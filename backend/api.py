@@ -8,18 +8,20 @@ Flow:
 """
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 import threading
 import traceback
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
+from rapidfuzz import fuzz
 
 from .differ_v2 import diff_blocks, diff_stats
 from .extractor_v2 import coverage_pct, extract_blocks_v2 as extract_blocks, render_pages
@@ -53,8 +55,17 @@ class QueryReq(BaseModel):
 
 
 class CompareTablesReq(BaseModel):
-    base_header_query: str
+    # New preferred fields: compare exact selected tables by ID.
+    base_table_id: Optional[str] = None
+    target_table_id: Optional[str] = None
+
+    # Backward-compatible fields: compare by fuzzy header text.
+    base_header_query: Optional[str] = None
     target_header_query: Optional[str] = None
+
+    # Optional row-level focus. Examples: PCB 205 vs PCB 203, row key 765.
+    base_row_key: Optional[str] = None
+    target_row_key: Optional[str] = None
 
 
 def _dump_model(obj):
@@ -494,53 +505,532 @@ def get_overlay(run_id: str, side: str, n: int):
     }
 
 
-@app.post("/runs/{run_id}/compare-tables")
-def compare_tables_endpoint(run_id: str, req: CompareTablesReq):
-    r = _ensure_complete(run_id)
+# ---------------- table intelligence helpers ----------------
 
-    from .differ_v2 import compare_table_headers
+_INTERNAL_TABLE_FIELDS = {
+    "__anchors__",
+    "__pages__",
+    "anchors",
+    "page_width",
+    "page_height",
+}
 
-    return compare_table_headers(
-        r["base_blocks"],
-        r["target_blocks"],
-        req.base_header_query,
-        req.target_header_query,
-    )
 
+def _norm_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip().lower()
+
+
+def _display_text(value: Any, limit: int = 180) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "..."
+
+
+def _path_label(path: str | None) -> str:
+    if not path:
+        return "Document"
+    parts = [p for p in path.split("/") if p]
+    if not parts:
+        return "Document"
+    return " / ".join(p.replace("_", " ").title() for p in parts[:4])
+
+
+def _table_header(block: Block) -> list[str]:
+    if not isinstance(block.payload, dict):
+        return []
+    return [str(h or "").strip() for h in block.payload.get("header", [])]
+
+
+def _table_rows(table: Block, blocks: list[Block]) -> list[Block]:
+    return [
+        b for b in blocks
+        if b.parent_id == table.id and b.block_type.value == "table_row"
+    ]
+
+
+def _row_values(row: Block) -> dict[str, Any]:
+    if not isinstance(row.payload, dict):
+        return {}
+
+    out = {}
+    for key, value in row.payload.items():
+        if key in _INTERNAL_TABLE_FIELDS:
+            continue
+        if str(key).startswith("__"):
+            continue
+        out[str(key)] = value
+    return out
+
+
+def _row_key(row: Block) -> str:
+    if row.stable_key:
+        return str(row.stable_key).strip()
+
+    values = _row_values(row)
+    for value in values.values():
+        text = str(value or "").strip()
+        if text:
+            return text[:80]
+
+    return _display_text(row.text, 80)
+
+
+def _row_definition(row: Block) -> str:
+    values = _row_values(row)
+    parts = []
+
+    for key, value in values.items():
+        v = str(value or "").strip()
+        if not v:
+            continue
+        if key.lower().startswith("col_"):
+            parts.append(v)
+        else:
+            parts.append(f"{key}: {v}")
+        if len(parts) >= 3:
+            break
+
+    if parts:
+        return " | ".join(parts)
+
+    return _display_text(row.text, 220)
+
+
+def _row_summary(row: Block, index: int) -> dict:
+    values = _row_values(row)
+    return {
+        "id": str(row.id),
+        "row_index": index,
+        "stable_key": row.stable_key,
+        "row_key": _row_key(row),
+        "definition": _row_definition(row),
+        "page": row.page_number,
+        "path": row.path,
+        "text": _display_text(row.text, 500),
+        "values": values,
+        "bbox": row.bbox,
+    }
+
+
+def _table_summary(table: Block, blocks: list[Block], include_rows: bool = False) -> dict:
+    header = _table_header(table)
+    rows = _table_rows(table, blocks)
+    spans = table.payload.get("spans_pages", [table.page_number]) if isinstance(table.payload, dict) else [table.page_number]
+    header_preview = " | ".join(str(h)[:40] for h in header[:8])
+
+    summary = {
+        "id": str(table.id),
+        "page_first": table.page_number,
+        "spans_pages": spans,
+        "path": table.path,
+        "area": _path_label(table.path),
+        "n_columns": len(header),
+        "n_rows": len(rows),
+        "header": header,
+        "header_preview": header_preview,
+        "row_keys": [_row_key(r) for r in rows[:80]],
+        "row_preview": [_row_summary(r, i) for i, r in enumerate(rows[:10])],
+    }
+
+    if include_rows:
+        summary["rows"] = [_row_summary(r, i) for i, r in enumerate(rows)]
+
+    return summary
+
+
+def _find_table_by_id(blocks: list[Block], table_id: str | None) -> Optional[Block]:
+    if not table_id:
+        return None
+
+    for block in blocks:
+        if block.block_type.value == "table" and str(block.id) == str(table_id):
+            return block
+
+    return None
+
+
+def _find_table_by_header(blocks: list[Block], query: str | None) -> Optional[Block]:
+    if not query:
+        return None
+
+    q = _norm_text(query)
+    if not q:
+        return None
+
+    best = None
+    best_score = 0.0
+
+    for block in blocks:
+        if block.block_type.value != "table":
+            continue
+
+        header = _table_header(block)
+        header_text = _norm_text(" ".join(header))
+        path_text = _norm_text(block.path)
+        score = max(
+            fuzz.partial_ratio(q, header_text) / 100.0,
+            fuzz.partial_ratio(q, path_text) / 100.0,
+        )
+
+        if score > best_score:
+            best_score = score
+            best = block
+
+    return best if best_score >= 0.45 else None
+
+
+def _resolve_table(blocks: list[Block], table_id: str | None, header_query: str | None) -> Optional[Block]:
+    return _find_table_by_id(blocks, table_id) or _find_table_by_header(blocks, header_query)
+
+
+def _find_row(rows: list[Block], row_key: str | None) -> Optional[Block]:
+    if not row_key:
+        return None
+
+    q = _norm_text(row_key)
+    if not q:
+        return None
+
+    exact = []
+    fuzzy = []
+
+    for row in rows:
+        key = _norm_text(_row_key(row))
+        stable = _norm_text(row.stable_key)
+        text = _norm_text(row.text)
+        values_text = _norm_text(" ".join(str(v or "") for v in _row_values(row).values()))
+
+        if q in {key, stable} or q == text:
+            exact.append(row)
+            continue
+
+        score = max(
+            fuzz.partial_ratio(q, key) / 100.0,
+            fuzz.partial_ratio(q, stable) / 100.0,
+            fuzz.partial_ratio(q, text) / 100.0,
+            fuzz.partial_ratio(q, values_text) / 100.0,
+        )
+        fuzzy.append((score, row))
+
+    if exact:
+        return exact[0]
+
+    fuzzy.sort(key=lambda item: item[0], reverse=True)
+    if fuzzy and fuzzy[0][0] >= 0.70:
+        return fuzzy[0][1]
+
+    return None
+
+
+def _header_alignment(base_header: list[str], target_header: list[str]) -> list[dict]:
+    used_target = set()
+    alignment = []
+
+    for base_index, base_col in enumerate(base_header):
+        best_index = None
+        best_score = 0.0
+
+        for target_index, target_col in enumerate(target_header):
+            if target_index in used_target:
+                continue
+
+            score = fuzz.ratio(_norm_text(base_col), _norm_text(target_col)) / 100.0
+            if score > best_score:
+                best_score = score
+                best_index = target_index
+
+        if best_index is not None and best_score >= 0.55:
+            used_target.add(best_index)
+            alignment.append(
+                {
+                    "base_col": base_col,
+                    "target_col": target_header[best_index],
+                    "base_index": base_index,
+                    "target_index": best_index,
+                    "score": round(best_score, 2),
+                    "status": "matched",
+                }
+            )
+        else:
+            alignment.append(
+                {
+                    "base_col": base_col,
+                    "target_col": None,
+                    "base_index": base_index,
+                    "target_index": None,
+                    "score": 0.0,
+                    "status": "base_only",
+                }
+            )
+
+    for target_index, target_col in enumerate(target_header):
+        if target_index not in used_target:
+            alignment.append(
+                {
+                    "base_col": None,
+                    "target_col": target_col,
+                    "base_index": None,
+                    "target_index": target_index,
+                    "score": 0.0,
+                    "status": "target_only",
+                }
+            )
+
+    return alignment
+
+
+def _compare_row_values(base_row: Optional[Block], target_row: Optional[Block], alignment: list[dict]) -> list[dict]:
+    if base_row is None and target_row is None:
+        return []
+
+    base_values = _row_values(base_row) if base_row else {}
+    target_values = _row_values(target_row) if target_row else {}
+
+    changes = []
+
+    if base_row is None:
+        for col, value in target_values.items():
+            changes.append(
+                {
+                    "field": col,
+                    "before": None,
+                    "after": value,
+                    "change_type": "ADDED",
+                }
+            )
+        return changes
+
+    if target_row is None:
+        for col, value in base_values.items():
+            changes.append(
+                {
+                    "field": col,
+                    "before": value,
+                    "after": None,
+                    "change_type": "DELETED",
+                }
+            )
+        return changes
+
+    for item in alignment:
+        base_col = item.get("base_col")
+        target_col = item.get("target_col")
+
+        if base_col and target_col:
+            before = base_values.get(base_col)
+            after = target_values.get(target_col)
+            if _norm_text(before) != _norm_text(after):
+                changes.append(
+                    {
+                        "field": base_col if base_col == target_col else f"{base_col} -> {target_col}",
+                        "before": before,
+                        "after": after,
+                        "change_type": "MODIFIED",
+                    }
+                )
+        elif base_col:
+            before = base_values.get(base_col)
+            if _norm_text(before):
+                changes.append(
+                    {
+                        "field": base_col,
+                        "before": before,
+                        "after": None,
+                        "change_type": "DELETED",
+                    }
+                )
+        elif target_col:
+            after = target_values.get(target_col)
+            if _norm_text(after):
+                changes.append(
+                    {
+                        "field": target_col,
+                        "before": None,
+                        "after": after,
+                        "change_type": "ADDED",
+                    }
+                )
+
+    return changes
+
+
+def _align_table_rows(base_rows: list[Block], target_rows: list[Block]) -> list[tuple[Optional[Block], Optional[Block], float]]:
+    pairs = []
+    used_base = set()
+    used_target = set()
+
+    target_by_key: dict[str, list[Block]] = {}
+    for row in target_rows:
+        key = _norm_text(_row_key(row))
+        if key:
+            target_by_key.setdefault(key, []).append(row)
+
+    for base_row in base_rows:
+        key = _norm_text(_row_key(base_row))
+        candidates = target_by_key.get(key, [])
+        match = next((row for row in candidates if row.id not in used_target), None)
+
+        if match:
+            pairs.append((base_row, match, 1.0))
+            used_base.add(base_row.id)
+            used_target.add(match.id)
+
+    scored = []
+    for base_row in base_rows:
+        if base_row.id in used_base:
+            continue
+
+        for target_row in target_rows:
+            if target_row.id in used_target:
+                continue
+
+            score = max(
+                fuzz.token_set_ratio(_norm_text(base_row.text), _norm_text(target_row.text)) / 100.0,
+                fuzz.token_set_ratio(_norm_text(_row_definition(base_row)), _norm_text(_row_definition(target_row))) / 100.0,
+            )
+            if score >= 0.62:
+                scored.append((score, base_row, target_row))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    for score, base_row, target_row in scored:
+        if base_row.id in used_base or target_row.id in used_target:
+            continue
+
+        pairs.append((base_row, target_row, score))
+        used_base.add(base_row.id)
+        used_target.add(target_row.id)
+
+    for base_row in base_rows:
+        if base_row.id not in used_base:
+            pairs.append((base_row, None, 0.0))
+
+    for target_row in target_rows:
+        if target_row.id not in used_target:
+            pairs.append((None, target_row, 0.0))
+
+    return pairs
+
+
+def _row_diff_record(
+    base_row: Optional[Block],
+    target_row: Optional[Block],
+    alignment: list[dict],
+    score: float = 0.0,
+) -> Optional[dict]:
+    changes = _compare_row_values(base_row, target_row, alignment)
+
+    if base_row is None and target_row is not None:
+        change_type = "ADDED"
+    elif target_row is None and base_row is not None:
+        change_type = "DELETED"
+    elif changes:
+        change_type = "MODIFIED"
+    else:
+        change_type = "UNCHANGED"
+
+    if change_type == "UNCHANGED":
+        return None
+
+    key = _row_key(base_row or target_row)
+    return {
+        "change_type": change_type,
+        "key": key,
+        "match_score": round(score, 2),
+        "base_row": _row_summary(base_row, 0) if base_row else None,
+        "target_row": _row_summary(target_row, 0) if target_row else None,
+        "definition": _row_definition(base_row or target_row),
+        "field_diffs": changes,
+    }
+
+
+# ---------------- table endpoints ----------------
 
 @app.get("/runs/{run_id}/tables")
-def list_tables(run_id: str):
+def list_tables(run_id: str, include_rows: bool = False):
     r = _ensure_complete(run_id)
 
     def _summarize(blocks):
         out = []
-        for b in blocks:
-            if b.block_type.value != "table":
+        for block in blocks:
+            if block.block_type.value != "table":
                 continue
-
-            header = b.payload.get("header", []) if isinstance(b.payload, dict) else []
-            spans = b.payload.get("spans_pages", [b.page_number]) if isinstance(b.payload, dict) else [b.page_number]
-            n_rows = sum(
-                1
-                for c in blocks
-                if c.parent_id == b.id and c.block_type.value == "table_row"
-            )
-            preview = " | ".join(str(h)[:40] for h in header[:6])
-
-            out.append(
-                {
-                    "id": str(b.id),
-                    "page_first": b.page_number,
-                    "spans_pages": spans,
-                    "n_columns": len(header),
-                    "n_rows": n_rows,
-                    "header_preview": preview,
-                }
-            )
-
+            out.append(_table_summary(block, blocks, include_rows=include_rows))
         return out
 
     return {
         "base": _summarize(r["base_blocks"]),
         "target": _summarize(r["target_blocks"]),
+    }
+
+
+@app.post("/runs/{run_id}/compare-tables")
+def compare_tables_endpoint(run_id: str, req: CompareTablesReq):
+    r = _ensure_complete(run_id)
+
+    base_table = _resolve_table(r["base_blocks"], req.base_table_id, req.base_header_query)
+    target_table = _resolve_table(r["target_blocks"], req.target_table_id, req.target_header_query)
+
+    if not base_table or not target_table:
+        return {
+            "error": "table not found",
+            "base_found": bool(base_table),
+            "target_found": bool(target_table),
+            "hint": "Use table IDs from GET /runs/{run_id}/tables, or provide a header query that appears in the table header/path.",
+        }
+
+    base_rows = _table_rows(base_table, r["base_blocks"])
+    target_rows = _table_rows(target_table, r["target_blocks"])
+
+    base_header = _table_header(base_table)
+    target_header = _table_header(target_table)
+    alignment = _header_alignment(base_header, target_header)
+
+    row_diffs = []
+
+    base_row_key = req.base_row_key or req.target_row_key
+    target_row_key = req.target_row_key or req.base_row_key
+
+    if base_row_key or target_row_key:
+        base_row = _find_row(base_rows, base_row_key)
+        target_row = _find_row(target_rows, target_row_key)
+
+        if not base_row or not target_row:
+            return {
+                "error": "row not found",
+                "base_row_found": bool(base_row),
+                "target_row_found": bool(target_row),
+                "base_row_key": base_row_key,
+                "target_row_key": target_row_key,
+                "base_table": _table_summary(base_table, r["base_blocks"]),
+                "target_table": _table_summary(target_table, r["target_blocks"]),
+            }
+
+        rec = _row_diff_record(base_row, target_row, alignment, score=1.0)
+        if rec:
+            row_diffs.append(rec)
+
+        mode = "selected_rows"
+    else:
+        for base_row, target_row, score in _align_table_rows(base_rows, target_rows):
+            rec = _row_diff_record(base_row, target_row, alignment, score=score)
+            if rec:
+                row_diffs.append(rec)
+
+        mode = "all_rows"
+
+    counts = {"ADDED": 0, "DELETED": 0, "MODIFIED": 0, "UNCHANGED": 0}
+    for row in row_diffs:
+        counts[row["change_type"]] += 1
+
+    return {
+        "mode": mode,
+        "base_table": _table_summary(base_table, r["base_blocks"]),
+        "target_table": _table_summary(target_table, r["target_blocks"]),
+        "base_header": base_header,
+        "target_header": target_header,
+        "header_alignment": alignment,
+        "row_diffs": row_diffs,
+        "counts": counts,
     }
