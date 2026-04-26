@@ -19,11 +19,46 @@ const css = `
   * { box-sizing: border-box; }
   body { margin: 0; }
   button, input, select, textarea { font: inherit; }
-  button { transition: background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease; }
+  button { transition: background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease, transform .15s ease; }
+  button:not(:disabled):hover { transform: translateY(-1px); }
+  button:disabled { transform: none; }
   code { background: #f6f1e8; border: 1px solid #e2d8c8; border-radius: 5px; padding: 1px 5px; }
   .dl-scrollbar::-webkit-scrollbar { height: 10px; width: 10px; }
   .dl-scrollbar::-webkit-scrollbar-thumb { background: #c9c0b0; border-radius: 999px; }
   .dl-scrollbar::-webkit-scrollbar-track { background: #f2ece2; }
+  .progress-track {
+    height: 7px;
+    background: #e9e2d7;
+    border-radius: 999px;
+    overflow: hidden;
+    position: relative;
+  }
+  .progress-fill {
+    height: 100%;
+    min-width: 7%;
+    border-radius: 999px;
+    overflow: hidden;
+    position: relative;
+    background: linear-gradient(90deg, #2f5f4f 0%, #3f8067 48%, #2f5f4f 100%);
+    transition: width 450ms ease, background 250ms ease;
+  }
+  .progress-fill::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
+    animation: progress-shimmer 1.45s ease-in-out infinite;
+  }
+  .progress-fill.failed {
+    background: #bb3030;
+  }
+  .progress-fill.failed::after {
+    display: none;
+  }
+  @keyframes progress-shimmer {
+    100% { transform: translateX(100%); }
+  }
   @media (max-width: 980px) {
     .upload-grid, .viewer-grid, .two-grid, .report-metrics, .table-picker-grid, .table-config-grid {
       grid-template-columns: 1fr !important;
@@ -34,7 +69,7 @@ const css = `
 
 const shellStyle = {
   minHeight: "100vh",
-  background: "#f7f3eb",
+  background: "#f8f5ef",
   color: "#202936",
   fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
 };
@@ -48,7 +83,7 @@ const pageStyle = {
 const panelStyle = {
   background: "#fffdf8",
   border: "1px solid #ded6c8",
-  borderRadius: 10,
+  borderRadius: 8,
   boxShadow: "0 1px 3px rgba(31,41,55,.08)",
 };
 
@@ -215,30 +250,30 @@ function Header({ runId, onStartOver, onDownloadReport }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
             <div
               style={{
-                width: 32,
-                height: 32,
-                borderRadius: 8,
+                width: 30,
+                height: 30,
+                borderRadius: 7,
                 background: "#1f2937",
                 color: "white",
                 display: "grid",
                 placeItems: "center",
-                fontSize: 13,
-                fontWeight: 700,
+                fontSize: 12,
+                fontWeight: 650,
               }}
             >
               AI
             </div>
-            <h1 style={{ margin: 0, fontSize: 28, letterSpacing: 0, lineHeight: 1.08, fontWeight: 650 }}>
+            <h1 style={{ margin: 0, fontSize: 26, letterSpacing: 0, lineHeight: 1.1, fontWeight: 600 }}>
               {BRAND.name}
             </h1>
           </div>
-          <p style={{ margin: "6px 0 0", color: "#667085", fontSize: 15 }}>{BRAND.subtitle}</p>
+          <p style={{ margin: "6px 0 0", color: "#667085", fontSize: 14 }}>{BRAND.subtitle}</p>
         </div>
 
         {runId && (
           <div className="header-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <button onClick={onDownloadReport} style={primaryButtonStyle()}>
-              Download report
+              Export PDF report
             </button>
             <button onClick={onStartOver} style={secondaryButtonStyle()}>
               New comparison
@@ -394,25 +429,24 @@ function Capability({ label, detail }) {
 
 function ProcessingState({ progress, message, status }) {
   const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));
+  const width = Math.max(7, safeProgress);
 
   return (
     <div style={{ marginTop: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 7, color: "#475467", fontSize: 13 }}>
-        <span style={{ fontWeight: 650 }}>{message}</span>
+        <span style={{ fontWeight: 600 }}>{message}</span>
         <span>{safeProgress}%</span>
       </div>
-      <div style={{ height: 8, background: "#e8dfd2", borderRadius: 999, overflow: "hidden" }}>
+      <div className="progress-track">
         <div
+          className={`progress-fill ${status === "failed" ? "failed" : ""}`}
           style={{
-            width: `${safeProgress}%`,
-            height: "100%",
-            background: status === "failed" ? COLORS.DELETED.border : "#2f5f4f",
-            transition: "width 450ms ease, background 250ms ease",
+            width: `${width}%`,
           }}
         />
       </div>
       <p style={{ margin: "10px 0 0", color: "#667085", fontSize: 13 }}>
-        Results will appear automatically when processing completes.
+        The comparison is still running. This view updates automatically as the backend reports progress.
       </p>
     </div>
   );
@@ -1663,11 +1697,11 @@ function filterButtonStyle(active) {
 function primaryButtonStyle(disabled = false, extra = {}) {
   return {
     border: "none",
-    borderRadius: 7,
+    borderRadius: 6,
     background: disabled ? "#98a2b3" : "#1f2937",
     color: "white",
     padding: "9px 14px",
-    fontWeight: 600,
+    fontWeight: 550,
     cursor: disabled ? "default" : "pointer",
     ...extra,
   };
@@ -1676,11 +1710,11 @@ function primaryButtonStyle(disabled = false, extra = {}) {
 function secondaryButtonStyle(extra = {}) {
   return {
     border: "1px solid #c9c0b0",
-    borderRadius: 7,
+    borderRadius: 6,
     background: "#fffdf8",
     color: "#344054",
     padding: "9px 13px",
-    fontWeight: 600,
+    fontWeight: 550,
     cursor: "pointer",
     ...extra,
   };
