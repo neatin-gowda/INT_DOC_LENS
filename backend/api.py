@@ -1,5 +1,5 @@
 """
-FastAPI app - orchestrates upload, extraction, diff, reports, and queries.
+FastAPI app - orchestrates upload, extraction, diff, reports, queries.
 
 Flow:
   POST /compare              stores files, starts background processing, returns run_id quickly
@@ -8,6 +8,7 @@ Flow:
 
 Table intelligence:
   GET  /runs/{run_id}/tables?include_rows=true
+  POST /runs/{run_id}/table-view
   POST /runs/{run_id}/compare-table-columns
 """
 from __future__ import annotations
@@ -65,6 +66,14 @@ class CompareTablesReq(BaseModel):
     target_header_query: Optional[str] = None
     base_row_key: Optional[str] = None
     target_row_key: Optional[str] = None
+
+
+class TableViewReq(BaseModel):
+    side: str = Field("base", description="base or target")
+    table_id: str
+    columns: list[str] = Field(default_factory=list)
+    row_filter: Optional[str] = None
+    limit: int = 300
 
 
 class CompareTableColumnsReq(BaseModel):
@@ -148,7 +157,7 @@ def _process_compare(
             }
         )
 
-        _set_run_status(run_id, "Extracting text, sections, and tables", 32)
+        _set_run_status(run_id, "Extracting text, tables, and document structure", 32)
 
         base_blocks = extract_blocks(str(base_pdf))
         target_blocks = extract_blocks(str(target_pdf))
@@ -219,6 +228,7 @@ def root():
             "GET /runs/{id}/pages/{side}/{n}",
             "GET /runs/{id}/overlay/{side}/{n}",
             "GET /runs/{id}/tables",
+            "POST /runs/{id}/table-view",
             "POST /runs/{id}/compare-tables",
             "POST /runs/{id}/compare-table-columns",
         ],
@@ -531,11 +541,13 @@ def get_overlay(run_id: str, side: str, n: int):
 _INTERNAL_TABLE_FIELDS = {
     "__anchors__",
     "__pages__",
+    "__row_index__",
+    "__table_title__",
+    "__table_context__",
     "anchors",
     "page_width",
     "page_height",
 }
-
 
 _ROW_LABEL_HINTS = (
     "feature",
@@ -546,11 +558,29 @@ _ROW_LABEL_HINTS = (
     "code",
     "part",
     "pcv",
+    "pcb",
     "model",
     "series",
     "equipment",
     "group",
     "package",
+    "option",
+    "content",
+)
+
+_VALUE_COLUMN_HINTS = (
+    "pcv",
+    "pcb",
+    "value",
+    "column",
+    "package",
+    "series",
+    "model",
+    "price",
+    "cost",
+    "amount",
+    "status",
+    "availability",
 )
 
 
@@ -568,21 +598,27 @@ def _display_text(value: Any, limit: int = 180) -> str:
 def _path_label(path: str | None) -> str:
     if not path:
         return "Document"
+
     parts = [p for p in path.split("/") if p]
     if not parts:
         return "Document"
+
     cleaned = []
     for part in parts:
         if part.startswith("table_") or part.startswith("row_"):
             continue
         cleaned.append(part.replace("_", " ").title())
+
     return " / ".join(cleaned[:4]) if cleaned else "Document"
 
 
+def _safe_payload(block: Block) -> dict:
+    return block.payload if isinstance(block.payload, dict) else {}
+
+
 def _table_header(block: Block) -> list[str]:
-    if not isinstance(block.payload, dict):
-        return []
-    return [str(h or "").strip() for h in block.payload.get("header", [])]
+    payload = _safe_payload(block)
+    return [str(h or "").strip() for h in payload.get("header", [])]
 
 
 def _table_rows(table: Block, blocks: list[Block]) -> list[Block]:
@@ -592,8 +628,8 @@ def _table_rows(table: Block, blocks: list[Block]) -> list[Block]:
     ]
 
 
-def _row_values(row: Block) -> dict[str, Any]:
-    if not isinstance(row.payload, dict):
+def _row_values(row: Optional[Block]) -> dict[str, Any]:
+    if not row or not isinstance(row.payload, dict):
         return {}
 
     out = {}
@@ -603,7 +639,12 @@ def _row_values(row: Block) -> dict[str, Any]:
         if str(key).startswith("__"):
             continue
         out[str(key)] = value
+
     return out
+
+
+def _is_generic_column_name(name: str) -> bool:
+    return bool(re.match(r"^(col|column|value)\s*[_-]?\s*\d+$", str(name or ""), re.I))
 
 
 def _column_names(table: Block, rows: list[Block]) -> list[str]:
@@ -628,7 +669,79 @@ def _column_names(table: Block, rows: list[Block]) -> list[str]:
     return out
 
 
-def _row_key(row: Block, row_columns: Optional[list[str]] = None) -> str:
+def _column_quality(columns: list[str]) -> float:
+    if not columns:
+        return 0.0
+
+    useful = 0
+    for col in columns:
+        if not _is_generic_column_name(col):
+            useful += 1
+
+    return useful / max(1, len(columns))
+
+
+def _table_title(table: Block, rows: Optional[list[Block]] = None) -> str:
+    payload = _safe_payload(table)
+
+    for key in ("table_title", "title", "caption"):
+        value = _display_text(payload.get(key), 160)
+        if value:
+            return value
+
+    near_texts = payload.get("near_texts")
+    if isinstance(near_texts, list):
+        for text in near_texts:
+            value = _display_text(text, 160)
+            if value:
+                return value
+
+    context = _display_text(payload.get("table_context"), 160)
+    if context:
+        return context
+
+    path_label = _path_label(table.path)
+    if path_label and path_label != "Document":
+        return path_label
+
+    rows = rows or []
+    columns = _column_names(table, rows)
+    useful_columns = [c for c in columns if not _is_generic_column_name(c)]
+
+    if useful_columns:
+        return " / ".join(useful_columns[:3])[:160]
+
+    return f"Table on page {table.page_number}"
+
+
+def _table_context(table: Block) -> str:
+    payload = _safe_payload(table)
+    context = _display_text(payload.get("table_context"), 260)
+    if context:
+        return context
+    return _path_label(table.path)
+
+
+def _table_pages(table: Block) -> list[int]:
+    payload = _safe_payload(table)
+    pages = payload.get("spans_pages")
+    if isinstance(pages, list) and pages:
+        return [int(p) for p in pages if p]
+    return [table.page_number]
+
+
+def _table_display_name(table: Block, rows: list[Block]) -> str:
+    pages = _table_pages(table)
+    page_label = f"p{pages[0]}" if len(pages) == 1 else f"p{pages[0]}-{pages[-1]}"
+    columns = _column_names(table, rows)
+    title = _table_title(table, rows)
+    return f"{page_label} - {title} ({len(columns)} columns, {len(rows)} rows)"
+
+
+def _row_key(row: Optional[Block], row_columns: Optional[list[str]] = None) -> str:
+    if not row:
+        return ""
+
     values = _row_values(row)
 
     if row_columns:
@@ -647,7 +760,10 @@ def _row_key(row: Block, row_columns: Optional[list[str]] = None) -> str:
     return _display_text(row.text, 120)
 
 
-def _row_definition(row: Block, row_columns: Optional[list[str]] = None) -> str:
+def _row_definition(row: Optional[Block], row_columns: Optional[list[str]] = None) -> str:
+    if not row:
+        return ""
+
     values = _row_values(row)
     parts = []
 
@@ -665,10 +781,12 @@ def _row_definition(row: Block, row_columns: Optional[list[str]] = None) -> str:
         v = str(value or "").strip()
         if not v:
             continue
-        if str(key).lower().startswith("col_"):
+
+        if _is_generic_column_name(str(key)):
             parts.append(v)
         else:
             parts.append(f"{key}: {v}")
+
         if len(parts) >= 4:
             break
 
@@ -678,7 +796,7 @@ def _row_definition(row: Block, row_columns: Optional[list[str]] = None) -> str:
     return _display_text(row.text, 260)
 
 
-def _row_summary(row: Block, index: int, columns: Optional[list[str]] = None) -> dict:
+def _row_summary(row: Block, index: int, columns: Optional[list[str]] = None, row_columns: Optional[list[str]] = None) -> dict:
     values = _row_values(row)
     selected_values = {col: values.get(col, "") for col in columns} if columns else values
 
@@ -686,8 +804,8 @@ def _row_summary(row: Block, index: int, columns: Optional[list[str]] = None) ->
         "id": str(row.id),
         "row_index": index,
         "stable_key": row.stable_key,
-        "row_key": _row_key(row),
-        "definition": _row_definition(row),
+        "row_key": _row_key(row, row_columns),
+        "definition": _row_definition(row, row_columns),
         "page": row.page_number,
         "path": row.path,
         "text": _display_text(row.text, 500),
@@ -702,57 +820,125 @@ def _guess_row_label_columns(columns: list[str], rows: list[Block]) -> list[str]
 
     scored = []
 
-    for col in columns:
+    for idx, col in enumerate(columns):
         col_low = _norm_text(col)
         non_empty = 0
         unique_values = set()
         text_len = 0
+        numericish = 0
 
-        for row in rows[:80]:
-            value = _display_text(_row_values(row).get(col), 120)
+        for row in rows[:100]:
+            value = _display_text(_row_values(row).get(col), 160)
             if value:
                 non_empty += 1
                 unique_values.add(value.lower())
                 text_len += len(value)
+                compact = re.sub(r"[\s,$%/().:-]", "", value)
+                if compact and sum(ch.isdigit() for ch in compact) >= max(1, sum(ch.isalpha() for ch in compact) * 2):
+                    numericish += 1
 
         uniqueness = len(unique_values) / max(1, non_empty)
         avg_len = text_len / max(1, non_empty)
+        numeric_ratio = numericish / max(1, non_empty)
         hint = 1.0 if any(term in col_low for term in _ROW_LABEL_HINTS) else 0.0
-        left_bias = max(0.0, 1.0 - (columns.index(col) / max(1, len(columns))))
+        left_bias = max(0.0, 1.0 - (idx / max(1, len(columns))))
 
-        score = hint * 0.45 + uniqueness * 0.25 + min(avg_len / 40.0, 1.0) * 0.15 + left_bias * 0.15
+        score = (
+            hint * 0.40
+            + uniqueness * 0.20
+            + min(avg_len / 45.0, 1.0) * 0.20
+            + left_bias * 0.15
+            - numeric_ratio * 0.20
+        )
         scored.append((score, col))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [col for _, col in scored[:1]]
+    best = [col for score, col in scored[:1] if score >= 0.25]
+
+    return best or [columns[0]]
+
+
+def _guess_value_columns(columns: list[str], row_columns: list[str]) -> list[str]:
+    candidates = [c for c in columns if c not in row_columns]
+
+    if not candidates:
+        return []
+
+    hinted = [c for c in candidates if any(term in _norm_text(c) for term in _VALUE_COLUMN_HINTS)]
+    if hinted:
+        return hinted
+
+    return candidates
+
+
+def _column_details(columns: list[str], rows: list[Block]) -> list[dict]:
+    details = []
+
+    for col in columns:
+        non_empty = 0
+        samples = []
+        distinct = set()
+
+        for row in rows[:120]:
+            value = _display_text(_row_values(row).get(col), 120)
+            if not value:
+                continue
+
+            non_empty += 1
+            distinct.add(value.lower())
+            if len(samples) < 5 and value not in samples:
+                samples.append(value)
+
+        details.append(
+            {
+                "name": col,
+                "is_generic": _is_generic_column_name(col),
+                "non_empty": non_empty,
+                "distinct_count": len(distinct),
+                "sample_values": samples,
+            }
+        )
+
+    return details
 
 
 def _table_matrix(table: Block, blocks: list[Block], include_rows: bool = False) -> dict:
     rows = _table_rows(table, blocks)
     columns = _column_names(table, rows)
     row_label_columns = _guess_row_label_columns(columns, rows)
-    spans = table.payload.get("spans_pages", [table.page_number]) if isinstance(table.payload, dict) else [table.page_number]
+    value_columns = _guess_value_columns(columns, row_label_columns)
+    pages = _table_pages(table)
+    payload = _safe_payload(table)
     header_preview = " | ".join(str(h)[:40] for h in columns[:8])
 
     matrix = {
         "id": str(table.id),
         "page_first": table.page_number,
-        "spans_pages": spans,
+        "spans_pages": pages,
+        "page_label": f"Page {pages[0]}" if len(pages) == 1 else f"Pages {pages[0]}-{pages[-1]}",
         "path": table.path,
+        "title": _table_title(table, rows),
+        "context": _table_context(table),
         "area": _path_label(table.path),
+        "display_name": _table_display_name(table, rows),
         "n_columns": len(columns),
         "n_rows": len(rows),
         "columns": columns,
+        "column_details": _column_details(columns, rows),
         "header": columns,
         "header_preview": header_preview,
+        "header_source": payload.get("header_sources", [None])[0] if isinstance(payload.get("header_sources"), list) and payload.get("header_sources") else None,
+        "header_quality": round(_column_quality(columns), 2),
         "suggested_row_columns": row_label_columns,
-        "suggested_value_columns": [c for c in columns if c not in row_label_columns],
+        "suggested_value_columns": value_columns,
         "row_keys": [_row_key(r, row_label_columns) for r in rows[:150]],
-        "row_preview": [_row_summary(r, i) for i, r in enumerate(rows[:12])],
+        "row_preview": [_row_summary(r, i, columns=columns, row_columns=row_label_columns) for i, r in enumerate(rows[:12])],
+        "near_texts": payload.get("near_texts", []),
+        "source_tables": payload.get("source_tables", []),
     }
 
     if include_rows:
-        matrix["rows"] = [_row_summary(r, i) for i, r in enumerate(rows)]
+        matrix["rows"] = [_row_summary(r, i, columns=columns, row_columns=row_label_columns) for i, r in enumerate(rows)]
 
     return matrix
 
@@ -785,12 +971,16 @@ def _find_table_by_header(blocks: list[Block], query: str | None) -> Optional[Bl
 
         rows = _table_rows(block, blocks)
         columns = _column_names(block, rows)
-        header_text = _norm_text(" ".join(columns))
-        path_text = _norm_text(block.path)
-        score = max(
-            fuzz.partial_ratio(q, header_text) / 100.0,
-            fuzz.partial_ratio(q, path_text) / 100.0,
+        searchable = " ".join(
+            [
+                _table_title(block, rows),
+                _table_context(block),
+                " ".join(columns),
+                block.path or "",
+            ]
         )
+
+        score = fuzz.partial_ratio(q, _norm_text(searchable)) / 100.0
 
         if score > best_score:
             best_score = score
@@ -839,8 +1029,17 @@ def _find_row(rows: list[Block], row_key: str | None, row_columns: Optional[list
 
 
 def _align_columns(base_cols: list[str], target_cols: list[str]) -> list[dict]:
+    """
+    Align selected value columns.
+
+    If users intentionally select different names, e.g. baseline PCV 205 and
+    revised PCV 203, fuzzy matching alone would call them unrelated. This
+    function first matches obvious same-name columns, then pairs remaining
+    selected columns by position when that is the only useful comparison.
+    """
     used_target = set()
     alignment = []
+    unmatched_base = []
 
     for base_col in base_cols:
         best_col = None
@@ -850,12 +1049,12 @@ def _align_columns(base_cols: list[str], target_cols: list[str]) -> list[dict]:
             if target_col in used_target:
                 continue
 
-            score = fuzz.ratio(_norm_text(base_col), _norm_text(target_col)) / 100.0
+            score = fuzz.token_set_ratio(_norm_text(base_col), _norm_text(target_col)) / 100.0
             if score > best_score:
                 best_score = score
                 best_col = target_col
 
-        if best_col is not None and best_score >= 0.55:
+        if best_col is not None and best_score >= 0.72:
             used_target.add(best_col)
             alignment.append(
                 {
@@ -866,25 +1065,43 @@ def _align_columns(base_cols: list[str], target_cols: list[str]) -> list[dict]:
                 }
             )
         else:
-            alignment.append(
-                {
-                    "base_col": base_col,
-                    "target_col": None,
-                    "score": 0.0,
-                    "status": "base_only",
-                }
-            )
+            unmatched_base.append(base_col)
 
-    for target_col in target_cols:
-        if target_col not in used_target:
-            alignment.append(
-                {
-                    "base_col": None,
-                    "target_col": target_col,
-                    "score": 0.0,
-                    "status": "target_only",
-                }
-            )
+    unmatched_target = [c for c in target_cols if c not in used_target]
+
+    # Intentional custom comparison: pair remaining selected columns by position.
+    while unmatched_base and unmatched_target:
+        base_col = unmatched_base.pop(0)
+        target_col = unmatched_target.pop(0)
+        score = fuzz.token_set_ratio(_norm_text(base_col), _norm_text(target_col)) / 100.0
+        alignment.append(
+            {
+                "base_col": base_col,
+                "target_col": target_col,
+                "score": round(score, 2),
+                "status": "selected_pair",
+            }
+        )
+
+    for base_col in unmatched_base:
+        alignment.append(
+            {
+                "base_col": base_col,
+                "target_col": None,
+                "score": 0.0,
+                "status": "base_only",
+            }
+        )
+
+    for target_col in unmatched_target:
+        alignment.append(
+            {
+                "base_col": None,
+                "target_col": target_col,
+                "score": 0.0,
+                "status": "target_only",
+            }
+        )
 
     return alignment
 
@@ -996,6 +1213,76 @@ def _compare_row_values(
     return changes
 
 
+def _row_matches_filter(row: Block, row_columns: list[str], row_filter: Optional[str]) -> bool:
+    if not row_filter:
+        return True
+
+    q = _norm_text(row_filter)
+    values = _row_values(row)
+    searchable = " ".join(
+        [
+            _row_key(row, row_columns),
+            row.text or "",
+            " ".join(str(v or "") for v in values.values()),
+        ]
+    )
+
+    text = _norm_text(searchable)
+    if q in text:
+        return True
+
+    return fuzz.partial_ratio(q, text) / 100.0 >= 0.55
+
+
+def _table_view_payload(
+    table: Block,
+    blocks: list[Block],
+    columns: Optional[list[str]] = None,
+    row_filter: Optional[str] = None,
+    limit: int = 300,
+) -> dict:
+    rows = _table_rows(table, blocks)
+    all_columns = _column_names(table, rows)
+    row_columns = _guess_row_label_columns(all_columns, rows)
+
+    if columns:
+        selected_columns = [c for c in columns if c in all_columns]
+    else:
+        selected_columns = all_columns
+
+    filtered_rows = [
+        row for row in rows
+        if _row_matches_filter(row, row_columns, row_filter)
+    ]
+
+    output_rows = []
+    for idx, row in enumerate(filtered_rows[: max(1, min(limit, 1000))]):
+        values = _row_values(row)
+        output_rows.append(
+            {
+                "row_index": idx,
+                "row_key": _row_key(row, row_columns),
+                "definition": _row_definition(row, row_columns),
+                "page": row.page_number,
+                "values": {col: values.get(col, "") for col in selected_columns},
+            }
+        )
+
+    matrix = _table_matrix(table, blocks, include_rows=False)
+
+    return {
+        "view": "table",
+        "table": matrix,
+        "title": matrix["display_name"],
+        "columns": selected_columns,
+        "row_columns": row_columns,
+        "rows": output_rows,
+        "count": len(output_rows),
+        "total_rows": len(filtered_rows),
+        "row_filter": row_filter,
+    }
+
+
 # ---------------- table endpoints ----------------
 
 @app.get("/runs/{run_id}/tables")
@@ -1016,6 +1303,28 @@ def list_tables(run_id: str, include_rows: bool = False):
     }
 
 
+@app.post("/runs/{run_id}/table-view")
+def table_view(run_id: str, req: TableViewReq):
+    r = _ensure_complete(run_id)
+
+    if req.side not in ("base", "target"):
+        raise HTTPException(400, "side must be base or target")
+
+    blocks = r["base_blocks"] if req.side == "base" else r["target_blocks"]
+    table = _find_table_by_id(blocks, req.table_id)
+
+    if not table:
+        raise HTTPException(404, "Selected table could not be found. Re-run the comparison and select a table from the current result.")
+
+    return _table_view_payload(
+        table,
+        blocks,
+        columns=req.columns,
+        row_filter=req.row_filter,
+        limit=req.limit,
+    )
+
+
 @app.post("/runs/{run_id}/compare-table-columns")
 def compare_table_columns(run_id: str, req: CompareTableColumnsReq):
     r = _ensure_complete(run_id)
@@ -1024,11 +1333,14 @@ def compare_table_columns(run_id: str, req: CompareTableColumnsReq):
     target_table = _find_table_by_id(r["target_blocks"], req.target_table_id)
 
     if not base_table or not target_table:
-        return {
-            "error": "Selected table could not be found. Re-run the comparison and select tables from the current result.",
-            "base_found": bool(base_table),
-            "target_found": bool(target_table),
-        }
+        raise HTTPException(
+            404,
+            {
+                "message": "Selected table could not be found. Re-run the comparison and select tables from the current result.",
+                "base_found": bool(base_table),
+                "target_found": bool(target_table),
+            },
+        )
 
     base_rows = _table_rows(base_table, r["base_blocks"])
     target_rows = _table_rows(target_table, r["target_blocks"])
@@ -1046,17 +1358,19 @@ def compare_table_columns(run_id: str, req: CompareTableColumnsReq):
     invalid_target = [c for c in target_row_columns + target_value_columns if c not in target_columns]
 
     if invalid_base or invalid_target:
-        return {
-            "error": "One or more selected columns were not found in the selected tables.",
-            "invalid_base_columns": invalid_base,
-            "invalid_target_columns": invalid_target,
-            "base_columns": base_columns,
-            "target_columns": target_columns,
-        }
+        raise HTTPException(
+            400,
+            {
+                "message": "One or more selected columns were not found in the selected tables.",
+                "invalid_base_columns": invalid_base,
+                "invalid_target_columns": invalid_target,
+                "base_columns": base_columns,
+                "target_columns": target_columns,
+            },
+        )
 
-    if req.row_filter:
-        base_rows = [row for row in base_rows if fuzz.partial_ratio(_norm_text(req.row_filter), _norm_text(_row_key(row, base_row_columns) + " " + row.text)) / 100.0 >= 0.55]
-        target_rows = [row for row in target_rows if fuzz.partial_ratio(_norm_text(req.row_filter), _norm_text(_row_key(row, target_row_columns) + " " + row.text)) / 100.0 >= 0.55]
+    base_rows = [row for row in base_rows if _row_matches_filter(row, base_row_columns, req.row_filter)]
+    target_rows = [row for row in target_rows if _row_matches_filter(row, target_row_columns, req.row_filter)]
 
     value_alignment = _align_columns(base_value_columns, target_value_columns)
 
@@ -1080,6 +1394,9 @@ def compare_table_columns(run_id: str, req: CompareTableColumnsReq):
         if change_type == "UNCHANGED":
             continue
 
+        selected_base_columns = base_row_columns + base_value_columns
+        selected_target_columns = target_row_columns + target_value_columns
+
         row_results.append(
             {
                 "change_type": change_type,
@@ -1092,8 +1409,10 @@ def compare_table_columns(run_id: str, req: CompareTableColumnsReq):
                     "base": _row_definition(base_row, base_row_columns) if base_row else None,
                     "target": _row_definition(target_row, target_row_columns) if target_row else None,
                 },
-                "base_row": _row_summary(base_row, 0, base_row_columns + base_value_columns) if base_row else None,
-                "target_row": _row_summary(target_row, 0, target_row_columns + target_value_columns) if target_row else None,
+                "base_row": _row_summary(base_row, 0, selected_base_columns, base_row_columns) if base_row else None,
+                "target_row": _row_summary(target_row, 0, selected_target_columns, target_row_columns) if target_row else None,
+                "base_values": _row_values(base_row) if base_row else {},
+                "target_values": _row_values(target_row) if target_row else {},
                 "field_diffs": field_diffs,
             }
         )
@@ -1109,6 +1428,8 @@ def compare_table_columns(run_id: str, req: CompareTableColumnsReq):
         ),
         "base_table": _table_matrix(base_table, r["base_blocks"], include_rows=False),
         "target_table": _table_matrix(target_table, r["target_blocks"], include_rows=False),
+        "base_preview": _table_view_payload(base_table, r["base_blocks"], base_row_columns + base_value_columns, req.row_filter, limit=30),
+        "target_preview": _table_view_payload(target_table, r["target_blocks"], target_row_columns + target_value_columns, req.row_filter, limit=30),
         "base_row_columns": base_row_columns,
         "target_row_columns": target_row_columns,
         "base_value_columns": base_value_columns,
@@ -1128,12 +1449,15 @@ def compare_tables_endpoint(run_id: str, req: CompareTablesReq):
     target_table = _resolve_table(r["target_blocks"], req.target_table_id, req.target_header_query)
 
     if not base_table or not target_table:
-        return {
-            "error": "Selected table could not be found.",
-            "base_found": bool(base_table),
-            "target_found": bool(target_table),
-            "hint": "Use table IDs from GET /runs/{run_id}/tables, or provide header text that appears in the table.",
-        }
+        raise HTTPException(
+            404,
+            {
+                "message": "Selected table could not be found.",
+                "base_found": bool(base_table),
+                "target_found": bool(target_table),
+                "hint": "Use table IDs from GET /runs/{run_id}/tables, or provide header/title text that appears near the table.",
+            },
+        )
 
     base_rows = _table_rows(base_table, r["base_blocks"])
     target_rows = _table_rows(target_table, r["target_blocks"])
@@ -1148,13 +1472,16 @@ def compare_tables_endpoint(run_id: str, req: CompareTablesReq):
         target_row = _find_row(target_rows, req.target_row_key or req.base_row_key, target_row_columns)
 
         if not base_row or not target_row:
-            return {
-                "error": "Selected row could not be found in one or both tables.",
-                "base_row_found": bool(base_row),
-                "target_row_found": bool(target_row),
-                "base_table": _table_matrix(base_table, r["base_blocks"]),
-                "target_table": _table_matrix(target_table, r["target_blocks"]),
-            }
+            raise HTTPException(
+                404,
+                {
+                    "message": "Selected row could not be found in one or both tables.",
+                    "base_row_found": bool(base_row),
+                    "target_row_found": bool(target_row),
+                    "base_table": _table_matrix(base_table, r["base_blocks"]),
+                    "target_table": _table_matrix(target_table, r["target_blocks"]),
+                },
+            )
 
         value_alignment = _align_columns(
             [c for c in base_columns if c not in base_row_columns],
@@ -1183,7 +1510,7 @@ def compare_tables_endpoint(run_id: str, req: CompareTablesReq):
             ] if field_diffs else [],
         }
 
-    # Backward compatible all-row compare using guessed label columns and all value columns.
+    # Backward-compatible all-row compare using guessed label columns and all value columns.
     req2 = CompareTableColumnsReq(
         base_table_id=str(base_table.id),
         target_table_id=str(target_table.id),
