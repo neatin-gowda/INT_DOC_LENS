@@ -31,15 +31,6 @@ const COLORS = {
   },
 };
 
-const PROCESS_STEPS = [
-  "Uploading documents",
-  "Reading pages",
-  "Finding sections and tables",
-  "Comparing changes",
-  "Preparing review summary",
-  "Finalizing results",
-];
-
 const shellStyle = {
   minHeight: "100vh",
   background: "#f7f3ea",
@@ -61,35 +52,29 @@ const panelStyle = {
   boxShadow: "0 1px 4px rgba(20, 20, 20, 0.07)",
 };
 
-function fetchWithTimeout(url, options = {}, timeoutMs = 180000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  return fetch(url, {
-    ...options,
-    signal: controller.signal,
-  }).finally(() => clearTimeout(timer));
-}
-
-async function readError(resp) {
+async function readResponseError(resp) {
   try {
     const text = await resp.text();
-    return text || `Request failed with status ${resp.status}`;
+    if (!text) return `Request failed with status ${resp.status}`;
+    try {
+      const parsed = JSON.parse(text);
+      return parsed.detail || parsed.error || text;
+    } catch {
+      return text;
+    }
   } catch {
     return `Request failed with status ${resp.status}`;
   }
 }
 
 function friendlyFetchError(err) {
-  if (err?.name === "AbortError") {
-    return "The comparison is taking longer than expected. Large PDFs or AI summaries can take extra time. Please try again, or run without AI summary for a quicker first check.";
+  const msg = String(err?.message || "");
+
+  if (msg.toLowerCase().includes("failed to fetch")) {
+    return "The app could not reach the comparison service. Please make sure the backend is running and accessible.";
   }
 
-  if (String(err?.message || "").toLowerCase().includes("failed to fetch")) {
-    return `Cannot reach the backend API at "${API}". Check that the FastAPI server is running and that VITE_API_BASE or the Vite proxy points to it.`;
-  }
-
-  return err?.message || "Something went wrong while processing the documents.";
+  return msg || "Something went wrong while processing the documents.";
 }
 
 export default function App() {
@@ -99,35 +84,49 @@ export default function App() {
   const [pageNum, setPageNum] = useState(1);
 
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [stepIndex, setStepIndex] = useState(0);
-  const [waitingFinal, setWaitingFinal] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!busy) return;
+    if (!runId || !busy) return;
 
-    setProgress(6);
-    setStepIndex(0);
-    setWaitingFinal(false);
+    let cancelled = false;
 
-    const timer = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 92) {
-          setWaitingFinal(true);
-          setStepIndex(PROCESS_STEPS.length - 1);
-          return 92;
+    const poll = async () => {
+      try {
+        const resp = await fetch(`${API}/runs/${runId}`);
+        if (!resp.ok) throw new Error(await readResponseError(resp));
+
+        const data = await resp.json();
+        if (cancelled) return;
+
+        setMeta(data);
+
+        if (data.status === "complete") {
+          setBusy(false);
+          setTab("viewer");
+          return;
         }
 
-        const next = Math.min(92, p + Math.max(2, Math.round((96 - p) / 9)));
-        const idx = Math.min(PROCESS_STEPS.length - 1, Math.floor(next / 17));
-        setStepIndex(idx);
-        return next;
-      });
-    }, 1100);
+        if (data.status === "failed") {
+          setBusy(false);
+          setError(data.error || data.status_message || "Comparison failed.");
+          return;
+        }
 
-    return () => clearInterval(timer);
-  }, [busy]);
+        setTimeout(poll, 1200);
+      } catch (err) {
+        if (cancelled) return;
+        setBusy(false);
+        setError(friendlyFetchError(err));
+      }
+    };
+
+    poll();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, busy]);
 
   const onUpload = async (e) => {
     e.preventDefault();
@@ -149,34 +148,29 @@ export default function App() {
     setTab("viewer");
 
     try {
-      const resp = await fetchWithTimeout(`${API}/compare`, {
+      const resp = await fetch(`${API}/compare`, {
         method: "POST",
         body: form,
       });
 
-      if (!resp.ok) {
-        throw new Error(await readError(resp));
-      }
+      if (!resp.ok) throw new Error(await readResponseError(resp));
 
       const data = await resp.json();
-      setProgress(96);
-      setStepIndex(PROCESS_STEPS.length - 1);
-      setWaitingFinal(false);
-
-      const metaResp = await fetchWithTimeout(`${API}/runs/${data.run_id}`, {}, 30000);
-      if (!metaResp.ok) throw new Error(await readError(metaResp));
-
-      const nextMeta = await metaResp.json();
 
       setRunId(data.run_id);
-      setMeta(nextMeta);
-      setProgress(100);
-      setTab("viewer");
+      setMeta({
+        run_id: data.run_id,
+        status: data.status,
+        status_message: data.status_message,
+        progress: data.progress,
+        stats: {},
+        coverage: {},
+        n_pages_base: 0,
+        n_pages_target: 0,
+      });
     } catch (err) {
-      setError(friendlyFetchError(err));
-    } finally {
       setBusy(false);
-      setWaitingFinal(false);
+      setError(friendlyFetchError(err));
     }
   };
 
@@ -186,7 +180,7 @@ export default function App() {
     setPageNum(1);
     setTab("viewer");
     setError("");
-    setProgress(0);
+    setBusy(false);
   };
 
   const downloadReport = () => {
@@ -194,26 +188,32 @@ export default function App() {
     window.location.href = `${API}/runs/${runId}/report.pdf`;
   };
 
+  const isComplete = meta?.status === "complete";
+
   return (
     <div style={shellStyle}>
       <div style={pageStyle}>
-        <Header runId={runId} onStartOver={startOver} onDownloadReport={downloadReport} />
+        <Header
+          runId={isComplete ? runId : null}
+          onStartOver={startOver}
+          onDownloadReport={downloadReport}
+        />
 
-        {!runId && (
+        {!isComplete && (
           <section style={{ ...panelStyle, padding: 22, marginBottom: 16 }}>
             <UploadPanel onUpload={onUpload} busy={busy} />
-            {busy && (
+            {busy && meta && (
               <ProcessingState
-                progress={progress}
-                step={PROCESS_STEPS[stepIndex]}
-                waitingFinal={waitingFinal}
+                progress={meta.progress || 0}
+                message={meta.status_message || "Working"}
+                status={meta.status || "running"}
               />
             )}
             {error && <ErrorBox message={error} />}
           </section>
         )}
 
-        {runId && meta && (
+        {isComplete && runId && meta && (
           <>
             <StatsBar meta={meta} onDownloadReport={downloadReport} />
             <Tabs tab={tab} setTab={setTab} />
@@ -332,7 +332,7 @@ function UploadPanel({ onUpload, busy }) {
           </button>
 
           <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.35 }}>
-            API: <code>{API}</code>
+            For a faster first check, turn off AI review summary.
           </div>
         </div>
       </div>
@@ -376,8 +376,17 @@ function FileInput({ label, helper, name, disabled }) {
         accept="application/pdf"
         required
         disabled={disabled}
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
         onChange={(e) => setFileName(e.target.files?.[0]?.name || "")}
-        style={{ display: "none" }}
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          opacity: 0,
+          pointerEvents: "none",
+        }}
       />
 
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -438,50 +447,29 @@ function Capability({ label, detail }) {
   );
 }
 
-function ProcessingState({ progress, step, waitingFinal }) {
-  const activeIndex = Math.max(0, PROCESS_STEPS.indexOf(step));
+function ProcessingState({ progress, message, status }) {
+  const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));
 
   return (
     <div style={{ marginTop: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 7, color: "#475467", fontSize: 13 }}>
-        <span style={{ fontWeight: 900 }}>{waitingFinal ? "Finalizing results" : step}</span>
-        <span>{progress}%</span>
+        <span style={{ fontWeight: 900 }}>{message}</span>
+        <span>{safeProgress}%</span>
       </div>
 
       <div style={{ height: 9, background: "#e8dfd2", borderRadius: 999, overflow: "hidden" }}>
         <div
           style={{
-            width: `${progress}%`,
+            width: `${safeProgress}%`,
             height: "100%",
-            background: waitingFinal ? "#8a6f14" : "#2f5f4f",
+            background: status === "failed" ? COLORS.DELETED.chip : "#2f5f4f",
             transition: "width 450ms ease, background 250ms ease",
           }}
         />
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 11, flexWrap: "wrap" }}>
-        {PROCESS_STEPS.map((s, i) => (
-          <span
-            key={s}
-            style={{
-              fontSize: 12,
-              color: i <= activeIndex ? "#2f5f4f" : "#98a2b3",
-              background: i <= activeIndex ? "#e5f0e9" : "#f0ece4",
-              border: "1px solid #ded6c8",
-              padding: "4px 8px",
-              borderRadius: 999,
-              fontWeight: 800,
-            }}
-          >
-            {s}
-          </span>
-        ))}
-      </div>
-
       <p style={{ margin: "11px 0 0", color: "#667085", fontSize: 13 }}>
-        {waitingFinal
-          ? "The documents are processed. The app is preparing the final response and report. This can take longer when AI summary is enabled."
-          : "Please keep this page open while the comparison runs."}
+        Please keep this page open while the comparison runs. Results will appear automatically.
       </p>
     </div>
   );
@@ -506,8 +494,6 @@ function ErrorBox({ message }) {
     </div>
   );
 }
-
-/* Rest of the application: results view */
 
 function StatsBar({ meta, onDownloadReport }) {
   const s = meta.stats || {};
