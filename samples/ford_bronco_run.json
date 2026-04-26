@@ -1,0 +1,609 @@
+{
+  "run_id_demo": "sample-2024-vs-2025",
+  "base_label": "2024_MPF_Model_Spec",
+  "target_label": "2025_MPF_Model_Spec",
+  "stats": {
+    "ADDED": 1030,
+    "DELETED": 1272,
+    "MODIFIED": 275,
+    "UNCHANGED": 176
+  },
+  "coverage": {
+    "base_pct": 96.25482102983963,
+    "target_pct": 94.2732108944643
+  },
+  "top_high_signal_diffs": [
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "CW",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 31,
+      "before_text": "Robin\u2019s Egg Blue1 | CW | O",
+      "after_text": "Robin\u2019s Egg Blue1 | CW | O",
+      "similarity": 1.0,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "CW",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 41,
+      "before_text": "Robin\u2019s Egg Blue3 |  | CW | \u25fc |  | \u25fc",
+      "after_text": "Robin\u2019s Egg Blue2 | CW | \u25fc",
+      "similarity": 0.833,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "G4",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 31,
+      "before_text": "Azure Gray Metallic Tri-Coat1 | G4 | O",
+      "after_text": "Azure Gray Metallic Tri-Coat1 | G4 | O",
+      "similarity": 1.0,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "G4",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 41,
+      "before_text": "Azure Gray Metallic Tri-Coat 4 |  | G4 | \u25fc |  | ",
+      "after_text": "Azure Gray Metallic Tri-Coat2 | G4 | \u25fc",
+      "similarity": 0.892,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "41H",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 31,
+      "before_text": "Engine Block Heater | 41H | O",
+      "after_text": "Engine Block Heater | 41H | O",
+      "similarity": 1.0,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "153",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 31,
+      "before_text": "Front License Plate Bracket\nNote: See \u201cEmissions\u201d section for additional information. | 153 | O",
+      "after_text": "Front License Plate Bracket\nNote: See \u201cEmissions\u201d section for additional information. | 153 | O",
+      "similarity": 1.0,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "863",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 31,
+      "before_text": "Roof Rails with Crossbars, Black\nNote: Requires Standard Hard Top | 863 | O",
+      "after_text": "Roof Rails with Crossbars, Black | 863 | O",
+      "similarity": 0.718,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "87E",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 31,
+      "before_text": "Storage Bags \u2013 Front Row Top Panels and Door\nTIP: Hard Top contains the Front Row Top Panels Storage Bag; this option adds the Door\nStorage Bags.\nTIP: The Door Storage Bags are unique to the number of",
+      "after_text": "Storage Bags \u2013 Door\nTIP: The Door Storage Bags are unique to the number of doors. On-vehicle door storage\nis 4-Door only. | 87E | O",
+      "similarity": 0.675,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "G1",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 41,
+      "before_text": "Shadow Black |  | G1 | \u25fc |  | ",
+      "after_text": "Shadow Black | G1 | \u25fc",
+      "similarity": 0.875,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "M7",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 40,
+      "before_text": "Carbonized Gray Metallic |  | M7 | \u25fc |  |  |  |  | ",
+      "after_text": "Carbonized Gray Metallic | M7 | \u25fc",
+      "similarity": 0.846,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "43L",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 39,
+      "before_text": "Hard Top, Carbonized Gray Molded-in-Color (MIC)\nNote: Standard 2-Door, all Series\nNote: Optional 4-Door, all Series | 43L | S/O | S/O | O | S/O | S/O",
+      "after_text": "Note: Standard 2-Door, all Series | 43L | S/O | O | O | S/O",
+      "similarity": 0.567,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "43L",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 40,
+      "before_text": "Hard Top, Carbonized Gray Molded-in-Color (MIC) |  |  |  | 43L | S |  | S | ",
+      "after_text": "Hard Top, Carbonized Gray Molded-in-Color\n(MIC) | 43L |  | S",
+      "similarity": 0.908,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "43Z",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 39,
+      "before_text": "Black Soft Top | 43Z | O | O | O | O | O",
+      "after_text": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top +\nBlack Soft Top\nNote: Requires 4-Door | 43Z |  | O | O | O",
+      "similarity": 0.433,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "S6",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 41,
+      "before_text": "Yellowstone |  | S6 |  |  | \u25fc",
+      "after_text": "Badlands\u2122 | Manual | \u2713 | \u2713 | - | - | S6",
+      "similarity": 0.469,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "765",
+      "block_type": "table_row",
+      "section": "/major_product_features/functional",
+      "page": 10,
+      "before_text": "Sasquatch\u2122 Package\n\u2022 Advanced 4x4 with Automatic On Demand Engagement\n\u2022 17\u201d Black High Gloss-Painted Aluminum, with Warm Alloy Beauty Ring, Beadlock Capable Wheels\n\u2022 4.7 Final Drive Ratio with Electro",
+      "after_text": "Sasquatch\u2122 Package\n\u2022 17\u201d Carbonized Gray-Painted Alloy Wheels\n\u2022 4.7 Final Drive Ratio with Electronic-locking Front and Rear Axle\n\u2022 High Clearance Suspension\n\u2022 High Clearance Fender Flares\nNote: Requi",
+      "similarity": 0.751,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "43L",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 13,
+      "before_text": "Hard Top, Carbonized Gray Molded-in-Color (MIC)\n\u2022 Hard Top Sound Deadening Headliner\n\u2022 Rear-Window Defroster and Washer\n\u2022 Storage Bag \u2013 Front Row Top Panels (for On-Vehicle Storage) | 43L | O | O",
+      "after_text": "Hard Top, Carbonized Gray Molded-in-Color (MIC)\n\u2022 Rear-Window Defroster and Washer\nNote: Not available with Black Appearance Package (51E) | 43L | O | O",
+      "similarity": 0.674,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "43Z",
+      "block_type": "table_row",
+      "section": "/major_product_features/functional_continued",
+      "page": 5,
+      "before_text": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top + Black Soft Top\nNote: Requires 4-Door | 43Z | O | O",
+      "after_text": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top + Black Soft Top\n\u2022 Rear-Window Defroster and Washer\nNote: Not available with Black Appearance Package (51E) | 43Z | O | O",
+      "similarity": 0.694,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "43Z",
+      "block_type": "table_row",
+      "section": "/major_product_features/functional",
+      "page": 10,
+      "before_text": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top + Black Soft Top\nNote: Requires 4-Door | 43Z | O | O",
+      "after_text": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top + Black Soft Top\n\u2022 Rear-Window Defroster and Washer\nNote: Not available with Black Appearance Package (51E) | 43Z | O | O",
+      "similarity": 0.694,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "43Z",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 13,
+      "before_text": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top + Black Soft Top | 43Z | O | O",
+      "after_text": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top + Black Soft Top\n\u2022 Rear-Window Defroster and Washer\nNote: Requires 4-Door\nNote: Not available with Black Appearance Package (51E) | 43Z | O |",
+      "similarity": 0.603,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "18D",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 21,
+      "before_text": "Tube Step \u2013 Powder Coated | 18D | O | O",
+      "after_text": "Side Step\nNote: Not available with Splash Guards \u2013 Front and Rear (17B)\nNote: Not available with Sasquatch\u2122 Package (765)\nNote: Not available with Black Diamond Package (51D) | 18D | O | O",
+      "similarity": 0.301,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "G4",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Azure Gray Metallic Tri-Coat1 | G4 | O | O",
+      "after_text": "Azure Gray Metallic Tri-Coat1 | G4 | O | O",
+      "similarity": 1.0,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "41H",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Engine Block Heater | 41H | O | O",
+      "after_text": "Engine Block Heater | 41H | O | O",
+      "similarity": 1.0,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "153",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Front License Plate Bracket\nNote: See \u201cEmissions\u201d section for additional information. | 153 | O | O",
+      "after_text": "Front License Plate Bracket\nNote: See \u201cEmissions\u201d section for additional information. | 153 | O | O",
+      "similarity": 1.0,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "16B",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Cargo Area Protector\nNote: Not available with Sasquatch\u2122 Package (765)\nNote: Not available with Slide-Out Tailgate (90F) | 16B | O | O",
+      "after_text": "Cargo Area Protector\nNote: Not available with Sasquatch\u2122 Package (765)\nNote: Not available with Slide-Out Tailgate (90F) | 16B | O | O",
+      "similarity": 1.0,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "47B",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Floor Liners, Front and Rear (with Carpet Floor Mats)\nNote: Includes standard Carpet Front and Rear Floor Mats | 47B | O | O",
+      "after_text": "Floor Liners, Front and Rear (with Carpet Floor Mats)\nNote: Includes Carpet Front and Rear Floor Mats | 47B | O | O",
+      "similarity": 0.962,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "47C",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Floor Liners, Front and Rear (without Carpet Floor Mats)\nNote: Deletes standard Carpet Front and Rear Floor Mats | 47C | O | O",
+      "after_text": "Floor Liners, Front and Rear (without Carpet Floor Mats)\nNote: Deletes Carpet Front and Rear Floor Mats | 47C | O | O",
+      "similarity": 0.963,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "863",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Roof Rails with Crossbars, Black\nNote: Requires Hard Top (43L) or Dual Top (43Z)\nNote: This option may reduce SiriusXM\u00ae satellite radio reception performance. | 863 | O | O",
+      "after_text": "Roof Rails with Crossbars, Black\nNote: Requires Hard Tops (43L/43U/43V) or Dual Tops (43Z/43A/43B)\nNote: This option may reduce SiriusXM\u00ae satellite radio reception performance. | 863 | O | O",
+      "similarity": 0.95,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "90F",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Slide-Out Tailgate\nNote: Not available with Sasquatch\u2122 Package (765)\nNote: Not available with Dual Top (43Z)\nTIP: Prevents on-vehicle door storage | 90F | O | O",
+      "after_text": "Slide-Out Tailgate\nNote: Not available with Sasquatch\u2122 Package (765)\nNote: Not available with Dual Tops (43Z/43A/43B)\nTIP: Prevents on-vehicle door storage | 90F | O | O",
+      "similarity": 0.972,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "90F",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 22,
+      "before_text": "Slide-Out Tailgate\nNote: Requires 4-Door\nNote: Not available with Full Vehicle Steel Bash Plates (61L)\nNote: Not available with Dual Top (43Z)\nTIP: Prevents on-vehicle door storage | 90F | O | O",
+      "after_text": "Slide-Out Tailgate\nNote: Not available with Dual Top (43X) | 90F | O",
+      "similarity": 0.511,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "87D",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Storage Bags \u2013 Door\nNote: Requires Soft Top, Black Cloth (With Hard Top Prep Kit, standard Top on 4-Door)\nTIP: Provides for on-vehicle door storage | 87D | O | O",
+      "after_text": "Storage Bags \u2013 Door\nNote: Requires Soft Top, Black Cloth (With Hard Top Prep Kit, standard Top on 4-Door)\nTIP: Provides for on-vehicle door storage | 87D | O | O",
+      "similarity": 1.0,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "87E",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Storage Bags \u2013 Front Row Top Panels and Door\nNote: Requires Hard Top (43L) or Dual Top (43Z)\nTIP: Hard Tops contain the Front Row Top Panels Storage Bag; this option adds the Door\nStorage Bags.\nTIP: T",
+      "after_text": "Storage Bags \u2013 Door\nNote: Requires Hard Tops (43L/43U/43V) or Dual Tops (43Z/43A/43B)\nTIP: The Door Storage Bags are unique to the number of doors. On-vehicle door storage is 4-\nDoor only. | 87E | O |",
+      "similarity": 0.723,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "94B",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 15,
+      "before_text": "Daytime Running Lamps (DRL) (Non-Configurable)\nNote: Replaces the standard Configurable Daytime Running Lamps (DRL) | 94B | O | O",
+      "after_text": "Daytime Running Lamps (DRL) (Non-Configurable)\nNote: Replaces the standard Configurable Daytime Running Lamps (DRL) | 94B | O | O",
+      "similarity": 1.0,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "99P",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 13,
+      "before_text": "2.7L EcoBoost\u00ae V6 Engine\n\u25cf Electric Brake Boost | 99P | O | O",
+      "after_text": "2.7L EcoBoost\u00ae V6 Engine\nNote: 4-Door Only\nNote: Only 10-Speed Automatic Transmission (44T) is available. Refer to the Transmission\nfeature for additional information. | 99P | O | O | O",
+      "similarity": 0.451,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "99P",
+      "block_type": "table_row",
+      "section": "/major_product_features/functional",
+      "page": 17,
+      "before_text": "2.7L EcoBoost\u00ae V6 Engine\n\u25cf Electric Brake Boost\nNote: Only 10-Speed Automatic Transmission (44T) is available. Refer to the Transmission\nfeature for additional information. | 99P | O | O | O",
+      "after_text": "2.7L EcoBoost\u00ae V6 Engine | 99P | S",
+      "similarity": 0.288,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "90U",
+      "block_type": "table_row",
+      "section": "/major_product_features/packages",
+      "page": 14,
+      "before_text": "Upgraded Carpet Floor Mats\nNote: Replaces standard Carpet Floor Mats\nNote: Not available with Floor Liners, Front and Rear (without Carpet Floor Mats) (47C) | 90U | O | O",
+      "after_text": "Upgraded Carpet Floor Mats\nNote: Replaces Carpet Floor Mats\nNote: Not available with Floor Liners, Front and Rear (without Carpet Floor Mats) (47C) | 90U | O | O",
+      "similarity": 0.973,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "43C",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 30,
+      "before_text": "Dual Tops \u2013 Modular Oxford White-Painted Hard Top + Black Soft Top\nNote: Requires 4-Door\nNote: Deletes standard Slide-Out Tailgate | 43C | O",
+      "after_text": "Dual Tops \u2013 Black-Painted Hard Top + Black Soft Top\nNote: Requires 4-Door | 43B |  |  | O | ",
+      "similarity": 0.69,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "43C",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 34,
+      "before_text": "Dual Tops \u2013 Modular Oxford White-Painted Hard Top + Black Soft Top\nNote: Requires 4-Door\nNote: Deletes standard Slide-Out Tailgate | 43C | O",
+      "after_text": "Painted Dual Tops \u2013 Hard Top, Shadow Black-Painted + Black\nSoft Top\nNote: Requires 4-Door | 43D |  | O |  | O",
+      "similarity": 0.623,
+      "impact": 0.9
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "E7",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 38,
+      "before_text": "Velocity Blue Metallic |  | E7 | \u25fc |  | \u25fc | \u25fc | \u25fc | \u25fc | \u25fc | \u25fc | \u25fc",
+      "after_text": "Velocity Blue | E7 |  |  |  |  |  |  |  |  |  |  | ",
+      "similarity": 0.738,
+      "impact": 0.85
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "M7",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 38,
+      "before_text": "Carbonized Gray Metallic |  | M7 | \u25fc |  | \u25fc | \u25fc | \u25fc | \u25fc | \u25fc | \u25fc | \u25fc",
+      "after_text": "Carbonized Gray | M7 |  |  |  |  |  |  |  |  |  |  | ",
+      "similarity": 0.748,
+      "impact": 0.85
+    },
+    {
+      "change_type": "MODIFIED",
+      "stable_key": "YZ",
+      "block_type": "table_row",
+      "section": "/packages/high_clearance_fender_flares",
+      "page": 40,
+      "before_text": "Oxford White |  | YZ |  |  |  | \u25fc | \u25fc | \u25fc",
+      "after_text": "Oxford White | YZ | \u25fc | \u25fc | \u25fc | \u25fc",
+      "similarity": 0.914,
+      "impact": 0.85
+    }
+  ],
+  "summary_table": [
+    {
+      "feature": "Robin\u2019s Egg Blue1 | CW | O",
+      "change": ": CW -> Robin\u2019s Egg Blue1; Heritage: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Robin\u2019s Egg Blue2 | CW | \u25fc",
+      "change": ": \u25fc -> CW; Cabin Environment1: None -> Robin\u2019s Egg Blue2",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Azure Gray Metallic Tri-Coat1 | G4 | O",
+      "change": ": G4 -> Azure Gray Metallic Tri-Coat1; Heritage: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Azure Gray Metallic Tri-Coat2 | G4 | \u25fc",
+      "change": ":  -> G4; Cabin Environment1: None -> Azure Gray Metallic Tri-Coat2",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Engine Block Heater | 41H | O",
+      "change": ": 41H -> Engine Block Heater; Heritage: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Front License Plate Bracket",
+      "change": ": 153 -> Front License Plate Bracket\nNote: See \u201cEmissions\u201d section for additional information.; Heritage: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Roof Rails with Crossbars, Black | 863 | O",
+      "change": ": 863 -> Roof Rails with Crossbars, Black; Heritage: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Storage Bags \u2013 Door",
+      "change": ": 87E -> Storage Bags \u2013 Door\nTIP: The Door Storage Bags are unique to the number of doors. On-vehicle door storage\nis 4-Door only; Heritage: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Shadow Black | G1 | \u25fc",
+      "change": ":  -> G1; Cabin Environment1: None -> Shadow Black",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Carbonized Gray Metallic | M7 | \u25fc",
+      "change": ":  -> M7; Cabin Environment1: None -> Carbonized Gray Metallic",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Note: Standard 2-Door, all Series | 43L | S/O | O | O | S/O",
+      "change": "08/16/23 2024 BRONCO PROPRIETARY\nCOLOR & TRIM AVAILABILITY\nBRONCO\u2122 TOP OFFERINGS: Hard Top, Carbonized Gray Molded-in-Color (MIC)\nNote: Standard 2-Door, all Series\nNote: Optional 4-Door, all Series -> None; : S/O -> None",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Hard Top, Carbonized Gray Molded-in-Color",
+      "change": "Top Description: None -> Hard Top, Carbonized Gray Molded-in-Color\n(MIC); 11/01/23 2024 BRONCO PROPRIETARY\nCOLOR & TRIM AVAILABILITY: Hard Top, Carbonized Gray Molded-in-Color (MIC) -> None",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top +",
+      "change": "08/16/23 2024 BRONCO PROPRIETARY\nCOLOR & TRIM AVAILABILITY\nBRONCO\u2122 TOP OFFERINGS: Black Soft Top -> None; : O -> None",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Badlands\u2122 | Manual | \u2713 | \u2713 | - | - | S6",
+      "change": ": \u25fc -> S6; Open Front: None -> \u2713",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Sasquatch\u2122 Package",
+      "change": ": 765 -> O; Order: None -> 765",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Hard Top, Carbonized Gray Molded-in-Color (MIC)",
+      "change": ": O -> 43L; Lux Package: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top + Black Soft Top",
+      "change": ": O -> 43Z; Standard: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top + Black Soft Top",
+      "change": "Lux Package: None -> O; Mid Package: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Dual Tops \u2013 Carbonized Gray Molded-in-Color (MIC) Hard Top + Black Soft Top",
+      "change": ": O -> 43Z; Standard: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Side Step",
+      "change": ": O -> 18D; Standard: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Azure Gray Metallic Tri-Coat1 | G4 | O | O",
+      "change": ": O -> G4; Lux Package: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Engine Block Heater | 41H | O | O",
+      "change": ": O -> 41H; Lux Package: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Front License Plate Bracket",
+      "change": ": O -> 153; Lux Package: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Cargo Area Protector",
+      "change": ": O -> 16B; Lux Package: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Floor Liners, Front and Rear (with Carpet Floor Mats)",
+      "change": ": O -> 47B; Lux Package: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Floor Liners, Front and Rear (without Carpet Floor Mats)",
+      "change": ": O -> 47C; Lux Package: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Roof Rails with Crossbars, Black",
+      "change": ": O -> 863; Lux Package: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Slide-Out Tailgate",
+      "change": ": O -> 90F; Lux Package: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Slide-Out Tailgate",
+      "change": ": O -> Slide-Out Tailgate\nNote: Not available with Dual Top (43X); Heritage: None -> O",
+      "seek_clarification": "None"
+    },
+    {
+      "feature": "Storage Bags \u2013 Door",
+      "change": ": O -> 87D; Lux Package: None -> O",
+      "seek_clarification": "None"
+    }
+  ]
+}
