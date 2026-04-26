@@ -19,6 +19,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter
+from dataclasses import dataclass
 from typing import Optional
 
 import fitz
@@ -28,19 +30,173 @@ from .anchors import (
     find_anchored_terms,
     find_anchors,
 )
-from .extractor import (  # reuse what already works from v1
-    _Line,
-    _TYPICAL_KEY_RE,
-    _body_font_size,
-    _is_heading,
-    _row_bbox_overlaps,
-    coverage_pct,
-    render_pages,
-)
 from .image_text import extract_image_text, ocr_full_page
 from .models import Block, BlockType, TemplateProfile
 from .table_extractor import extract_tables_robust
 from .table_stitcher import stitch_tables
+
+
+@dataclass
+class _Line:
+    page: int
+    text: str
+    x0: float
+    y: float
+    x1: float
+    avg_size: float
+    boldish: bool = False
+
+
+_TYPICAL_KEY_RE = re.compile(
+    r"^\s*(?P<key>[A-Za-z][A-Za-z0-9 /_.()%-]{1,80})\s*[:\-]\s*(?P<val>.+?)\s*$"
+)
+
+
+def render_pages(pdf_path: str, out_dir: str, zoom: float = 1.6) -> list[str]:
+    """Render PDF pages as PNG files and return their paths."""
+    from pathlib import Path
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    doc = fitz.open(pdf_path)
+    paths: list[str] = []
+    matrix = fitz.Matrix(zoom, zoom)
+
+    try:
+        for idx, page in enumerate(doc, start=1):
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            path = out / f"page_{idx}.png"
+            pix.save(str(path))
+            paths.append(str(path))
+    finally:
+        doc.close()
+
+    return paths
+
+
+def _collect_lines(pdf_path: str) -> list[_Line]:
+    """Collect reasonably ordered text lines from a PDF using PyMuPDF."""
+    doc = fitz.open(pdf_path)
+    lines: list[_Line] = []
+
+    try:
+        for page_index, page in enumerate(doc, start=1):
+            data = page.get_text("dict")
+
+            for block in data.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+
+                for raw_line in block.get("lines", []):
+                    spans = raw_line.get("spans", [])
+                    text_parts = []
+                    sizes = []
+                    fonts = []
+                    x0s = []
+                    y0s = []
+                    x1s = []
+
+                    for span in spans:
+                        text = span.get("text", "")
+                        if not text:
+                            continue
+
+                        text_parts.append(text)
+                        sizes.append(float(span.get("size") or 0))
+                        fonts.append(str(span.get("font") or ""))
+                        bbox = span.get("bbox") or [0, 0, 0, 0]
+                        x0s.append(float(bbox[0]))
+                        y0s.append(float(bbox[1]))
+                        x1s.append(float(bbox[2]))
+
+                    text = re.sub(r"\s+", " ", "".join(text_parts)).strip()
+                    if not text:
+                        continue
+
+                    avg_size = sum(sizes) / max(1, len(sizes))
+                    boldish = any("bold" in f.lower() or "black" in f.lower() for f in fonts)
+
+                    lines.append(
+                        _Line(
+                            page=page_index,
+                            text=text,
+                            x0=min(x0s) if x0s else 0.0,
+                            y=min(y0s) if y0s else 0.0,
+                            x1=max(x1s) if x1s else 0.0,
+                            avg_size=avg_size,
+                            boldish=boldish,
+                        )
+                    )
+    finally:
+        doc.close()
+
+    lines.sort(key=lambda ln: (ln.page, ln.y, ln.x0))
+    return lines
+
+
+def _body_font_size(lines: list[_Line]) -> float:
+    sizes = [round(ln.avg_size, 1) for ln in lines if ln.avg_size > 0]
+    if not sizes:
+        return 10.0
+    return Counter(sizes).most_common(1)[0][0]
+
+
+def _is_heading(ln: _Line, body_size: float) -> bool:
+    text = ln.text.strip()
+    if not text or len(text) > 140:
+        return False
+
+    if re.fullmatch(r"\d+(?:\.\d+)*\.?\s+[A-Z0-9][A-Za-z0-9 /&()_.:-]{2,120}", text):
+        return True
+
+    if ln.avg_size >= body_size + 1.8:
+        return True
+
+    alpha = re.sub(r"[^A-Za-z]+", "", text)
+    if len(alpha) >= 4 and text.upper() == text and len(text.split()) <= 9:
+        return True
+
+    if ln.boldish and len(text.split()) <= 10 and not text.endswith("."):
+        return True
+
+    return False
+
+
+def _row_bbox_overlaps(ln: _Line, bboxes: list[tuple[float, float, float, float]]) -> bool:
+    if not bboxes:
+        return False
+
+    line_y0 = ln.y
+    line_y1 = ln.y + max(ln.avg_size, 6)
+
+    for x0, y0, x1, y1 in bboxes:
+        horizontal = ln.x1 >= x0 - 2 and ln.x0 <= x1 + 2
+        vertical = line_y1 >= y0 - 2 and line_y0 <= y1 + 2
+        if horizontal and vertical:
+            return True
+
+    return False
+
+
+def coverage_pct(pdf_path: str, blocks: list[Block]) -> float:
+    """
+    Rough extraction coverage: extracted block characters vs PDF text characters.
+    This is intentionally approximate and stable enough for a UI quality signal.
+    """
+    doc = fitz.open(pdf_path)
+    try:
+        pdf_text = "\n".join(page.get_text("text") or "" for page in doc)
+    finally:
+        doc.close()
+
+    total = len(re.sub(r"\s+", "", pdf_text))
+    extracted = len(re.sub(r"\s+", "", " ".join(b.text or "" for b in blocks)))
+
+    if total <= 0:
+        return 100.0 if extracted > 0 else 0.0
+
+    return round(min(100.0, (extracted / total) * 100.0), 1)
 
 
 _IDENTIFIER_HEADER_TERMS = (
@@ -263,9 +419,6 @@ def _detect_stable_key(
 
 
 def _collect_lines_with_filter(pdf_path: str) -> list[_Line]:
-    """Identical to v1's _collect_lines, kept here for explicit reuse."""
-    from .extractor import _collect_lines
-
     return _collect_lines(pdf_path)
 
 
