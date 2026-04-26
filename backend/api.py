@@ -25,7 +25,27 @@ from .differ_v2 import diff_blocks, diff_stats
 from .extractor_v2 import coverage_pct, extract_blocks_v2 as extract_blocks, render_pages
 from .models import Block, ChangeType
 from .query import query as nl_query
-from .report import build_pdf_report
+@app.get("/runs/{run_id}/report.pdf")
+def get_report_pdf(run_id: str):
+    r = _ensure_complete(run_id)
+
+    try:
+        from .report import build_pdf_report
+    except Exception as exc:
+        raise HTTPException(
+            500,
+            f"PDF report generation is not available because the report dependency failed to load: {exc}",
+        )
+
+    pdf_bytes = build_pdf_report(run_id, r)
+    filename = f"document_comparison_report_{run_id}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 from .summarizer import summarize
 
 
