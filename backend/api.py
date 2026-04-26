@@ -135,6 +135,63 @@ def _ensure_complete(run_id: str) -> dict:
     return r
 
 
+def _db_health_payload() -> dict:
+    try:
+        from .db import ping_db
+    except Exception as exc:
+        return {
+            "enabled": False,
+            "ok": False,
+            "error": f"Database module could not be loaded: {exc}",
+        }
+
+    return ping_db()
+
+
+def _persist_run_safely(
+    *,
+    run_id: str,
+    base_label: str,
+    target_label: str,
+    base_pdf: Path,
+    target_pdf: Path,
+    base_blocks: list[Block],
+    target_blocks: list[Block],
+    diffs: list,
+    summary: list,
+    stats: dict,
+    coverage: dict,
+    base_page_count: int,
+    target_page_count: int,
+) -> tuple[Optional[int], Optional[str]]:
+    try:
+        from .persistence import persist_run
+    except Exception as exc:
+        return None, f"Persistence module could not be loaded: {exc}"
+
+    try:
+        db_run_id = persist_run(
+            run_id=run_id,
+            family_supplier="uploaded",
+            family_name="document_comparison",
+            base_label=base_label,
+            target_label=target_label,
+            base_pdf=base_pdf,
+            target_pdf=target_pdf,
+            base_blocks=base_blocks,
+            target_blocks=target_blocks,
+            diffs=diffs,
+            summary=summary,
+            stats=stats,
+            coverage=coverage,
+            base_page_count=base_page_count,
+            target_page_count=target_page_count,
+        )
+        return db_run_id, None
+    except Exception:
+        return None, traceback.format_exc()
+
+
 def _process_compare(
     run_id: str,
     work: Path,
@@ -180,6 +237,25 @@ def _process_compare(
 
         summary = summarize(diffs, base_blocks, target_blocks, use_llm=use_llm)
 
+        _set_run_status(run_id, "Storing extracted tables and comparison data", 88)
+
+        coverage = {"base": cov_b, "target": cov_t}
+        db_run_id, db_error = _persist_run_safely(
+            run_id=run_id,
+            base_label=base_label,
+            target_label=target_label,
+            base_pdf=base_pdf,
+            target_pdf=target_pdf,
+            base_blocks=base_blocks,
+            target_blocks=target_blocks,
+            diffs=diffs,
+            summary=summary,
+            stats=stats,
+            coverage=coverage,
+            base_page_count=len(base_imgs),
+            target_page_count=len(target_imgs),
+        )
+
         _RUNS[run_id].update(
             {
                 "status": "complete",
@@ -197,7 +273,9 @@ def _process_compare(
                 "diffs": diffs,
                 "stats": stats,
                 "summary": summary,
-                "coverage": {"base": cov_b, "target": cov_t},
+                "coverage": coverage,
+                "db_run_id": db_run_id,
+                "db_error": db_error,
             }
         )
 
@@ -220,6 +298,7 @@ def root():
         "name": "doculens-ai-agent",
         "endpoints": [
             "POST /compare",
+            "GET /db-health",
             "GET /runs/{id}",
             "GET /runs/{id}/diff",
             "GET /runs/{id}/summary",
@@ -238,6 +317,11 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/db-health")
+def db_health():
+    return _db_health_payload()
 
 
 @app.post("/compare", response_model=CompareResponse)
@@ -325,6 +409,8 @@ def run_meta(run_id: str):
         "target_label": r.get("target_label"),
         "stats": r.get("stats", {}),
         "coverage": r.get("coverage", {}),
+        "db_run_id": r.get("db_run_id"),
+        "db_error": r.get("db_error"),
         "n_pages_base": len(r.get("base_imgs", [])),
         "n_pages_target": len(r.get("target_imgs", [])),
     }
