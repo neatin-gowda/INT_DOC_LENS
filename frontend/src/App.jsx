@@ -176,19 +176,23 @@ function PageView({ runId, side, pageNum, label }) {
           style={{ display: "block", width: "100%", height: "auto" }}
           alt={`${side} page ${pageNum}`}
         />
-        {overlay.regions.map((r, i) => {
-          const [x0, y0, x1, y1] = r.bbox;
-          const c = COLORS[r.change_type] || COLORS.MODIFIED;
-          return (
+{overlay.regions.map((r, i) => {
+  const [x0, y0, x1, y1] = r.bbox;
+  const c = COLORS[r.change_type] || COLORS.MODIFIED;
+  const pageWidth = r.page_width || overlay.page_width || 612;
+  const pageHeight = r.page_height || overlay.page_height || 792;
+  return (
+
             <div
               key={i}
               title={`${r.change_type} ${r.stable_key || ""} (${r.block_type})`}
               style={{
                 position: "absolute",
-                left:   `${(x0 / 612) * 100}%`,
-                top:    `${(y0 / 792) * 100}%`,
-                width:  `${((x1 - x0) / 612) * 100}%`,
-                height: `${((y1 - y0) / 792) * 100}%`,
+                left:   `${(x0 / pageWidth) * 100}%`,
+                top:    `${(y0 / pageHeight) * 100}%`,
+                width:  `${((x1 - x0) / pageWidth) * 100}%`,
+                height: `${((y1 - y0) / pageHeight) * 100}%`,
+
                 background: c.bg,
                 outline:    `1px solid ${c.border}`,
               }}
