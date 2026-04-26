@@ -56,6 +56,13 @@ def _slug(s: str) -> str:
     return s[:60] or "section"
 
 
+def _page_sizes(pdf_path: str) -> dict[int, tuple[float, float]]:
+    doc = fitz.open(pdf_path)
+    sizes = {i + 1: (page.rect.width, page.rect.height) for i, page in enumerate(doc)}
+    doc.close()
+    return sizes
+
+
 def _detect_stable_key(row: list[str], profile: Optional[TemplateProfile]) -> Optional[str]:
     """Pick a stable identifier from a row. Profile-driven, with a generic fallback."""
     if profile and profile.stable_key_patterns:
@@ -68,6 +75,7 @@ def _detect_stable_key(row: list[str], profile: Optional[TemplateProfile]) -> Op
                 m = rx.search(str(cell or ""))
                 if m:
                     return m.group(0)
+
     code_rx = re.compile(r"^[A-Z0-9]{2,4}[A-Z]?$")
     for cell in row:
         cell = str(cell or "").strip()
@@ -94,7 +102,9 @@ def extract_blocks_v2(
       sections, tables (stitched across pages), table_rows, list_items,
       kv_pairs, paragraphs, figures (with OCR'd image text and captions).
     """
+    page_sizes = _page_sizes(pdf_path)
     lines = _collect_lines_with_filter(pdf_path)
+
     if not lines:
         # Possibly a fully scanned PDF — try full-page OCR
         if enable_ocr:
@@ -102,10 +112,17 @@ def extract_blocks_v2(
             n_pages = len(doc)
             doc.close()
             blocks: list[Block] = []
+
             for p in range(1, n_pages + 1):
                 txt = ocr_full_page(pdf_path, p)
                 if txt.strip():
-                    payload = {"text": txt, "ocr": True}
+                    page_width, page_height = page_sizes.get(p, (612, 792))
+                    payload = {
+                        "text": txt,
+                        "ocr": True,
+                        "page_width": page_width,
+                        "page_height": page_height,
+                    }
                     b = Block(
                         block_type=BlockType.PARAGRAPH,
                         path=f"/scanned_page_{p}",
@@ -145,15 +162,21 @@ def extract_blocks_v2(
 
     def _emit_table(st):
         nonlocal seq
+
         first_page = st.pages[0]
         tbl_path = "/".join(path_stack + [f"table_{first_page}_{len(blocks)}"])
         bbox = list(st.bboxes_by_page[first_page])
+        page_width, page_height = page_sizes.get(first_page, (612, 792))
+
         payload = {
             "header": st.header,
             "rows": st.rows,
             "spans_pages": st.pages,
             "stitched_from": st.source_count,
+            "page_width": page_width,
+            "page_height": page_height,
         }
+
         anchors_in_table = []
         for h in st.header:
             anchors_in_table.extend(find_anchors(h or ""))
@@ -178,9 +201,16 @@ def extract_blocks_v2(
             stable_key = _detect_stable_key(row, profile)
             row_text = " | ".join(str(c or "") for c in row)
             anchors = find_anchors(row_text) + find_anchored_terms(row_text, defined_terms)
-            row_payload = {h or f"col_{i}": v for i, (h, v) in enumerate(zip(st.header, row))}
+
+            row_payload = {
+                h or f"col_{i}": v
+                for i, (h, v) in enumerate(zip(st.header, row))
+            }
             row_payload["__anchors__"] = [a.key() for a in anchors]
             row_payload["__pages__"] = st.pages
+            row_payload["page_width"] = page_width
+            row_payload["page_height"] = page_height
+
             rblock = Block(
                 parent_id=tblock.id,
                 block_type=BlockType.TABLE_ROW,
@@ -204,7 +234,6 @@ def extract_blocks_v2(
     for ln in lines:
         # Emit any tables whose first page is at-or-before this line's page
         while next_table is not None and next_table.pages[0] <= ln.page and next_table.pages[0] not in emitted_table_anchor_pages:
-            # Anchor this table to its first appearance — only emit once
             if next_table.pages[0] == ln.page or next_table.pages[0] < ln.page:
                 _emit_table(next_table)
                 emitted_table_anchor_pages.add(next_table.pages[0])
@@ -222,11 +251,16 @@ def extract_blocks_v2(
             depth = max(1, int(round((ln.avg_size - body) / max(0.5, body * 0.1))))
             depth = min(depth, len(path_stack) + 1)
             path_stack = path_stack[:depth - 1] + [slug]
+
+            page_width, page_height = page_sizes.get(ln.page, (612, 792))
             payload = {
                 "heading": ln.text,
                 "size": ln.avg_size,
                 "anchors": [a.key() for a in find_anchors(ln.text)],
+                "page_width": page_width,
+                "page_height": page_height,
             }
+
             blk = Block(
                 parent_id=current_section_block.id if (current_section_block and depth > 1) else None,
                 block_type=BlockType.SECTION,
@@ -246,12 +280,16 @@ def extract_blocks_v2(
         # Key:value?
         m = _TYPICAL_KEY_RE.match(ln.text)
         if m:
+            page_width, page_height = page_sizes.get(ln.page, (612, 792))
             payload = {
                 "key": m.group("key").strip(),
                 "value": m.group("val").strip(),
                 "anchors": [a.key() for a in find_anchors(ln.text)],
+                "page_width": page_width,
+                "page_height": page_height,
             }
-            base = (current_section_block.path if current_section_block else "/root")
+
+            base = current_section_block.path if current_section_block else "/root"
             blk = Block(
                 parent_id=current_section_block.id if current_section_block else None,
                 block_type=BlockType.KV_PAIR,
@@ -272,12 +310,17 @@ def extract_blocks_v2(
         if list_marker:
             txt = list_marker.group(2).strip()
             anchors = find_anchors(txt) + find_anchored_terms(txt, defined_terms)
+
+            page_width, page_height = page_sizes.get(ln.page, (612, 792))
             payload = {
                 "marker": list_marker.group(1),
                 "text": txt,
                 "anchors": [a.key() for a in anchors],
+                "page_width": page_width,
+                "page_height": page_height,
             }
-            base = (current_section_block.path if current_section_block else "/root")
+
+            base = current_section_block.path if current_section_block else "/root"
             blk = Block(
                 parent_id=current_section_block.id if current_section_block else None,
                 block_type=BlockType.LIST_ITEM,
@@ -295,8 +338,15 @@ def extract_blocks_v2(
 
         # Plain paragraph
         anchors = find_anchors(ln.text) + find_anchored_terms(ln.text, defined_terms)
-        payload = {"text": ln.text, "anchors": [a.key() for a in anchors]}
-        base = (current_section_block.path if current_section_block else "/root")
+        page_width, page_height = page_sizes.get(ln.page, (612, 792))
+        payload = {
+            "text": ln.text,
+            "anchors": [a.key() for a in anchors],
+            "page_width": page_width,
+            "page_height": page_height,
+        }
+
+        base = current_section_block.path if current_section_block else "/root"
         blk = Block(
             parent_id=current_section_block.id if current_section_block else None,
             block_type=BlockType.PARAGRAPH,
@@ -328,13 +378,18 @@ def extract_blocks_v2(
                 txt_parts.append(fig["ocr_text"])
             if not txt_parts:
                 continue
+
             text = " | ".join(txt_parts)
+            page_width, page_height = page_sizes.get(fig["page"], (612, 792))
             payload = {
-                "caption":   fig["near_text"],
-                "ocr_text":  fig["ocr_text"],
-                "anchors":   [a.key() for a in find_anchors(text)],
-                "kind":      fig["kind"],
+                "caption": fig["near_text"],
+                "ocr_text": fig["ocr_text"],
+                "anchors": [a.key() for a in find_anchors(text)],
+                "kind": fig["kind"],
+                "page_width": page_width,
+                "page_height": page_height,
             }
+
             blk = Block(
                 block_type=BlockType.FIGURE,
                 path=f"/figures/page_{fig['page']}_xref_{fig['image_xref']}",
