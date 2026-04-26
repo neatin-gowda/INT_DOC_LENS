@@ -90,6 +90,20 @@ STOP_QUERY_TERMS = {
 }
 
 
+SUMMARY_TERMS = (
+    "summary",
+    "summarize",
+    "summarise",
+    "overview",
+    "brief",
+    "short",
+    "high level",
+    "key changes",
+    "main changes",
+    "important changes",
+)
+
+
 def _norm(s: Any) -> str:
     return re.sub(r"\s+", " ", str(s or "").lower()).strip()
 
@@ -641,6 +655,26 @@ def parse_query(nl: str) -> dict:
     }
 
 
+def _is_summary_intent(nl: str) -> bool:
+    q = _norm(nl)
+    return any(term in q for term in SUMMARY_TERMS)
+
+
+def _broad_summary_plan(nl: str) -> dict:
+    return {
+        "intent": "summary",
+        "filters": {
+            "change_type": ["ADDED", "DELETED", "MODIFIED"],
+            "section": [],
+            "stable_key": [],
+            "category": [],
+            "text": "",
+            "original_question": nl,
+        },
+        "granularity": "business_summary",
+    }
+
+
 def execute_plan(
     plan: dict,
     diffs: list[BlockDiff],
@@ -991,7 +1025,8 @@ def query(
     if table_result is not None:
         return table_result
 
-    plan = parse_query(nl)
+    is_summary = _is_summary_intent(nl)
+    plan = _broad_summary_plan(nl) if is_summary else parse_query(nl)
     rows = execute_plan(plan, diffs, base_blocks, target_blocks)
     semantic_rows = _semantic_search(nl, db_run_id)
 
@@ -1000,6 +1035,10 @@ def query(
         if llm:
             plan = llm
             rows = execute_plan(plan, diffs, base_blocks, target_blocks)
+
+    if not rows and is_summary:
+        plan = _broad_summary_plan(nl)
+        rows = execute_plan(plan, diffs, base_blocks, target_blocks)
 
     rows = _merge_rows(rows, semantic_rows)
     answer = llm_answer(nl, rows) or _build_answer(nl, rows, plan)
