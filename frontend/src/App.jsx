@@ -198,7 +198,7 @@ export default function App() {
               {tab === "viewer" && <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />}
               {tab === "report" && <ReviewReport runId={runId} />}
               {tab === "query" && <QueryPanel runId={runId} />}
-              {tab === "tables" && <TablesList runId={runId} />}
+              {tab === "tables" && <TablesWorkspace runId={runId} />}
             </main>
           </>
         )}
@@ -481,7 +481,7 @@ function Tabs({ tab, setTab }) {
     ["viewer", "Visual review"],
     ["report", "Review report"],
     ["query", "Ask agent"],
-    ["tables", "Table compare"],
+    ["tables", "Table workspace"],
   ];
 
   return (
@@ -796,7 +796,7 @@ function QueryPanel({ runId }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && ask()}
-            placeholder="Example: Compare PCV 205 in the old file with PCV 203 in the new file"
+            placeholder="Example: Summarize changes in equipment group availability as a table"
             style={{ ...inputStyle, flex: 1 }}
           />
           <button onClick={ask} disabled={busy} style={primaryButtonStyle(busy)}>
@@ -839,7 +839,7 @@ function QueryResult({ r }) {
   );
 }
 
-function TablesList({ runId }) {
+function TablesWorkspace({ runId }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [baseTableId, setBaseTableId] = useState("");
@@ -849,8 +849,11 @@ function TablesList({ runId }) {
   const [baseValueColumns, setBaseValueColumns] = useState([]);
   const [targetValueColumns, setTargetValueColumns] = useState([]);
   const [rowFilter, setRowFilter] = useState("");
+  const [baseView, setBaseView] = useState(null);
+  const [targetView, setTargetView] = useState(null);
+  const [viewBusy, setViewBusy] = useState(false);
   const [diff, setDiff] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [compareBusy, setCompareBusy] = useState(false);
 
   useEffect(() => {
     setData(null);
@@ -874,6 +877,8 @@ function TablesList({ runId }) {
   const targetTable = targetTables.find((t) => t.id === targetTableId);
 
   useEffect(() => {
+    setDiff(null);
+    setBaseView(null);
     if (!baseTable) {
       setBaseRowColumns([]);
       setBaseValueColumns([]);
@@ -884,6 +889,8 @@ function TablesList({ runId }) {
   }, [baseTableId]);
 
   useEffect(() => {
+    setDiff(null);
+    setTargetView(null);
     if (!targetTable) {
       setTargetRowColumns([]);
       setTargetValueColumns([]);
@@ -893,10 +900,54 @@ function TablesList({ runId }) {
     setTargetValueColumns(defaultValueColumns(targetTable));
   }, [targetTableId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (!baseTable && !targetTable) return;
+
+      setViewBusy(true);
+      setError("");
+
+      try {
+        const [basePayload, targetPayload] = await Promise.all([
+          baseTable
+            ? fetchTableView(runId, "base", baseTable.id, unique([...baseRowColumns, ...baseValueColumns]), rowFilter)
+            : Promise.resolve(null),
+          targetTable
+            ? fetchTableView(runId, "target", targetTable.id, unique([...targetRowColumns, ...targetValueColumns]), rowFilter)
+            : Promise.resolve(null),
+        ]);
+
+        if (cancelled) return;
+
+        setBaseView(basePayload);
+        setTargetView(targetPayload);
+      } catch (err) {
+        if (!cancelled) setError(friendlyFetchError(err));
+      } finally {
+        if (!cancelled) setViewBusy(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    runId,
+    baseTableId,
+    targetTableId,
+    baseRowColumns.join("|"),
+    targetRowColumns.join("|"),
+    baseValueColumns.join("|"),
+    targetValueColumns.join("|"),
+    rowFilter,
+  ]);
+
   const compare = async () => {
     if (!baseTableId || !targetTableId) return;
 
-    setBusy(true);
+    setCompareBusy(true);
     setDiff(null);
     setError("");
 
@@ -921,7 +972,7 @@ function TablesList({ runId }) {
     } catch (err) {
       setError(friendlyFetchError(err));
     } finally {
-      setBusy(false);
+      setCompareBusy(false);
     }
   };
 
@@ -930,9 +981,9 @@ function TablesList({ runId }) {
   return (
     <div>
       <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 14 }}>
-        <div style={{ fontWeight: 650, marginBottom: 4 }}>Compare detected tables</div>
-        <div style={{ color: "#667085", fontSize: 13 }}>
-          Select tables, choose the row/feature columns, then choose the PCV/value columns you want to compare.
+        <div style={{ fontWeight: 650, marginBottom: 4 }}>Table workspace</div>
+        <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.45 }}>
+          Select tables by page and topic, choose the row/feature columns and value columns, preview the selected rows, then compare only those table slices.
         </div>
       </div>
 
@@ -943,33 +994,29 @@ function TablesList({ runId }) {
         <TablePicker title="Revised document table" value={targetTableId} onChange={setTargetTableId} tables={targetTables} />
       </div>
 
-      {(baseTable || targetTable) && (
-        <div className="two-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-          <TableInfo table={baseTable} emptyLabel="Select a baseline table to inspect detected rows." />
-          <TableInfo table={targetTable} emptyLabel="Select a revised table to inspect detected rows." />
-        </div>
-      )}
+      <div className="two-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+        <TableInfo table={baseTable} emptyLabel="Select a baseline table to inspect its title, page, columns, and rows." />
+        <TableInfo table={targetTable} emptyLabel="Select a revised table to inspect its title, page, columns, and rows." />
+      </div>
 
-      {(baseTable || targetTable) && (
-        <div className="table-config-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-          <ColumnConfig
-            title="Baseline columns"
-            table={baseTable}
-            rowColumns={baseRowColumns}
-            setRowColumns={setBaseRowColumns}
-            valueColumns={baseValueColumns}
-            setValueColumns={setBaseValueColumns}
-          />
-          <ColumnConfig
-            title="Revised columns"
-            table={targetTable}
-            rowColumns={targetRowColumns}
-            setRowColumns={setTargetRowColumns}
-            valueColumns={targetValueColumns}
-            setValueColumns={setTargetValueColumns}
-          />
-        </div>
-      )}
+      <div className="table-config-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+        <ColumnConfig
+          title="Baseline columns"
+          table={baseTable}
+          rowColumns={baseRowColumns}
+          setRowColumns={setBaseRowColumns}
+          valueColumns={baseValueColumns}
+          setValueColumns={setBaseValueColumns}
+        />
+        <ColumnConfig
+          title="Revised columns"
+          table={targetTable}
+          rowColumns={targetRowColumns}
+          setRowColumns={setTargetRowColumns}
+          valueColumns={targetValueColumns}
+          setValueColumns={setTargetValueColumns}
+        />
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
         <div>
@@ -983,16 +1030,40 @@ function TablesList({ runId }) {
         </div>
         <button
           onClick={compare}
-          disabled={busy || !baseTableId || !targetTableId}
-          style={primaryButtonStyle(busy || !baseTableId || !targetTableId, { height: 40 })}
+          disabled={compareBusy || !baseTableId || !targetTableId}
+          style={primaryButtonStyle(compareBusy || !baseTableId || !targetTableId, { height: 40 })}
         >
-          {busy ? "Comparing" : "Compare"}
+          {compareBusy ? "Comparing" : "Compare selected tables"}
         </button>
+      </div>
+
+      {viewBusy && <SoftLoading label="Rendering selected table values" />}
+
+      <div className="two-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+        <SelectedTableView title="Baseline selected view" view={baseView} />
+        <SelectedTableView title="Revised selected view" view={targetView} />
       </div>
 
       {diff && <TableColumnCompareResult diff={diff} />}
     </div>
   );
+}
+
+async function fetchTableView(runId, side, tableId, columns, rowFilter) {
+  const r = await fetch(`${API}/runs/${runId}/table-view`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      side,
+      table_id: tableId,
+      columns,
+      row_filter: rowFilter.trim() || null,
+      limit: 300,
+    }),
+  });
+
+  if (!r.ok) throw new Error(await readResponseError(r));
+  return r.json();
 }
 
 function TablePicker({ title, value, onChange, tables }) {
@@ -1003,7 +1074,7 @@ function TablePicker({ title, value, onChange, tables }) {
         <option value="">Select a detected table</option>
         {tables.map((t) => (
           <option key={t.id} value={t.id}>
-            p{t.page_first || t.page || "-"} - {t.n_columns || columnNames(t).length}c x {t.n_rows || rowsOf(t).length}r - {t.header_preview || t.area || "table"}
+            {t.display_name || `Page ${t.page_first || "-"} - ${t.title || t.header_preview || "Detected table"}`}
           </option>
         ))}
       </select>
@@ -1014,26 +1085,44 @@ function TablePicker({ title, value, onChange, tables }) {
 function TableInfo({ table, emptyLabel }) {
   if (!table) return <EmptyState label={emptyLabel} />;
 
-  const columns = columnNames(table);
-  const rows = rowsOf(table);
+  const columns = table.columns || [];
 
   return (
     <div style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderRadius: 8, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
         <div>
-          <div style={{ fontWeight: 650 }}>{table.area || "Detected table"}</div>
+          <div style={{ fontWeight: 650 }}>{table.title || table.area || "Detected table"}</div>
           <div style={{ marginTop: 4, color: "#667085", fontSize: 13 }}>
-            Page {table.page_first || table.page || "-"} · {columns.length} columns · {table.n_rows || rows.length} rows
+            {table.page_label || `Page ${table.page_first || "-"}`} · {table.n_columns || columns.length} columns · {table.n_rows || 0} rows
           </div>
         </div>
         {table.id && <code>{table.id.slice(0, 8)}</code>}
       </div>
 
+      {table.context && (
+        <div style={{ marginTop: 10, color: "#667085", fontSize: 13, lineHeight: 1.4 }}>
+          {table.context}
+        </div>
+      )}
+
       <div style={{ marginTop: 10, color: "#475467", fontSize: 13 }}>
-        <strong style={{ fontWeight: 650 }}>Columns:</strong> {columns.slice(0, 12).join(" | ") || "No columns detected"}
+        <strong style={{ fontWeight: 650 }}>Columns:</strong> {columns.slice(0, 14).join(" | ") || "No columns detected"}
       </div>
 
-      {rows.length > 0 && <TablePreview table={table} />}
+      {Array.isArray(table.column_details) && table.column_details.length > 0 && (
+        <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {table.column_details.slice(0, 14).map((col) => (
+            <span key={col.name} style={{ border: "1px solid #d8d0c3", borderRadius: 999, padding: "2px 7px", fontSize: 12, color: "#475467", background: "#fbfaf6" }}>
+              {col.name}
+              {col.sample_values?.[0] ? `: ${trim(col.sample_values[0], 24)}` : ""}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {Array.isArray(table.row_preview) && table.row_preview.length > 0 && (
+        <TablePreview columns={columns.slice(0, 6)} rows={table.row_preview.slice(0, 5)} />
+      )}
     </div>
   );
 }
@@ -1041,7 +1130,7 @@ function TableInfo({ table, emptyLabel }) {
 function ColumnConfig({ title, table, rowColumns, setRowColumns, valueColumns, setValueColumns }) {
   if (!table) return <EmptyState label={`${title}: select a table first.`} />;
 
-  const columns = columnNames(table);
+  const columns = table.columns || [];
 
   return (
     <div style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderRadius: 8, padding: 12 }}>
@@ -1049,7 +1138,7 @@ function ColumnConfig({ title, table, rowColumns, setRowColumns, valueColumns, s
 
       <MultiSelect
         label="Row / feature columns"
-        helper="Used to identify and align rows."
+        helper="Used to identify and align rows, such as Feature, Item, Order Code, Package, or PCV."
         options={columns}
         selected={rowColumns}
         onChange={setRowColumns}
@@ -1058,8 +1147,8 @@ function ColumnConfig({ title, table, rowColumns, setRowColumns, valueColumns, s
       <div style={{ height: 12 }} />
 
       <MultiSelect
-        label="Value / PCV columns"
-        helper="Only selected value columns are compared."
+        label="Value columns"
+        helper="Values to render and compare, such as PCV columns, packages, prices, marks, dots, stars, or status fields."
         options={columns}
         selected={valueColumns}
         onChange={setValueColumns}
@@ -1106,10 +1195,7 @@ function MultiSelect({ label, helper, options, selected, onChange }) {
   );
 }
 
-function TablePreview({ table }) {
-  const columns = columnNames(table).slice(0, 6);
-  const rows = rowsOf(table).slice(0, 5);
-
+function TablePreview({ columns, rows }) {
   if (!columns.length || !rows.length) return null;
 
   return (
@@ -1123,7 +1209,54 @@ function TablePreview({ table }) {
         <tbody>
           {rows.map((row, i) => (
             <tr key={i}>
-              {columns.map((col) => <td key={col} style={smallTd}>{displayCell(row[col])}</td>)}
+              {columns.map((col) => <td key={col} style={smallTd}>{displayCell(row.values?.[col])}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SelectedTableView({ title, view }) {
+  if (!view) return <EmptyState label={`${title}: select a table and columns to render values.`} />;
+
+  return (
+    <div style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderRadius: 8, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontWeight: 650 }}>{title}</div>
+          <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }}>
+            {view.title || view.table?.display_name || "Selected table"} · showing {view.count || 0} of {view.total_rows || 0} row(s)
+          </div>
+        </div>
+      </div>
+
+      <RenderedRowsTable columns={view.columns || []} rows={view.rows || []} />
+    </div>
+  );
+}
+
+function RenderedRowsTable({ columns, rows }) {
+  if (!columns.length) return <EmptyState label="No columns selected." />;
+  if (!rows.length) return <EmptyState label="No rows match the selected table/filter." />;
+
+  return (
+    <div className="dl-scrollbar" style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 720 }}>
+        <thead>
+          <tr style={{ background: "#f2eee6", color: "#344054" }}>
+            <th style={smallTh}>Row</th>
+            {columns.map((col) => <th key={col} style={smallTh}>{col}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i}>
+              <td style={{ ...smallTd, color: "#667085", minWidth: 160 }}>{row.row_key || row.definition || `Row ${i + 1}`}</td>
+              {columns.map((col) => (
+                <td key={col} style={smallTd}>{displayCell(row.values?.[col])}</td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -1149,10 +1282,15 @@ function TableColumnCompareResult({ diff }) {
         <StatChip label="Added rows" value={counts.ADDED || counts.added || 0} tone="added" />
         <StatChip label="Deleted rows" value={counts.DELETED || counts.deleted || 0} tone="deleted" />
         <StatChip label="Modified rows" value={counts.MODIFIED || counts.modified || 0} tone="modified" />
-        <StatChip label="Compared rows" value={rows.length} />
+        <StatChip label="Compared changes" value={rows.length} />
       </div>
 
       {alignment.length > 0 && <ColumnAlignment alignment={alignment} />}
+
+      <div className="two-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14, marginBottom: 14 }}>
+        <SelectedTableView title="Baseline compared values" view={diff.base_preview} />
+        <SelectedTableView title="Revised compared values" view={diff.target_preview} />
+      </div>
 
       {rows.length === 0 ? (
         <EmptyState label="No row-level differences were found for the selected columns." />
@@ -1171,10 +1309,10 @@ function ColumnAlignment({ alignment }) {
       <div style={{ fontWeight: 650, marginBottom: 8 }}>Selected column alignment</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {alignment.slice(0, 60).map((item, i) => {
-          const type = item.status === "matched" ? "MATCH" : item.status === "base_only" ? "DELETED" : "ADDED";
+          const type = item.status === "matched" || item.status === "selected_pair" ? "MATCH" : item.status === "base_only" ? "DELETED" : "ADDED";
           return (
             <span key={i} style={{ border: `1px solid ${COLORS[type].border}`, background: COLORS[type].chip, color: COLORS[type].text, borderRadius: 999, padding: "3px 8px", fontSize: 12 }}>
-              {item.base_col || item.base || "new"} {item.target_col || item.target ? `→ ${item.target_col || item.target}` : ""}
+              {item.base_col || "new"} {item.target_col ? `-> ${item.target_col}` : ""}
             </span>
           );
         })}
@@ -1193,7 +1331,7 @@ function TableColumnRowDiff({ row }) {
         <div>
           <ChangeBadge type={type} />
           <span style={{ marginLeft: 8, fontWeight: 650 }}>
-            {row.key || row.row_key || row.base_key || row.target_key || row.definition || "row"}
+            {row.row_key?.base || row.row_key?.target || row.key || row.definition || "row"}
           </span>
         </div>
         {typeof row.match_score === "number" && (
@@ -1202,15 +1340,15 @@ function TableColumnRowDiff({ row }) {
       </div>
 
       <div className="two-grid" style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <DefinitionBox title="Baseline row" value={row.base_definition || row.definition?.base || row.base_row?.definition || row.base_row?.text || row.before} />
-        <DefinitionBox title="Revised row" value={row.target_definition || row.definition?.target || row.target_row?.definition || row.target_row?.text || row.after} />
+        <DefinitionBox title="Baseline row" value={row.row_definition?.base || row.base_row?.definition || row.before} />
+        <DefinitionBox title="Revised row" value={row.row_definition?.target || row.target_row?.definition || row.after} />
       </div>
 
       {diffs.length > 0 ? (
         <FieldDiffTable rows={diffs} />
       ) : (
         <div style={{ marginTop: 10 }}>
-          <ValuesSideBySide base={row.base_values || row.base_row?.values || row.base_row} target={row.target_values || row.target_row?.values || row.target_row} />
+          <ValuesSideBySide base={row.base_row?.values || row.base_values} target={row.target_row?.values || row.target_values} />
         </div>
       )}
     </div>
@@ -1376,59 +1514,19 @@ function normalizeErrorMessage(value) {
 }
 
 function defaultRowColumns(table) {
+  const columns = table?.columns || [];
   const suggested = table?.suggested_row_columns || [];
-  if (suggested.length) return suggested.filter((c) => columnNames(table).includes(c));
-  const columns = columnNames(table);
-  return columns.length ? [columns[0]] : [];
+  const picked = suggested.filter((c) => columns.includes(c));
+  return picked.length ? picked : columns.slice(0, 1);
 }
 
 function defaultValueColumns(table) {
-  const columns = columnNames(table);
+  const columns = table?.columns || [];
   const suggested = table?.suggested_value_columns || [];
   const rowCols = defaultRowColumns(table);
   const picked = suggested.filter((c) => columns.includes(c) && !rowCols.includes(c));
-  if (picked.length) return picked;
-  return columns.filter((c) => !rowCols.includes(c)).slice(0, 8);
-}
-
-function columnNames(table) {
-  if (!table) return [];
-  if (Array.isArray(table.columns) && table.columns.length) return table.columns.map(String);
-  if (Array.isArray(table.header) && table.header.length) {
-    return table.header.map((h, i) => String(h || `col_${i + 1}`));
-  }
-  const rows = rowsOf(table);
-  if (rows.length && typeof rows[0] === "object" && !Array.isArray(rows[0])) return Object.keys(rows[0]);
-  const count = table.n_columns || 0;
-  return Array.from({ length: count }, (_, i) => `col_${i + 1}`);
-}
-
-function rowsOf(table) {
-  if (!table) return [];
-  if (Array.isArray(table.rows)) return normalizeRows(table.rows, columnNamesWithoutRows(table));
-  if (Array.isArray(table.row_preview)) return normalizeRows(table.row_preview, columnNamesWithoutRows(table));
-  return [];
-}
-
-function columnNamesWithoutRows(table) {
-  if (!table) return [];
-  if (Array.isArray(table.columns) && table.columns.length) return table.columns.map(String);
-  if (Array.isArray(table.header) && table.header.length) {
-    return table.header.map((h, i) => String(h || `col_${i + 1}`));
-  }
-  const count = table.n_columns || 0;
-  return Array.from({ length: count }, (_, i) => `col_${i + 1}`);
-}
-
-function normalizeRows(rows, columns) {
-  return rows.map((row) => {
-    if (!Array.isArray(row)) return row || {};
-    const obj = {};
-    row.forEach((value, i) => {
-      obj[columns[i] || `col_${i + 1}`] = value;
-    });
-    return obj;
-  });
+  if (picked.length) return picked.slice(0, 12);
+  return columns.filter((c) => !rowCols.includes(c)).slice(0, 12);
 }
 
 function inferColumns(rows) {
@@ -1455,6 +1553,10 @@ function trim(value, limit) {
   if (!value) return "";
   const text = String(value).replace(/\s+/g, " ").trim();
   return text.length <= limit ? text : `${text.slice(0, limit - 1)}...`;
+}
+
+function unique(values) {
+  return Array.from(new Set((values || []).filter(Boolean)));
 }
 
 function filterLabel(filter) {
