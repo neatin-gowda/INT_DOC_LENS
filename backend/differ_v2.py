@@ -35,6 +35,26 @@ from .models import (
 
 _WS_RE = re.compile(r"\s+")
 _TM_RE = re.compile(r"[™®©]")
+_PUNCT_RE = re.compile(r"[^a-z0-9 ]+")
+_NUMBER_PREFIX_RE = re.compile(r"^\s*\d+(?:\.\d+)*\s*[.)-]?\s*")
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_DATE_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b")
+
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
+    "has", "in", "is", "it", "of", "on", "or", "that", "the", "this",
+    "to", "with",
+}
+
+_SEMANTIC_TYPES = {
+    BlockType.SECTION,
+    BlockType.HEADING,
+    BlockType.PARAGRAPH,
+    BlockType.LIST_ITEM,
+    BlockType.KV_PAIR,
+    BlockType.FIGURE,
+}
+
 
 
 def _norm_text(s: str) -> str:
@@ -43,6 +63,76 @@ def _norm_text(s: str) -> str:
     s = _TM_RE.sub("", s)
     s = _WS_RE.sub(" ", s)
     return s.strip().lower()
+def _canonical_text(s: str) -> str:
+    """Strict equality text: ignores layout, whitespace, case, trademarks."""
+    if not s:
+        return ""
+    s = _TM_RE.sub("", s)
+    s = _WS_RE.sub(" ", s)
+    return s.strip().casefold()
+
+
+def _semantic_text(s: str) -> str:
+    """
+    Matching text: ignores section numbers, punctuation, and filler words.
+    Years/dates are preserved so real-world changes are still caught.
+    """
+    if not s:
+        return ""
+    s = _TM_RE.sub("", s)
+    s = _NUMBER_PREFIX_RE.sub("", s)
+    s = _PUNCT_RE.sub(" ", s.casefold())
+    tokens = [t for t in _WS_RE.split(s.strip()) if t and t not in _STOPWORDS]
+    return " ".join(tokens)
+
+
+def _page_sequence_affinity(b: Block, t: Block) -> float:
+    seq_gap = abs((b.sequence or 0) - (t.sequence or 0))
+    page_gap = abs((b.page_number or 0) - (t.page_number or 0))
+    seq_score = max(0.0, 1.0 - seq_gap / 12.0)
+    page_score = max(0.0, 1.0 - page_gap / 4.0)
+    return seq_score * 0.70 + page_score * 0.30
+
+
+def _semantic_match_score(b: Block, t: Block) -> float:
+    bs = _semantic_text(b.text)
+    ts = _semantic_text(t.text)
+    if not bs or not ts:
+        return 0.0
+    ratio = fuzz.ratio(bs, ts) / 100.0
+    token_set = fuzz.token_set_ratio(bs, ts) / 100.0
+    partial = fuzz.partial_ratio(bs, ts) / 100.0
+    same_type = 0.12 if b.block_type == t.block_type else -0.20
+    anchors = jaccard(_anchors_of(b), _anchors_of(t)) if (_anchors_of(b) or _anchors_of(t)) else 0.0
+    return (
+        ratio * 0.35
+        + token_set * 0.25
+        + partial * 0.20
+        + _page_sequence_affinity(b, t) * 0.15
+        + anchors * 0.05
+        + same_type
+    )
+
+
+def _is_layout_only_change(b: Block, t: Block) -> bool:
+    """If only whitespace/case/trademark/layout changed, treat as unchanged."""
+    return _canonical_text(b.text) == _canonical_text(t.text)
+
+
+def _has_real_world_delta(b: Block, t: Block) -> bool:
+    """
+    Conservative signal: years, dates, numbers, codes, or text changed.
+    Spacing/layout-only changes return False.
+    """
+    if _is_layout_only_change(b, t):
+        return False
+    before = _canonical_text(b.text)
+    after = _canonical_text(t.text)
+    if _YEAR_RE.findall(before) != _YEAR_RE.findall(after):
+        return True
+    if _DATE_RE.findall(before) != _DATE_RE.findall(after):
+        return True
+    return before != after
 
 
 def _section_prefix(path: str, depth: int = 2) -> str:
@@ -181,6 +271,40 @@ def _align(
             used_t.add(best.id)
 
     # Remaining = ADDED / DELETED
+     # Pass 5: semantic match before declaring add/delete.
+    # This prevents harmless layout/wrapping/page movement from becoming
+    # false ADDED/DELETED highlights.
+    remaining_b = [
+        b for b in base
+        if b.id not in used_b and b.block_type in _SEMANTIC_TYPES
+    ]
+    remaining_t = [
+        t for t in target
+        if t.id not in used_t and t.block_type in _SEMANTIC_TYPES
+    ]
+
+    scored = []
+    for b in remaining_b:
+        for t in remaining_t:
+            if t.id in used_t:
+                continue
+            score = _semantic_match_score(b, t)
+            threshold = 0.50
+            if _page_sequence_affinity(b, t) > 0.75:
+                threshold = 0.43
+            if b.block_type != t.block_type:
+                threshold += 0.10
+            if score >= threshold:
+                scored.append((score, b, t))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    for score, b, t in scored:
+        if b.id in used_b or t.id in used_t:
+            continue
+        pairs.append((b, t))
+        used_b.add(b.id)
+        used_t.add(t.id)
+
     for b in base:
         if b.id not in used_b:
             pairs.append((b, None))
@@ -267,7 +391,7 @@ def diff_blocks(base: list[Block], target: list[Block]) -> list[BlockDiff]:
                 impact_score=_impact(ChangeType.DELETED, b, None, []),
             ))
         elif b and t:
-            if b.content_hash == t.content_hash:
+            if b.content_hash == t.content_hash or _is_layout_only_change(b, t):
                 out.append(BlockDiff(
                     base_block_id=b.id,
                     target_block_id=t.id,
@@ -276,9 +400,20 @@ def diff_blocks(base: list[Block], target: list[Block]) -> list[BlockDiff]:
                     impact_score=0.0,
                 ))
                 continue
+
             f_diffs = _field_diff(b, t)
+            if not f_diffs and not _has_real_world_delta(b, t):
+                out.append(BlockDiff(
+                    base_block_id=b.id,
+                    target_block_id=t.id,
+                    change_type=ChangeType.UNCHANGED,
+                    similarity=1.0,
+                    impact_score=0.0,
+                ))
+                continue
+
             t_diff = []
-            if b.block_type in {BlockType.PARAGRAPH, BlockType.LIST_ITEM, BlockType.HEADING, BlockType.FIGURE}:
+            if b.block_type in {BlockType.PARAGRAPH, BlockType.LIST_ITEM, BlockType.HEADING, BlockType.SECTION, BlockType.FIGURE}:
                 t_diff = _token_diff(b.text or "", t.text or "")
             sim = fuzz.ratio(_norm_text(b.text), _norm_text(t.text)) / 100.0
             out.append(BlockDiff(
