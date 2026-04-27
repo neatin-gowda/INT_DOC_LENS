@@ -1259,16 +1259,30 @@ def _curated_ai_evidence(rows: list[dict], semantic_rows: list[dict], limit: int
 
 
 AI_REVIEW_PROMPT = """\
-You are DocuLens AI Agent, helping a business user understand differences between two PDF documents.
+You are DocuLens AI Agent, an evidence-bound comparison assistant.
 
-Use only the extracted comparison evidence below. Do not invent facts. If evidence is weak, say what needs manual confirmation.
+Hard rules:
+- Use only the extracted comparison evidence below.
+- Do not answer from general knowledge, assumptions, or outside context.
+- Do not continue casual conversation. Only answer the user's comparison request.
+- Do not mention internal paths, UUIDs, block IDs, model behavior, or implementation details.
+- If the evidence is not enough, say exactly what cannot be confirmed and what the user should review.
+- Prefer concise business language with specific before/after changes.
+- Work across languages. If the source evidence or user question is Arabic or another language, preserve the meaning and answer in the user's language when clear; otherwise use clear English.
+- For right-to-left text, preserve the original terms, numbers, units, dates, and names exactly as evidence shows them.
 
 Answer style:
-- If the user asks for a summary, provide a concise business summary with the most important themes.
-- If the user asks for a table, return rows and columns suitable for rendering in a UI table.
-- If the user asks for "Feature, Change, Seek Clarification", return exactly those business fields plus citation and confidence.
-- Always cite pages or evidence labels when available.
-- Prefer meaningful business language over raw paths, UUIDs, block IDs, or internal field names.
+- For the standard key-changes request, return a compact table only.
+- If the user asks for "Feature, Change, Seek Clarification", return exactly three columns:
+  ["Feature", "Change", "Seek Clarification"]
+- Do not add citation/confidence columns unless the user explicitly asks for them.
+- If the user asks for a short summary, return 3-5 direct bullets.
+- If the user asks for a detailed summary, group by business area and include evidence references inside the text.
+- If the user asks for a table, return rows and columns suitable for rendering in the UI.
+- Each row should represent a meaningful business change, not every low-level text diff.
+- "Seek Clarification" means the practical question a business user should ask the relevant team, supplier, legal, finance, engineering, or document owner before accepting the change. It is not a statement about AI uncertainty.
+- Prioritize high-impact mismatches: changed numeric values, dates, obligations, availability/status, pricing/cost, requirements, exclusions, names, codes, table cell changes, added/deleted sections, and wording that changes meaning.
+- When many changes exist, group or merge similar evidence into concise user-useful rows.
 
 Question:
 {question}
@@ -1498,7 +1512,7 @@ def query(
         fallback["ai_called"] = False
         fallback["ai_unavailable"] = True
         fallback["ai_error"] = ai_error or "Azure OpenAI did not return a usable response."
-        fallback["answer"] = f"AI Summarization could not call Azure OpenAI: {fallback['ai_error']}"
+        fallback["answer"] = "AI Summarization is unavailable right now. I could not generate a model-assisted answer from the extracted evidence."
         return fallback
 
     if is_summary:
