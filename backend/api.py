@@ -19,6 +19,7 @@ import tempfile
 import threading
 import traceback
 import uuid
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
 
@@ -58,6 +59,14 @@ class CompareResponse(BaseModel):
 class QueryReq(BaseModel):
     question: str
     mode: str = "fast"
+
+
+class AiSummaryPdfReq(BaseModel):
+    title: str = "AI Summary"
+    answer: str = ""
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    confidence: Optional[float] = None
 
 
 class CompareTablesReq(BaseModel):
@@ -308,6 +317,7 @@ def root():
             "GET /runs/{id}/diff",
             "GET /runs/{id}/summary",
             "GET /runs/{id}/report.pdf",
+            "POST /runs/{id}/ai-summary.pdf",
             "POST /runs/{id}/query",
             "GET /runs/{id}/pages/{side}/{n}",
             "GET /runs/{id}/overlay/{side}/{n}",
@@ -503,6 +513,184 @@ def get_report_pdf(run_id: str):
 
     return Response(
         content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _ai_pdf_cell(row: dict[str, Any], column: str) -> str:
+    if not isinstance(row, dict):
+        return ""
+    if column in row:
+        return "" if row[column] is None else str(row[column])
+    wanted = column.strip().lower()
+    for key, value in row.items():
+        if str(key).strip().lower() == wanted:
+            return "" if value is None else str(value)
+    return ""
+
+
+def _ai_pdf_confidence(value: Optional[float]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    if n <= 1:
+        n *= 100
+    return max(0, min(100, round(n)))
+
+
+@app.post("/runs/{run_id}/ai-summary.pdf")
+def get_ai_summary_pdf(run_id: str, req: AiSummaryPdfReq):
+    _ensure_complete(run_id)
+
+    try:
+        from html import escape
+
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import inch
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except Exception as exc:
+        raise HTTPException(
+            500,
+            f"AI summary PDF generation is not available because the report dependency failed to load: {exc}",
+        )
+
+    font_name = "Helvetica"
+    for font_path in (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    ):
+        try:
+            if Path(font_path).exists():
+                pdfmetrics.registerFont(TTFont("DocuLensUnicode", font_path))
+                font_name = "DocuLensUnicode"
+                break
+        except Exception:
+            font_name = "Helvetica"
+
+    page_size = landscape(A4)
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=page_size,
+        leftMargin=0.45 * inch,
+        rightMargin=0.45 * inch,
+        topMargin=0.45 * inch,
+        bottomMargin=0.45 * inch,
+        title=req.title or "AI Summary",
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "DocuLensTitle",
+        parent=styles["Title"],
+        fontName=font_name,
+        fontSize=16,
+        leading=20,
+        textColor=colors.HexColor("#1f2937"),
+        spaceAfter=8,
+    )
+    meta_style = ParagraphStyle(
+        "DocuLensMeta",
+        parent=styles["BodyText"],
+        fontName=font_name,
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#667085"),
+        spaceAfter=8,
+    )
+    body_style = ParagraphStyle(
+        "DocuLensBody",
+        parent=styles["BodyText"],
+        fontName=font_name,
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#344054"),
+        spaceAfter=8,
+    )
+    header_style = ParagraphStyle(
+        "DocuLensHeader",
+        parent=body_style,
+        fontName=font_name,
+        fontSize=8.5,
+        leading=10,
+        textColor=colors.white,
+    )
+    cell_style = ParagraphStyle(
+        "DocuLensCell",
+        parent=body_style,
+        fontName=font_name,
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#1f2937"),
+    )
+
+    story = []
+    title = (req.title or "AI Summary").strip() or "AI Summary"
+    story.append(Paragraph(escape(title), title_style))
+
+    confidence = _ai_pdf_confidence(req.confidence)
+    meta_parts = [f"Run: {run_id}", "Source: extracted comparison evidence"]
+    if confidence is not None:
+        meta_parts.append(f"Confidence: {confidence}%")
+    story.append(Paragraph(escape(" | ".join(meta_parts)), meta_style))
+
+    if req.answer:
+        for paragraph in str(req.answer).splitlines():
+            if paragraph.strip():
+                story.append(Paragraph(escape(paragraph.strip()), body_style))
+        story.append(Spacer(1, 8))
+
+    columns = [str(c) for c in (req.columns or []) if str(c).strip()]
+    rows = [row for row in (req.rows or []) if isinstance(row, dict)]
+
+    if columns and rows:
+        usable_width = page_size[0] - doc.leftMargin - doc.rightMargin
+        col_width = usable_width / max(1, len(columns))
+        data = [[Paragraph(escape(col), header_style) for col in columns]]
+
+        for row in rows[:200]:
+            data.append(
+                [
+                    Paragraph(escape(_ai_pdf_cell(row, col)).replace("\n", "<br/>"), cell_style)
+                    for col in columns
+                ]
+            )
+
+        table = Table(data, colWidths=[col_width] * len(columns), repeatRows=1)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, -1), font_name),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#ded6c8")),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#fbfaf6")]),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
+        story.append(table)
+    elif not req.answer:
+        story.append(Paragraph("No AI summary content was provided for this run.", body_style))
+
+    doc.build(story)
+    filename = f"ai_summary_{run_id}.pdf"
+
+    return Response(
+        content=buffer.getvalue(),
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
