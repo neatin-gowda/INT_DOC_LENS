@@ -101,6 +101,15 @@ SUMMARY_TERMS = (
     "key changes",
     "main changes",
     "important changes",
+    "review items",
+    "review table",
+    "seek clarification",
+)
+
+FEATURE_TABLE_TERMS = (
+    "feature",
+    "change",
+    "seek clarification",
 )
 
 
@@ -660,6 +669,17 @@ def _is_summary_intent(nl: str) -> bool:
     return any(term in q for term in SUMMARY_TERMS)
 
 
+def _is_feature_review_table_intent(nl: str) -> bool:
+    q = _norm(nl)
+    if "seek clarification" in q:
+        return True
+    if "feature" in q and "change" in q:
+        return True
+    if "review" in q and "table" in q:
+        return True
+    return all(term in q for term in FEATURE_TABLE_TERMS[:2])
+
+
 def _broad_summary_plan(nl: str) -> dict:
     return {
         "intent": "summary",
@@ -924,6 +944,205 @@ def _merge_rows(primary: list[dict], semantic: list[dict], limit: int = 200) -> 
     return merged[:limit]
 
 
+def _count_changes(rows: list[dict]) -> dict[str, int]:
+    counts = {"ADDED": 0, "DELETED": 0, "MODIFIED": 0, "UNCHANGED": 0, "MATCH": 0}
+    for row in rows:
+        change_type = str(row.get("change_type") or "").upper()
+        if change_type in counts:
+            counts[change_type] += 1
+    return counts
+
+
+def _human_change(row: dict, limit: int = 280) -> str:
+    change_type = str(row.get("change_type") or "").upper()
+    before = _preview(row.get("before"), limit)
+    after = _preview(row.get("after"), limit)
+    field_changes = row.get("field_changes") or []
+
+    if field_changes:
+        pieces = []
+        for fd in field_changes[:4]:
+            field = fd.get("field") or fd.get("column") or "value"
+            old = _preview(fd.get("before"), 90)
+            new = _preview(fd.get("after"), 90)
+            if old and new:
+                pieces.append(f"{field}: {old} -> {new}")
+            elif new:
+                pieces.append(f"{field}: added {new}")
+            elif old:
+                pieces.append(f"{field}: removed {old}")
+        if pieces:
+            return "; ".join(pieces)
+
+    if change_type == "ADDED":
+        return f"Added: {after or row.get('text') or 'new content'}"
+    if change_type == "DELETED":
+        return f"Removed: {before or row.get('text') or 'previous content'}"
+    if change_type == "MODIFIED":
+        if before and after:
+            return f"{before} -> {after}"
+        return f"Modified: {after or before or row.get('text') or 'content changed'}"
+
+    if row.get("text"):
+        return _preview(row.get("text"), limit) or "-"
+    return after or before or "-"
+
+
+def _feature_label(row: dict) -> str:
+    stable = row.get("stable_key")
+    definition = row.get("definition")
+
+    if isinstance(definition, dict):
+        value = definition.get("target") or definition.get("base")
+        if value:
+            return _preview(value, 150) or str(value)
+    elif definition:
+        return _preview(definition, 150) or str(definition)
+
+    area = row.get("area") or _path_label(row.get("path"))
+    if stable:
+        return f"{area} - {stable}"
+    return area
+
+
+def _seek_clarification(row: dict) -> str:
+    category = str(row.get("category") or "").lower()
+    change_type = str(row.get("change_type") or "").upper()
+    confidence = float(row.get("confidence") or 0)
+
+    if category == "dates":
+        return "Confirm the effective date/timing and whether downstream milestones or releases change."
+    if category == "pricing":
+        return "Confirm commercial impact, approval need, and whether pricing communication is required."
+    if category == "availability":
+        return "Confirm affected variants/packages and whether availability changed from optional, standard, or unavailable."
+    if category == "requirement":
+        return "Confirm whether this creates a new mandatory requirement, dependency, or compliance impact."
+    if category == "legal":
+        return "Confirm interpretation with the owning legal/business reviewer."
+    if change_type == "ADDED":
+        return "Confirm whether this newly added item is applicable, approved, and communicated to impacted teams."
+    if change_type == "DELETED":
+        return "Confirm whether this removed item is intentionally discontinued and whether any dependency remains."
+    if confidence and confidence < 0.72:
+        return "Confirm manually because the extracted match confidence is lower."
+    return "Confirm business impact and whether follow-up action is needed."
+
+
+def _business_row(row: dict, feature_mode: bool = False) -> dict:
+    confidence = row.get("confidence")
+    if isinstance(confidence, (int, float)):
+        confidence_text = f"{round((confidence if confidence <= 1 else confidence / 100) * 100)}%"
+    else:
+        confidence_text = "-"
+
+    if feature_mode:
+        return {
+            "feature": _feature_label(row),
+            "change": _human_change(row),
+            "seek_clarification": _seek_clarification(row),
+            "citation": row.get("citation") or f"page {row.get('page') or row.get('page_base') or '-'}",
+            "confidence": confidence_text,
+        }
+
+    return {
+        "area": row.get("area") or _path_label(row.get("path")),
+        "change_type": str(row.get("change_type") or "-").upper(),
+        "change": _human_change(row),
+        "evidence": row.get("citation") or f"page {row.get('page') or row.get('page_base') or '-'}",
+        "confidence": confidence_text,
+        "review": _seek_clarification(row),
+    }
+
+
+def _priority_rows(rows: list[dict], limit: int = 12) -> list[dict]:
+    def score(row: dict) -> tuple:
+        category = str(row.get("category") or "")
+        change_type = str(row.get("change_type") or "")
+        impact = float(row.get("impact") or 0)
+        confidence = float(row.get("confidence") or 0)
+        category_weight = 1 if category in {"dates", "pricing", "availability", "requirement", "legal"} else 0
+        type_weight = 1 if change_type in {"ADDED", "DELETED"} else 0
+        return (category_weight, type_weight, impact, confidence)
+
+    selected = []
+    seen = set()
+    for row in sorted(rows, key=score, reverse=True):
+        key = (row.get("change_type"), row.get("area"), row.get("before"), row.get("after"), row.get("citation"))
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(row)
+        if len(selected) >= limit:
+            break
+
+    return selected
+
+
+def _summary_answer(question: str, rows: list[dict], selected: list[dict]) -> str:
+    if not rows:
+        return "I could not find extracted changes to summarize for this comparison."
+
+    counts = _count_changes(rows)
+    categories: dict[str, int] = {}
+    for row in rows:
+        category = str(row.get("category") or "other")
+        categories[category] = categories.get(category, 0) + 1
+
+    main_themes = [
+        f"{name} ({count})"
+        for name, count in sorted(categories.items(), key=lambda kv: -kv[1])
+        if name != "other"
+    ][:4]
+
+    parts = [
+        (
+            f"I found {len(rows)} meaningful extracted change{'s' if len(rows) != 1 else ''}: "
+            f"{counts['ADDED']} added, {counts['DELETED']} deleted, and {counts['MODIFIED']} modified."
+        )
+    ]
+
+    if main_themes:
+        parts.append("The main themes are " + ", ".join(main_themes) + ".")
+
+    examples = []
+    for idx, row in enumerate(selected[:4], start=1):
+        feature = _feature_label(row)
+        change = _human_change(row, 150)
+        citation = row.get("citation") or ""
+        examples.append(f"{idx}. {feature}: {change}" + (f" ({citation})" if citation else ""))
+
+    if examples:
+        parts.append("Top review items: " + " ".join(examples))
+
+    if "short" in _norm(question) or "brief" in _norm(question):
+        return " ".join(parts[:2])
+
+    parts.append("The table below lists the highest-priority items with citations and clarification prompts.")
+    return " ".join(parts)
+
+
+def _summary_response(question: str, rows: list[dict], plan: dict, semantic_rows: list[dict]) -> dict:
+    feature_mode = _is_feature_review_table_intent(question)
+    selected = _priority_rows(rows, limit=20 if feature_mode else 12)
+    business_rows = [_business_row(row, feature_mode=feature_mode) for row in selected]
+    columns = (
+        ["feature", "change", "seek_clarification", "citation", "confidence"]
+        if feature_mode
+        else ["area", "change_type", "change", "evidence", "confidence", "review"]
+    )
+
+    return {
+        "answer": llm_answer(question, selected) or _summary_answer(question, rows, selected),
+        "columns": columns,
+        "rows": business_rows,
+        "count": len(rows),
+        "plan": plan,
+        "semantic_matches": len(semantic_rows),
+        "presentation": "feature_review_table" if feature_mode else "business_summary",
+    }
+
+
 ANSWER_PROMPT = """\
 You are answering a business user's question about a PDF comparison.
 Use only the supplied evidence. Keep the answer direct and cite pages.
@@ -1025,7 +1244,7 @@ def query(
     if table_result is not None:
         return table_result
 
-    is_summary = _is_summary_intent(nl)
+    is_summary = _is_summary_intent(nl) or _is_feature_review_table_intent(nl)
     plan = _broad_summary_plan(nl) if is_summary else parse_query(nl)
     rows = execute_plan(plan, diffs, base_blocks, target_blocks)
     semantic_rows = _semantic_search(nl, db_run_id)
@@ -1041,6 +1260,10 @@ def query(
         rows = execute_plan(plan, diffs, base_blocks, target_blocks)
 
     rows = _merge_rows(rows, semantic_rows)
+
+    if is_summary:
+        return _summary_response(nl, rows, plan, semantic_rows)
+
     answer = llm_answer(nl, rows) or _build_answer(nl, rows, plan)
 
     return {
