@@ -3,8 +3,12 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
     tesseract-ocr \
+    tesseract-ocr-ara \
     ghostscript \
     libgl1 \
+    libreoffice \
+    fonts-dejavu \
+    fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
