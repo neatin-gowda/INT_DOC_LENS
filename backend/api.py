@@ -30,6 +30,14 @@ from pydantic import BaseModel, Field
 from rapidfuzz import fuzz
 
 from .differ_v2 import diff_blocks, diff_stats
+from .document_ingest import (
+    coverage_for_source,
+    extract_blocks_from_source,
+    normalize_to_pdf,
+    save_upload_to_source,
+    source_kind,
+    supported_input_extensions,
+)
 from .extractor_v2 import coverage_pct, extract_blocks_v2 as extract_blocks, render_pages
 from .models import Block, ChangeType
 from .query import ai_health, query as nl_query
@@ -207,14 +215,31 @@ def _persist_run_safely(
 def _process_compare(
     run_id: str,
     work: Path,
-    base_pdf: Path,
-    target_pdf: Path,
+    base_source: Path,
+    target_source: Path,
     base_label: str,
     target_label: str,
     use_llm: bool,
 ) -> None:
     try:
-        _set_run_status(run_id, "Rendering document pages", 12)
+        _set_run_status(run_id, "Preparing uploaded documents", 10)
+
+        converted_dir = work / "converted"
+        base_pdf = normalize_to_pdf(base_source, converted_dir / "base")
+        target_pdf = normalize_to_pdf(target_source, converted_dir / "target")
+
+        _RUNS[run_id].update(
+            {
+                "base_source": base_source,
+                "target_source": target_source,
+                "base_pdf": base_pdf,
+                "target_pdf": target_pdf,
+                "base_format": source_kind(base_source),
+                "target_format": source_kind(target_source),
+            }
+        )
+
+        _set_run_status(run_id, "Rendering document pages", 18)
 
         base_imgs = render_pages(str(base_pdf), str(work / "pages_base"))
         target_imgs = render_pages(str(target_pdf), str(work / "pages_target"))
@@ -226,17 +251,17 @@ def _process_compare(
             }
         )
 
-        _set_run_status(run_id, "Extracting text, tables, and document structure", 32)
+        _set_run_status(run_id, "Extracting text, tables, and document structure", 36)
 
-        base_blocks = extract_blocks(str(base_pdf))
-        target_blocks = extract_blocks(str(target_pdf))
+        base_blocks = extract_blocks_from_source(base_source, base_pdf, extract_blocks)
+        target_blocks = extract_blocks_from_source(target_source, target_pdf, extract_blocks)
 
-        _set_run_status(run_id, "Checking extraction coverage", 48)
+        _set_run_status(run_id, "Checking extraction coverage", 50)
 
-        cov_b = coverage_pct(str(base_pdf), base_blocks)
-        cov_t = coverage_pct(str(target_pdf), target_blocks)
+        cov_b = coverage_for_source(base_source, base_pdf, base_blocks, coverage_pct)
+        cov_t = coverage_for_source(target_source, target_pdf, target_blocks, coverage_pct)
 
-        _set_run_status(run_id, "Comparing semantic changes", 62)
+        _set_run_status(run_id, "Comparing semantic changes", 64)
 
         diffs = diff_blocks(base_blocks, target_blocks)
         stats = diff_stats(diffs)
@@ -277,6 +302,10 @@ def _process_compare(
                 "work": work,
                 "base_pdf": base_pdf,
                 "target_pdf": target_pdf,
+                "base_source": base_source,
+                "target_source": target_source,
+                "base_format": source_kind(base_source),
+                "target_format": source_kind(target_source),
                 "base_label": base_label,
                 "target_label": target_label,
                 "base_imgs": base_imgs,
@@ -326,6 +355,7 @@ def root():
             "POST /runs/{id}/compare-tables",
             "POST /runs/{id}/compare-table-columns",
         ],
+        "supported_upload_formats": supported_input_extensions(),
     }
 
 
@@ -346,8 +376,8 @@ def get_ai_health():
 
 @app.post("/compare", response_model=CompareResponse)
 async def compare(
-    base: UploadFile = File(..., description="Older / previous version PDF"),
-    target: UploadFile = File(..., description="Newer / current version PDF"),
+    base: UploadFile = File(..., description="Older / previous version document"),
+    target: UploadFile = File(..., description="Newer / current version document"),
     use_llm: bool = Form(False),
 ):
     if not base.filename or not target.filename:
@@ -355,8 +385,6 @@ async def compare(
 
     run_id = str(uuid.uuid4())
     work = Path(tempfile.mkdtemp(prefix=f"specdiff_{run_id}_"))
-    base_pdf = work / "base.pdf"
-    target_pdf = work / "target.pdf"
 
     base_label = Path(base.filename).stem
     target_label = Path(target.filename).stem
@@ -372,13 +400,20 @@ async def compare(
         "target_imgs": [],
         "stats": {},
         "coverage": {},
+        "supported_upload_formats": supported_input_extensions(),
     }
 
     try:
-        with base_pdf.open("wb") as f:
-            shutil.copyfileobj(base.file, f)
-        with target_pdf.open("wb") as f:
-            shutil.copyfileobj(target.file, f)
+        base_source = save_upload_to_source(base, work, "base")
+        target_source = save_upload_to_source(target, work, "target")
+        _RUNS[run_id].update(
+            {
+                "base_source": base_source,
+                "target_source": target_source,
+                "base_format": source_kind(base_source),
+                "target_format": source_kind(target_source),
+            }
+        )
     except Exception as exc:
         _RUNS[run_id].update(
             {
@@ -396,8 +431,8 @@ async def compare(
         args=(
             run_id,
             work,
-            base_pdf,
-            target_pdf,
+            base_source,
+            target_source,
             base_label,
             target_label,
             use_llm,
@@ -427,6 +462,9 @@ def run_meta(run_id: str):
         "traceback": r.get("traceback"),
         "base_label": r.get("base_label"),
         "target_label": r.get("target_label"),
+        "base_format": r.get("base_format"),
+        "target_format": r.get("target_format"),
+        "supported_upload_formats": supported_input_extensions(),
         "stats": r.get("stats", {}),
         "coverage": r.get("coverage", {}),
         "db_run_id": r.get("db_run_id"),
