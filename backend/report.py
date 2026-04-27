@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import html
 import io
+import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from reportlab.lib import colors
@@ -22,6 +24,8 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     PageBreak,
     Paragraph,
@@ -42,13 +46,68 @@ CHANGE_COLORS = {
 }
 
 IMPACT_ORDER = {"high": 3, "medium": 2, "low": 1, None: 0}
+ARABIC_RE = re.compile(r"[\u0600-\u06ff]")
+FONT_REGULAR = "Helvetica"
+FONT_BOLD = "Helvetica-Bold"
+
+
+def _register_unicode_fonts() -> tuple[str, str]:
+    regular_candidates = (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    )
+    bold_candidates = (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    )
+
+    regular = "Helvetica"
+    bold = "Helvetica-Bold"
+
+    for path in regular_candidates:
+        try:
+            if Path(path).exists():
+                pdfmetrics.registerFont(TTFont("DocuLensUnicode", path))
+                regular = "DocuLensUnicode"
+                break
+        except Exception:
+            regular = "Helvetica"
+
+    for path in bold_candidates:
+        try:
+            if Path(path).exists():
+                pdfmetrics.registerFont(TTFont("DocuLensUnicodeBold", path))
+                bold = "DocuLensUnicodeBold"
+                break
+        except Exception:
+            bold = regular
+
+    return regular, bold
+
+
+FONT_REGULAR, FONT_BOLD = _register_unicode_fonts()
+
+
+def _shape_rtl_if_needed(text: str) -> str:
+    if not ARABIC_RE.search(text):
+        return text
+
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+
+        return get_display(arabic_reshaper.reshape(text))
+    except Exception:
+        return text
 
 
 def _safe_text(value: Any, fallback: str = "-") -> str:
     if value is None:
         return fallback
     text = str(value).strip()
-    return text if text else fallback
+    return _shape_rtl_if_needed(text) if text else fallback
 
 
 def _xml(value: Any, fallback: str = "-") -> str:
@@ -115,7 +174,7 @@ def _style_sheet():
         ParagraphStyle(
             name="ReportTitle",
             parent=base["Title"],
-            fontName="Helvetica-Bold",
+            fontName=FONT_BOLD,
             fontSize=18,
             leading=22,
             textColor=colors.HexColor("#1f2937"),
@@ -127,7 +186,7 @@ def _style_sheet():
         ParagraphStyle(
             name="SectionTitle",
             parent=base["Heading2"],
-            fontName="Helvetica-Bold",
+            fontName=FONT_BOLD,
             fontSize=12,
             leading=15,
             textColor=colors.HexColor("#1f2937"),
@@ -140,7 +199,7 @@ def _style_sheet():
         ParagraphStyle(
             name="BodySmall",
             parent=base["BodyText"],
-            fontName="Helvetica",
+            fontName=FONT_REGULAR,
             fontSize=8.5,
             leading=11,
             textColor=colors.HexColor("#344054"),
@@ -152,7 +211,7 @@ def _style_sheet():
         ParagraphStyle(
             name="BodyTiny",
             parent=base["BodyText"],
-            fontName="Helvetica",
+            fontName=FONT_REGULAR,
             fontSize=7.4,
             leading=9.3,
             textColor=colors.HexColor("#344054"),
@@ -164,7 +223,7 @@ def _style_sheet():
         ParagraphStyle(
             name="MutedTiny",
             parent=base["BodyText"],
-            fontName="Helvetica",
+            fontName=FONT_REGULAR,
             fontSize=7,
             leading=8.8,
             textColor=colors.HexColor("#667085"),
@@ -185,7 +244,7 @@ def _rich(text: str, style) -> Paragraph:
 
 def _footer(canvas, doc):
     canvas.saveState()
-    canvas.setFont("Helvetica", 7)
+    canvas.setFont(FONT_REGULAR, 7)
     canvas.setFillColor(colors.HexColor("#667085"))
     footer = f"DocuLens AI Agent report  |  Page {doc.page}"
     canvas.drawRightString(A4[0] - 0.45 * inch, 0.28 * inch, footer)
