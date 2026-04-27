@@ -1,0 +1,628 @@
+"""
+Multi-format document ingestion.
+
+This module keeps the rest of the application PDF-compatible while allowing
+users to upload Word, Excel, CSV, and PDF files.
+
+Design:
+  * Every uploaded source is normalized to a PDF for the visual side-by-side
+    viewer and page-image APIs.
+  * Structured comparison blocks are extracted from the original source format
+    when that is more reliable than reading the converted PDF:
+      - DOCX: headings, paragraphs, lists, and tables
+      - XLSX/XLSM: sheets, rows, and cells
+      - CSV: rows and cells
+  * Legacy DOC/XLS and unsupported formats are converted to PDF and then use
+    the normal PDF extractor as a fallback.
+
+LibreOffice is required in the backend container for non-PDF visual conversion.
+"""
+from __future__ import annotations
+
+import csv
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any, Callable, Iterable, Optional
+
+from .models import Block, BlockType, TemplateProfile
+
+
+SUPPORTED_INPUT_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".doc",
+    ".xlsx",
+    ".xlsm",
+    ".xls",
+    ".csv",
+    ".tsv",
+}
+
+WORD_EXTENSIONS = {".docx", ".doc"}
+SPREADSHEET_EXTENSIONS = {".xlsx", ".xlsm", ".xls", ".csv", ".tsv"}
+
+
+def supported_input_extensions() -> list[str]:
+    return sorted(SUPPORTED_INPUT_EXTENSIONS)
+
+
+def source_kind(path: str | Path) -> str:
+    ext = Path(path).suffix.lower()
+    if ext == ".pdf":
+        return "pdf"
+    if ext in WORD_EXTENSIONS:
+        return "word"
+    if ext in SPREADSHEET_EXTENSIONS:
+        return "spreadsheet"
+    return "unknown"
+
+
+def ensure_supported(path: str | Path) -> None:
+    ext = Path(path).suffix.lower()
+    if ext not in SUPPORTED_INPUT_EXTENSIONS:
+        raise ValueError(
+            "Unsupported file type. Supported formats: "
+            + ", ".join(supported_input_extensions())
+        )
+
+
+def _hash_content(payload: dict) -> str:
+    s = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def _clean(value: Any) -> str:
+    text = str(value or "").replace("\u00a0", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _slug(value: Any, fallback: str = "section") -> str:
+    text = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "")).strip("_").lower()
+    return text[:70] or fallback
+
+
+def _header_name(value: Any, index: int) -> str:
+    text = _clean(value)
+    return text[:90] if text else f"Column {index + 1}"
+
+
+def _looks_like_identifier(value: Any) -> bool:
+    text = _clean(value)
+    if not text:
+        return False
+
+    low = text.lower()
+    if low in {"x", "o", "s", "m", "-", "--", "n/a", "na", "none", "yes", "no", "tbd"}:
+        return False
+    if "$" in text or "%" in text:
+        return False
+    if re.fullmatch(r"(?:19|20)\d{2}", text):
+        return False
+    if re.fullmatch(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", text):
+        return False
+
+    return bool(
+        re.fullmatch(r"[A-Z]{1,10}[- ]?\d{1,12}[A-Z]?", text, re.I)
+        or re.fullmatch(r"\d{2,12}[A-Z]?", text, re.I)
+        or re.fullmatch(r"[A-Z0-9]{2,12}[A-Z]?", text, re.I)
+    )
+
+
+def _detect_stable_key(row: list[str], header: Optional[list[str]] = None) -> Optional[str]:
+    header = header or []
+    header_low = [h.lower() for h in header]
+
+    identifier_terms = (
+        "id",
+        "code",
+        "key",
+        "number",
+        "no",
+        "part",
+        "item",
+        "model",
+        "option",
+        "order",
+        "package",
+        "pcv",
+        "pcb",
+        "sku",
+        "ref",
+    )
+
+    for i, cell in enumerate(row):
+        if not _looks_like_identifier(cell):
+            continue
+        h = header_low[i] if i < len(header_low) else ""
+        if any(term in h for term in identifier_terms):
+            return _clean(cell)
+
+    for cell in row:
+        if _looks_like_identifier(cell):
+            return _clean(cell)
+
+    for cell in row:
+        text = _clean(cell)
+        if len(text) >= 3:
+            return text[:120]
+
+    return None
+
+
+def _row_payload(header: list[str], row: list[str]) -> dict[str, str]:
+    payload: dict[str, str] = {}
+    used: set[str] = set()
+    max_len = max(len(header), len(row))
+
+    for i in range(max_len):
+        key = _header_name(header[i] if i < len(header) else "", i)
+        if key in used:
+            key = f"{key} {i + 1}"
+        used.add(key)
+        payload[key] = _clean(row[i]) if i < len(row) else ""
+
+    return payload
+
+
+def _row_text(payload: dict[str, str]) -> str:
+    parts = []
+    for key, value in payload.items():
+        if not _clean(value):
+            continue
+        if re.fullmatch(r"Column \d+", str(key), re.I):
+            parts.append(_clean(value))
+        else:
+            parts.append(f"{key}: {_clean(value)}")
+    return " | ".join(parts)
+
+
+def _block(
+    *,
+    block_type: BlockType,
+    path: str,
+    text: str = "",
+    payload: Optional[dict[str, Any]] = None,
+    sequence: int = 0,
+    page_number: int = 1,
+    parent_id: Any = None,
+    stable_key: Optional[str] = None,
+) -> Block:
+    payload = payload or {}
+    payload.setdefault("source_extraction", "native")
+    payload.setdefault("page_width", 612)
+    payload.setdefault("page_height", 792)
+
+    block = Block(
+        parent_id=parent_id,
+        block_type=block_type,
+        path=path,
+        page_number=max(1, int(page_number or 1)),
+        bbox=None,
+        text=text,
+        payload=payload,
+        sequence=sequence,
+        stable_key=stable_key,
+    )
+    block.content_hash = _hash_content(payload if payload else {"text": text})
+    return block
+
+
+def _page_for_sequence(seq: int, rows_per_page: int = 45) -> int:
+    return max(1, int(seq // rows_per_page) + 1)
+
+
+def _safe_copy_upload_name(filename: str, side: str) -> str:
+    ext = Path(filename or "").suffix.lower()
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(filename or side).stem).strip("._")
+    return f"{side}_{stem or side}{ext or '.bin'}"
+
+
+def save_upload_to_source(upload_file, work_dir: Path, side: str) -> Path:
+    filename = upload_file.filename or f"{side}.pdf"
+    path = work_dir / _safe_copy_upload_name(filename, side)
+    ensure_supported(path)
+
+    with path.open("wb") as f:
+        shutil.copyfileobj(upload_file.file, f)
+
+    return path
+
+
+def _find_libreoffice() -> Optional[str]:
+    configured = os.getenv("LIBREOFFICE_BIN") or os.getenv("SOFFICE_BIN")
+    if configured and Path(configured).exists():
+        return configured
+
+    for candidate in ("soffice", "libreoffice"):
+        found = shutil.which(candidate)
+        if found:
+            return found
+
+    return None
+
+
+def normalize_to_pdf(source_path: Path, out_dir: Path) -> Path:
+    """
+    Return a PDF path for visual rendering.
+
+    PDFs pass through unchanged. Office/CSV files are converted through
+    LibreOffice to preserve layout, fonts, tables, and pagination as much as
+    possible.
+    """
+    ensure_supported(source_path)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if source_path.suffix.lower() == ".pdf":
+        return source_path
+
+    soffice = _find_libreoffice()
+    if not soffice:
+        raise RuntimeError(
+            "LibreOffice/soffice is required to convert Word, Excel, or CSV files to PDF. "
+            "Install LibreOffice in the backend container or upload PDF files."
+        )
+
+    cmd = [
+        soffice,
+        "--headless",
+        "--nologo",
+        "--nofirststartwizard",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(out_dir),
+        str(source_path),
+    ]
+
+    try:
+        completed = subprocess.run(
+            cmd,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=int(os.getenv("DOCUMENT_CONVERSION_TIMEOUT", "120")),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Document conversion timed out after {exc.timeout} seconds.") from exc
+
+    pdf_path = out_dir / f"{source_path.stem}.pdf"
+    if completed.returncode != 0 or not pdf_path.exists():
+        raise RuntimeError(
+            "Document conversion to PDF failed. "
+            f"stdout={completed.stdout[-800:]} stderr={completed.stderr[-800:]}"
+        )
+
+    return pdf_path
+
+
+def _iter_docx_blocks(document):
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    body = document.element.body
+
+    for child in body.iterchildren():
+        if child.tag.endswith("}p"):
+            yield Paragraph(child, document)
+        elif child.tag.endswith("}tbl"):
+            yield Table(child, document)
+
+
+def _extract_docx(source_path: Path) -> list[Block]:
+    try:
+        from docx import Document
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
+    except Exception:
+        return []
+
+    document = Document(str(source_path))
+    blocks: list[Block] = []
+    seq = 0
+    path_stack = ["document"]
+    current_section = None
+
+    for item in _iter_docx_blocks(document):
+        if isinstance(item, Paragraph):
+            text = _clean(item.text)
+            if not text:
+                continue
+
+            style_name = _clean(getattr(item.style, "name", ""))
+            is_heading = style_name.lower().startswith("heading")
+
+            if is_heading:
+                level_match = re.search(r"(\d+)", style_name)
+                level = int(level_match.group(1)) if level_match else 1
+                level = max(1, min(6, level))
+                path_stack = path_stack[:level] + [_slug(text, f"heading_{seq}")]
+                path = "/" + "/".join(path_stack)
+                block = _block(
+                    block_type=BlockType.SECTION,
+                    path=path,
+                    text=text,
+                    payload={
+                        "heading": text,
+                        "style": style_name,
+                        "source_format": "docx",
+                    },
+                    sequence=seq,
+                    page_number=_page_for_sequence(seq),
+                    parent_id=current_section.id if current_section and level > 1 else None,
+                )
+                blocks.append(block)
+                current_section = block
+                seq += 1
+                continue
+
+            block_type = BlockType.LIST_ITEM if style_name.lower().startswith("list") or re.match(r"^[-*•]\s+", text) else BlockType.PARAGRAPH
+            base_path = current_section.path if current_section else "/document"
+            block = _block(
+                parent_id=current_section.id if current_section else None,
+                block_type=block_type,
+                path=f"{base_path}/p_{seq}",
+                text=text,
+                payload={
+                    "text": text,
+                    "style": style_name,
+                    "source_format": "docx",
+                },
+                sequence=seq,
+                page_number=_page_for_sequence(seq),
+            )
+            blocks.append(block)
+            seq += 1
+            continue
+
+        if isinstance(item, Table):
+            rows = []
+            for raw_row in item.rows:
+                rows.append([_clean(cell.text) for cell in raw_row.cells])
+
+            rows = [row for row in rows if any(_clean(cell) for cell in row)]
+            if not rows:
+                continue
+
+            n_cols = max(len(row) for row in rows)
+            normalized_rows = [row + [""] * (n_cols - len(row)) for row in rows]
+            header = [_header_name(cell, i) for i, cell in enumerate(normalized_rows[0])]
+            body_rows = normalized_rows[1:] if len(normalized_rows) > 1 else normalized_rows
+
+            base_path = current_section.path if current_section else "/document"
+            table_title = _clean(current_section.text if current_section else "") or f"Table {len([b for b in blocks if b.block_type == BlockType.TABLE]) + 1}"
+            table_payload = {
+                "header": header,
+                "rows": body_rows,
+                "spans_pages": [_page_for_sequence(seq)],
+                "table_title": table_title,
+                "table_context": base_path.replace("_", " ").strip("/"),
+                "source_format": "docx",
+            }
+            table_block = _block(
+                parent_id=current_section.id if current_section else None,
+                block_type=BlockType.TABLE,
+                path=f"{base_path}/table_{seq}",
+                text=table_title,
+                payload=table_payload,
+                sequence=seq,
+                page_number=_page_for_sequence(seq),
+            )
+            blocks.append(table_block)
+            seq += 1
+
+            for ri, row in enumerate(body_rows):
+                payload = _row_payload(header, row)
+                payload.update(
+                    {
+                        "__row_index__": ri,
+                        "__table_title__": table_title,
+                        "__pages__": [_page_for_sequence(seq)],
+                        "source_format": "docx",
+                    }
+                )
+                text = _row_text(payload)
+                block = _block(
+                    parent_id=table_block.id,
+                    block_type=BlockType.TABLE_ROW,
+                    path=f"{table_block.path}/row_{ri}",
+                    text=text,
+                    payload=payload,
+                    sequence=seq,
+                    page_number=_page_for_sequence(seq),
+                    stable_key=_detect_stable_key(row, header),
+                )
+                blocks.append(block)
+                seq += 1
+
+    return blocks
+
+
+def _sheet_rows_from_openpyxl(source_path: Path) -> Iterable[tuple[str, list[list[str]]]]:
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(str(source_path), data_only=True, read_only=True)
+    try:
+        for sheet in workbook.worksheets:
+            rows = []
+            for raw_row in sheet.iter_rows(values_only=True):
+                row = [_clean(value) for value in raw_row]
+                if any(row):
+                    rows.append(row)
+            yield sheet.title, rows
+    finally:
+        workbook.close()
+
+
+def _sheet_rows_from_xls(source_path: Path) -> Iterable[tuple[str, list[list[str]]]]:
+    try:
+        import xlrd
+    except Exception:
+        return []
+
+    workbook = xlrd.open_workbook(str(source_path))
+    out = []
+    for sheet in workbook.sheets():
+        rows = []
+        for ri in range(sheet.nrows):
+            row = [_clean(sheet.cell_value(ri, ci)) for ci in range(sheet.ncols)]
+            if any(row):
+                rows.append(row)
+        out.append((sheet.name, rows))
+    return out
+
+
+def _sheet_rows_from_csv(source_path: Path) -> Iterable[tuple[str, list[list[str]]]]:
+    delimiter = "\t" if source_path.suffix.lower() == ".tsv" else ","
+    rows = []
+    with source_path.open("r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.reader(f, delimiter=delimiter)
+        for row in reader:
+            clean = [_clean(cell) for cell in row]
+            if any(clean):
+                rows.append(clean)
+    return [(source_path.stem, rows)]
+
+
+def _extract_spreadsheet(source_path: Path) -> list[Block]:
+    ext = source_path.suffix.lower()
+
+    try:
+        if ext in {".xlsx", ".xlsm"}:
+            sheets = list(_sheet_rows_from_openpyxl(source_path))
+        elif ext == ".xls":
+            sheets = list(_sheet_rows_from_xls(source_path))
+        else:
+            sheets = list(_sheet_rows_from_csv(source_path))
+    except Exception:
+        return []
+
+    blocks: list[Block] = []
+    seq = 0
+
+    for sheet_name, rows in sheets:
+        rows = [row for row in rows if any(_clean(cell) for cell in row)]
+        if not rows:
+            continue
+
+        n_cols = max(len(row) for row in rows)
+        normalized_rows = [row + [""] * (n_cols - len(row)) for row in rows]
+
+        header_index = 0
+        for idx, row in enumerate(normalized_rows[:10]):
+            if sum(1 for cell in row if _clean(cell)) >= max(1, min(2, n_cols)):
+                header_index = idx
+                break
+
+        header = [_header_name(cell, i) for i, cell in enumerate(normalized_rows[header_index])]
+        body_rows = normalized_rows[header_index + 1 :] if len(normalized_rows) > header_index + 1 else normalized_rows
+
+        sheet_slug = _slug(sheet_name, f"sheet_{seq}")
+        section = _block(
+            block_type=BlockType.SECTION,
+            path=f"/{sheet_slug}",
+            text=sheet_name,
+            payload={
+                "heading": sheet_name,
+                "source_format": ext.lstrip("."),
+                "sheet_name": sheet_name,
+            },
+            sequence=seq,
+            page_number=_page_for_sequence(seq, 55),
+        )
+        blocks.append(section)
+        seq += 1
+
+        table_payload = {
+            "header": header,
+            "rows": body_rows,
+            "spans_pages": [_page_for_sequence(seq, 55)],
+            "table_title": sheet_name,
+            "table_context": f"Sheet: {sheet_name}",
+            "source_format": ext.lstrip("."),
+            "sheet_name": sheet_name,
+        }
+        table = _block(
+            parent_id=section.id,
+            block_type=BlockType.TABLE,
+            path=f"/{sheet_slug}/table_{seq}",
+            text=sheet_name,
+            payload=table_payload,
+            sequence=seq,
+            page_number=_page_for_sequence(seq, 55),
+        )
+        blocks.append(table)
+        seq += 1
+
+        for ri, row in enumerate(body_rows):
+            payload = _row_payload(header, row)
+            payload.update(
+                {
+                    "__row_index__": ri,
+                    "__table_title__": sheet_name,
+                    "__pages__": [_page_for_sequence(seq, 55)],
+                    "source_format": ext.lstrip("."),
+                    "sheet_name": sheet_name,
+                }
+            )
+            text = _row_text(payload)
+            block = _block(
+                parent_id=table.id,
+                block_type=BlockType.TABLE_ROW,
+                path=f"{table.path}/row_{ri}",
+                text=text,
+                payload=payload,
+                sequence=seq,
+                page_number=_page_for_sequence(seq, 55),
+                stable_key=_detect_stable_key(row, header),
+            )
+            blocks.append(block)
+            seq += 1
+
+    return blocks
+
+
+def extract_blocks_from_source(
+    source_path: Path,
+    pdf_path: Path,
+    pdf_extractor: Callable[[str], list[Block]],
+    profile: Optional[TemplateProfile] = None,
+) -> list[Block]:
+    """
+    Extract structured blocks from the best available source.
+
+    profile is accepted for API compatibility; native Office extraction is
+    intentionally generic and template-free in this first release.
+    """
+    ext = source_path.suffix.lower()
+
+    if ext == ".pdf":
+        return pdf_extractor(str(pdf_path))
+
+    blocks: list[Block] = []
+    if ext == ".docx":
+        blocks = _extract_docx(source_path)
+    elif ext in SPREADSHEET_EXTENSIONS:
+        blocks = _extract_spreadsheet(source_path)
+
+    if blocks:
+        return blocks
+
+    # DOC/legacy XLS or parser failure: use the converted PDF as a safe fallback.
+    return pdf_extractor(str(pdf_path))
+
+
+def coverage_for_source(source_path: Path, pdf_path: Path, blocks: list[Block], pdf_coverage: Callable[[str, list[Block]], float]) -> float:
+    if source_path.suffix.lower() == ".pdf":
+        return pdf_coverage(str(pdf_path), blocks)
+
+    extracted = len(re.sub(r"\s+", "", " ".join(block.text or "" for block in blocks)))
+    if extracted > 0:
+        return 100.0
+    return 0.0
+
