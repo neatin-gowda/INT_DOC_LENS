@@ -593,23 +593,53 @@ function Tabs({ tab, setTab }) {
 
 function SideBySide({ runId, meta, pageNum, setPageNum }) {
   const maxPages = Math.max(meta.n_pages_base || 1, meta.n_pages_target || 1);
+  const [basePage, setBasePage] = useState(pageNum);
+  const [targetPage, setTargetPage] = useState(pageNum);
+
+  useEffect(() => {
+    setBasePage(pageNum);
+    setTargetPage(pageNum);
+  }, [runId, pageNum]);
+
+  const goBoth = (nextPage) => {
+    const safePage = Math.max(1, Math.min(maxPages, nextPage));
+    setPageNum(safePage);
+    setBasePage(safePage);
+    setTargetPage(safePage);
+  };
 
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-        <button onClick={() => setPageNum(Math.max(1, pageNum - 1))} disabled={pageNum <= 1} style={navButtonStyle(pageNum <= 1)}>
-          Prev
+        <button onClick={() => goBoth(pageNum - 1)} disabled={pageNum <= 1} style={navButtonStyle(pageNum <= 1)}>
+          Prev both
         </button>
         <span style={{ fontSize: 17, fontWeight: 650, minWidth: 100 }}>Page {pageNum} / {maxPages}</span>
-        <button onClick={() => setPageNum(Math.min(maxPages, pageNum + 1))} disabled={pageNum >= maxPages} style={navButtonStyle(pageNum >= maxPages)}>
-          Next
+        <button onClick={() => goBoth(pageNum + 1)} disabled={pageNum >= maxPages} style={navButtonStyle(pageNum >= maxPages)}>
+          Next both
         </button>
         <Legend />
       </div>
 
       <div className="viewer-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-        <PageView runId={runId} side="base" pageNum={pageNum} totalPages={meta.n_pages_base} label="Baseline document" docName={meta.base_label} />
-        <PageView runId={runId} side="target" pageNum={pageNum} totalPages={meta.n_pages_target} label="Revised document" docName={meta.target_label} />
+        <PageView
+          runId={runId}
+          side="base"
+          pageNum={basePage}
+          setPageNum={setBasePage}
+          totalPages={meta.n_pages_base}
+          label="Baseline document"
+          docName={meta.base_label}
+        />
+        <PageView
+          runId={runId}
+          side="target"
+          pageNum={targetPage}
+          setPageNum={setTargetPage}
+          totalPages={meta.n_pages_target}
+          label="Revised document"
+          docName={meta.target_label}
+        />
       </div>
     </div>
   );
@@ -624,6 +654,19 @@ function navButtonStyle(disabled) {
     padding: "7px 12px",
     cursor: disabled ? "default" : "pointer",
     fontWeight: 600,
+  };
+}
+
+function smallNavButtonStyle(disabled) {
+  return {
+    border: "1px solid #c9c0b0",
+    background: disabled ? "#f1ece3" : "#fffdf8",
+    color: disabled ? "#98a2b3" : "#344054",
+    borderRadius: 6,
+    padding: "5px 8px",
+    cursor: disabled ? "default" : "pointer",
+    fontWeight: 600,
+    fontSize: 12,
   };
 }
 
@@ -645,7 +688,7 @@ function LegendChip({ label, color, border }) {
   );
 }
 
-function PageView({ runId, side, pageNum, totalPages, label, docName }) {
+function PageView({ runId, side, pageNum, setPageNum, totalPages, label, docName }) {
   const [overlay, setOverlay] = useState({ regions: [] });
   const [imageState, setImageState] = useState("idle");
   const pageExists = pageNum >= 1 && pageNum <= totalPages;
@@ -666,10 +709,35 @@ function PageView({ runId, side, pageNum, totalPages, label, docName }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 7 }}>
-        <div style={{ fontSize: 13, color: "#667085", fontWeight: 600 }}>{label}</div>
-        <div style={{ fontSize: 14, color: "#344054", fontWeight: 650 }}>
-          {docName} - {pageExists ? `page ${pageNum}` : "no page"}
+      <div style={{ marginBottom: 7, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 13, color: "#667085", fontWeight: 600 }}>{label}</div>
+          <div style={{ fontSize: 14, color: "#344054", fontWeight: 650 }}>
+            {docName} - {pageExists ? `page ${pageNum}` : "no page"}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => setPageNum(Math.max(1, pageNum - 1))}
+            disabled={pageNum <= 1}
+            style={smallNavButtonStyle(pageNum <= 1)}
+            title={`Previous ${label}`}
+          >
+            Prev
+          </button>
+          <span style={{ color: "#667085", fontSize: 12, minWidth: 46, textAlign: "center" }}>
+            {pageNum}/{totalPages || 1}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPageNum(Math.min(totalPages || 1, pageNum + 1))}
+            disabled={pageNum >= (totalPages || 1)}
+            style={smallNavButtonStyle(pageNum >= (totalPages || 1))}
+            title={`Next ${label}`}
+          >
+            Next
+          </button>
         </div>
       </div>
 
@@ -870,7 +938,7 @@ function QueryPanel({ runId }) {
       <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 12 }}>
         <div style={{ fontWeight: 650, marginBottom: 6 }}>Ask about the comparison</div>
         <div style={{ color: "#667085", fontSize: 13, marginBottom: 10 }}>
-          Use fast query for exact evidence lookup, or OpenAI review for a freer summary/table answer from extracted and vector-ranked context.
+          Use fast query for exact evidence lookup, or AI Summarization to call Azure OpenAI using extracted and vector-ranked context.
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
@@ -888,7 +956,7 @@ function QueryPanel({ runId }) {
             disabled={busy}
             style={modeButtonStyle(mode === "ai", busy)}
           >
-            OpenAI review
+            AI Summarization
           </button>
         </div>
 
@@ -905,7 +973,7 @@ function QueryPanel({ runId }) {
             style={{ ...inputStyle, flex: 1 }}
           />
           <button onClick={ask} disabled={busy} style={primaryButtonStyle(busy)}>
-            {busy ? (mode === "ai" ? "Reviewing" : "Searching") : "Ask"}
+            {busy ? (mode === "ai" ? "Summarizing" : "Searching") : "Ask"}
           </button>
         </div>
       </div>
@@ -914,11 +982,17 @@ function QueryPanel({ runId }) {
         <div style={{ background: "#fffdf8", border: "1px solid #d8d0c3", borderLeft: "4px solid #2f5f4f", borderRadius: 8, padding: 12, marginBottom: 12, color: "#344054", lineHeight: 1.45 }}>
           {response.mode && (
             <div style={{ color: "#667085", fontSize: 12, fontWeight: 650, marginBottom: 6 }}>
-              {response.mode === "ai" ? "OpenAI review" : "Natural language query"}
-              {response.ai_unavailable ? " - fallback used" : ""}
+              {response.mode === "ai" ? "AI Summarization" : "Natural language query"}
+              {response.ai_called === true ? " - Azure OpenAI called" : ""}
+              {response.ai_unavailable ? " - Azure OpenAI unavailable" : ""}
             </div>
           )}
           {response.answer}
+          {response.ai_error && (
+            <div style={{ marginTop: 8, color: COLORS.DELETED.text, fontSize: 12, fontWeight: 600 }}>
+              {response.ai_error}
+            </div>
+          )}
         </div>
       )}
 
