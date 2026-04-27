@@ -11,7 +11,8 @@ Response shape:
   "answer": "...",
   "rows": [...],
   "count": 10,
-  "plan": {...}
+  "plan": {...},
+  "mode": "fast"|"ai"
 }
 """
 from __future__ import annotations
@@ -1122,7 +1123,7 @@ def _summary_answer(question: str, rows: list[dict], selected: list[dict]) -> st
     return " ".join(parts)
 
 
-def _summary_response(question: str, rows: list[dict], plan: dict, semantic_rows: list[dict]) -> dict:
+def _summary_response(question: str, rows: list[dict], plan: dict, semantic_rows: list[dict], allow_llm: bool = False) -> dict:
     feature_mode = _is_feature_review_table_intent(question)
     selected = _priority_rows(rows, limit=20 if feature_mode else 12)
     business_rows = [_business_row(row, feature_mode=feature_mode) for row in selected]
@@ -1133,13 +1134,140 @@ def _summary_response(question: str, rows: list[dict], plan: dict, semantic_rows
     )
 
     return {
-        "answer": llm_answer(question, selected) or _summary_answer(question, rows, selected),
+        "answer": (llm_answer(question, selected) if allow_llm else None) or _summary_answer(question, rows, selected),
         "columns": columns,
         "rows": business_rows,
         "count": len(rows),
         "plan": plan,
         "semantic_matches": len(semantic_rows),
         "presentation": "feature_review_table" if feature_mode else "business_summary",
+    }
+
+
+def _wants_table_output(nl: str) -> bool:
+    q = _norm(nl)
+    return (
+        "table" in q
+        or "tabular" in q
+        or "feature, change" in q
+        or "feature change" in q
+        or "seek clarification" in q
+        or ("columns" in q and "rows" in q)
+    )
+
+
+def _curated_ai_evidence(rows: list[dict], semantic_rows: list[dict], limit: int = 60) -> list[dict]:
+    selected = _priority_rows(rows, limit=limit)
+    merged = _merge_rows(selected, semantic_rows, limit=limit)
+
+    evidence = []
+    for row in merged:
+        evidence.append(
+            {
+                "area": row.get("area") or _path_label(row.get("path")),
+                "change_type": row.get("change_type"),
+                "category": row.get("category"),
+                "before": _preview(row.get("before"), 700),
+                "after": _preview(row.get("after"), 700),
+                "change": _human_change(row, 700),
+                "field_changes": row.get("field_changes") or [],
+                "definition": row.get("definition"),
+                "values": row.get("values"),
+                "citation": row.get("citation"),
+                "page_base": row.get("page_base"),
+                "page_target": row.get("page_target"),
+                "confidence": row.get("confidence"),
+            }
+        )
+
+    return evidence
+
+
+AI_REVIEW_PROMPT = """\
+You are DocuLens AI Agent, helping a business user understand differences between two PDF documents.
+
+Use only the extracted comparison evidence below. Do not invent facts. If evidence is weak, say what needs manual confirmation.
+
+Answer style:
+- If the user asks for a summary, provide a concise business summary with the most important themes.
+- If the user asks for a table, return rows and columns suitable for rendering in a UI table.
+- If the user asks for "Feature, Change, Seek Clarification", return exactly those business fields plus citation and confidence.
+- Always cite pages or evidence labels when available.
+- Prefer meaningful business language over raw paths, UUIDs, block IDs, or internal field names.
+
+Question:
+{question}
+
+Evidence JSON:
+{evidence}
+
+Return strict JSON only with this schema:
+{{
+  "answer": "plain language answer",
+  "columns": ["optional", "table", "columns"],
+  "rows": [
+    {{"column": "value"}}
+  ],
+  "confidence": 0.0
+}}
+"""
+
+
+def llm_freeform_answer(nl: str, rows: list[dict], semantic_rows: list[dict]) -> Optional[dict]:
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+    deploy = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+
+    if not (endpoint and api_key and deploy):
+        return None
+
+    evidence_rows = _curated_ai_evidence(rows, semantic_rows, limit=70)
+    if not evidence_rows:
+        return None
+
+    try:
+        from openai import AzureOpenAI
+
+        client = AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
+        )
+        evidence = json.dumps(evidence_rows, ensure_ascii=False, default=str)
+        resp = client.chat.completions.create(
+            model=deploy,
+            messages=[
+                {"role": "system", "content": "Return strict JSON only. Do not include markdown fences."},
+                {"role": "user", "content": AI_REVIEW_PROMPT.format(question=nl, evidence=evidence)},
+            ],
+            temperature=0.15,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+    except Exception:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    answer = str(data.get("answer") or "").strip()
+    llm_rows = data.get("rows") if isinstance(data.get("rows"), list) else []
+    columns = data.get("columns") if isinstance(data.get("columns"), list) else []
+
+    if not columns and llm_rows:
+        columns = list(llm_rows[0].keys())[:8] if isinstance(llm_rows[0], dict) else []
+
+    if not answer:
+        answer = _summary_answer(nl, rows, _priority_rows(rows, limit=8))
+
+    return {
+        "answer": answer,
+        "columns": [str(c) for c in columns],
+        "rows": llm_rows[:80],
+        "count": len(llm_rows),
+        "confidence": data.get("confidence"),
+        "presentation": "ai_table" if llm_rows or _wants_table_output(nl) else "ai_answer",
+        "evidence_count": len(evidence_rows),
     }
 
 
@@ -1239,9 +1367,14 @@ def query(
     base_blocks: list[Block],
     target_blocks: list[Block],
     db_run_id: Optional[str] = None,
+    mode: str = "fast",
 ) -> dict:
     table_result = _table_query_answer(nl, base_blocks, target_blocks)
-    if table_result is not None:
+    normalized_mode = _norm(mode) or "fast"
+    use_ai = normalized_mode in {"ai", "openai", "llm", "agent"}
+
+    if table_result is not None and not use_ai:
+        table_result["mode"] = "fast"
         return table_result
 
     is_summary = _is_summary_intent(nl) or _is_feature_review_table_intent(nl)
@@ -1261,10 +1394,40 @@ def query(
 
     rows = _merge_rows(rows, semantic_rows)
 
-    if is_summary:
-        return _summary_response(nl, rows, plan, semantic_rows)
+    if use_ai:
+        ai_result = llm_freeform_answer(nl, rows, semantic_rows)
+        if ai_result:
+            ai_result.update(
+                {
+                    "mode": "ai",
+                    "plan": plan,
+                    "semantic_matches": len(semantic_rows),
+                    "source_rows": len(rows),
+                }
+            )
+            return ai_result
 
-    answer = llm_answer(nl, rows) or _build_answer(nl, rows, plan)
+        fallback = _summary_response(nl, rows, plan, semantic_rows, allow_llm=False) if (is_summary or _wants_table_output(nl)) else {
+            "answer": _build_answer(nl, rows, plan),
+            "rows": rows[:80],
+            "count": len(rows),
+            "plan": plan,
+            "semantic_matches": len(semantic_rows),
+        }
+        fallback["mode"] = "ai"
+        fallback["ai_unavailable"] = True
+        fallback["answer"] = (
+            "AI review mode could not call Azure OpenAI for this run, so I used the extracted comparison evidence instead. "
+            + str(fallback.get("answer") or "")
+        )
+        return fallback
+
+    if is_summary:
+        response = _summary_response(nl, rows, plan, semantic_rows, allow_llm=False)
+        response["mode"] = "fast"
+        return response
+
+    answer = _build_answer(nl, rows, plan)
 
     return {
         "answer": answer,
@@ -1272,4 +1435,5 @@ def query(
         "count": len(rows),
         "plan": plan,
         "semantic_matches": len(semantic_rows),
+        "mode": "fast",
     }
