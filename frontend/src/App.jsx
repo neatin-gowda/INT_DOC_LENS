@@ -592,7 +592,9 @@ function Tabs({ tab, setTab }) {
 }
 
 function SideBySide({ runId, meta, pageNum, setPageNum }) {
-  const maxPages = Math.max(meta.n_pages_base || 1, meta.n_pages_target || 1);
+  const basePages = meta.base_format && meta.base_format !== "pdf" ? meta.base_native_pages || meta.n_pages_base || 1 : meta.n_pages_base || 1;
+  const targetPages = meta.target_format && meta.target_format !== "pdf" ? meta.target_native_pages || meta.n_pages_target || 1 : meta.n_pages_target || 1;
+  const maxPages = Math.max(basePages, targetPages);
   const [basePage, setBasePage] = useState(pageNum);
   const [targetPage, setTargetPage] = useState(pageNum);
 
@@ -627,18 +629,20 @@ function SideBySide({ runId, meta, pageNum, setPageNum }) {
           side="base"
           pageNum={basePage}
           setPageNum={setBasePage}
-          totalPages={meta.n_pages_base}
+          totalPages={basePages}
           label="Baseline document"
           docName={meta.base_label}
+          format={meta.base_format}
         />
         <PageView
           runId={runId}
           side="target"
           pageNum={targetPage}
           setPageNum={setTargetPage}
-          totalPages={meta.n_pages_target}
+          totalPages={targetPages}
           label="Revised document"
           docName={meta.target_label}
+          format={meta.target_format}
         />
       </div>
     </div>
@@ -688,24 +692,37 @@ function LegendChip({ label, color, border }) {
   );
 }
 
-function PageView({ runId, side, pageNum, setPageNum, totalPages, label, docName }) {
+function PageView({ runId, side, pageNum, setPageNum, totalPages, label, docName, format }) {
   const [overlay, setOverlay] = useState({ regions: [] });
+  const [nativePage, setNativePage] = useState(null);
   const [imageState, setImageState] = useState("idle");
   const pageExists = pageNum >= 1 && pageNum <= totalPages;
+  const useNativeViewer = format && format !== "pdf";
 
   useEffect(() => {
-    setImageState(pageExists ? "loading" : "idle");
+    setImageState(pageExists && !useNativeViewer ? "loading" : "idle");
 
     if (!pageExists) {
       setOverlay({ regions: [] });
+      setNativePage(null);
       return;
     }
 
+    if (useNativeViewer) {
+      setOverlay({ regions: [] });
+      fetch(`${API}/runs/${runId}/native-page/${side}/${pageNum}`)
+        .then((r) => r.json())
+        .then(setNativePage)
+        .catch(() => setNativePage({ items: [] }));
+      return;
+    }
+
+    setNativePage(null);
     fetch(`${API}/runs/${runId}/overlay/${side}/${pageNum}`)
       .then((r) => r.json())
       .then(setOverlay)
       .catch(() => setOverlay({ regions: [] }));
-  }, [runId, side, pageNum, pageExists]);
+  }, [runId, side, pageNum, pageExists, useNativeViewer]);
 
   return (
     <div>
@@ -714,6 +731,7 @@ function PageView({ runId, side, pageNum, setPageNum, totalPages, label, docName
           <div style={{ fontSize: 13, color: "#667085", fontWeight: 600 }}>{label}</div>
           <div style={{ fontSize: 14, color: "#344054", fontWeight: 650 }}>
             {docName} - {pageExists ? `page ${pageNum}` : "no page"}
+            {format && <span style={{ color: "#667085", fontSize: 11, marginLeft: 6, textTransform: "uppercase" }}>{format}</span>}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -741,9 +759,11 @@ function PageView({ runId, side, pageNum, setPageNum, totalPages, label, docName
         </div>
       </div>
 
-      <div style={{ position: "relative", border: "1px solid #b7ae9f", background: "#f9f6ef", minHeight: 520, overflow: "hidden" }}>
+      <div style={{ position: "relative", border: "1px solid #b7ae9f", background: "#f9f6ef", minHeight: 520, overflow: useNativeViewer ? "auto" : "hidden" }}>
         {!pageExists ? (
           <EmptyPage pageNum={pageNum} />
+        ) : useNativeViewer ? (
+          <NativePageView page={nativePage} />
         ) : (
           <>
             {imageState === "loading" && (
@@ -804,6 +824,131 @@ function EmptyPage({ pageNum }) {
       No page {pageNum} in this document.
     </div>
   );
+}
+
+function NativePageView({ page }) {
+  if (!page) {
+    return (
+      <div style={{ minHeight: 520, display: "grid", placeItems: "center", color: "#667085", fontWeight: 600 }}>
+        Loading structured page
+      </div>
+    );
+  }
+
+  const items = page.items || [];
+
+  if (!items.length) {
+    return (
+      <div style={{ minHeight: 520, display: "grid", placeItems: "center", color: "#667085", fontWeight: 600 }}>
+        No structured content on this page.
+      </div>
+    );
+  }
+
+  return (
+    <div dir="auto" style={{ padding: 16, background: "#fffdf8", minHeight: 520, color: "#1f2937" }}>
+      {items.map((item) => (
+        <NativeItem key={item.id} item={item} />
+      ))}
+    </div>
+  );
+}
+
+function NativeItem({ item }) {
+  const highlight = nativeHighlightStyle(item.highlight);
+
+  if (item.type === "table") {
+    return <NativeTable item={item} />;
+  }
+
+  const isHeading = item.type === "section" || item.type === "heading";
+
+  return (
+    <div
+      dir="auto"
+      style={{
+        ...highlight,
+        marginBottom: isHeading ? 10 : 8,
+        padding: isHeading ? "8px 10px" : "7px 9px",
+        borderRadius: 6,
+        fontSize: isHeading ? 15 : 13,
+        fontWeight: isHeading ? 650 : 400,
+        lineHeight: 1.45,
+      }}
+      title={item.change_type}
+    >
+      {item.text || item.payload?.text || item.path || "-"}
+      {Array.isArray(item.field_diffs) && item.field_diffs.length > 0 && (
+        <FieldDiffTable rows={item.field_diffs} />
+      )}
+    </div>
+  );
+}
+
+function NativeTable({ item }) {
+  const header = item.header || [];
+  const rows = item.rows || [];
+  const title = item.payload?.table_title || item.text || "Table";
+
+  return (
+    <div dir="auto" style={{ ...nativeHighlightStyle(item.highlight), marginBottom: 14, padding: 10, borderRadius: 7 }}>
+      <div style={{ fontSize: 14, fontWeight: 650, marginBottom: 7, color: "#344054" }}>{title}</div>
+      <div className="dl-scrollbar" style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: Math.max(520, header.length * 130) }}>
+          <thead>
+            <tr style={{ background: "#f2eee6", color: "#344054" }}>
+              {header.map((col) => (
+                <th key={col} dir="auto" style={smallTh}>{col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const rowStyle = nativeHighlightStyle(row.highlight, true);
+              return (
+                <tr key={row.id} title={row.change_type} style={{ background: rowStyle.background }}>
+                  {header.map((col) => (
+                    <td key={col} dir="auto" style={{ ...smallTd, borderLeft: rowStyle.borderLeft }}>
+                      {displayCell(row.values?.[col])}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function nativeHighlightStyle(kind, compact = false) {
+  if (kind === "added") {
+    return {
+      background: compact ? COLORS.ADDED.bg : "rgba(222, 247, 225, 0.72)",
+      border: compact ? undefined : `1px solid ${COLORS.ADDED.border}`,
+      borderLeft: `3px solid ${COLORS.ADDED.border}`,
+    };
+  }
+  if (kind === "deleted") {
+    return {
+      background: compact ? COLORS.DELETED.bg : "rgba(255, 226, 226, 0.74)",
+      border: compact ? undefined : `1px solid ${COLORS.DELETED.border}`,
+      borderLeft: `3px solid ${COLORS.DELETED.border}`,
+    };
+  }
+  if (kind === "modified") {
+    return {
+      background: compact ? COLORS.MODIFIED.bg : "rgba(249, 240, 181, 0.68)",
+      border: compact ? undefined : `1px solid ${COLORS.MODIFIED.border}`,
+      borderLeft: `3px solid ${COLORS.MODIFIED.border}`,
+    };
+  }
+  return {
+    background: compact ? "transparent" : "#fffdf8",
+    border: compact ? undefined : "1px solid transparent",
+    borderLeft: "3px solid transparent",
+  };
 }
 
 function ReviewReport({ runId }) {
