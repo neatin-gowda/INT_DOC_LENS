@@ -29,10 +29,65 @@ Reconciliation rule:
 """
 from __future__ import annotations
 
+import re
 import warnings
 from typing import Optional
 
 import pdfplumber
+
+
+_MARK_VALUES = {
+    "",
+    "-",
+    "--",
+    "—",
+    "–",
+    "x",
+    "o",
+    "●",
+    "○",
+    "•",
+    "n/a",
+    "na",
+    "none",
+    "tbd",
+}
+
+
+def _normalize_cell(value: Optional[str]) -> str:
+    text = str(value or "").replace("\u00a0", " ").strip()
+    if not text:
+        return ""
+
+    lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.splitlines() if ln.strip()]
+
+    # Vertical headers often arrive as P\nC\nV or S t a n d a r d. Collapse
+    # only when each line is a tiny fragment; keep normal multi-line cells.
+    if len(lines) >= 3 and all(len(ln) <= 3 for ln in lines):
+        joined = "".join(lines)
+        if len(joined) <= 24:
+            return joined
+
+    if len(lines) == 1:
+        chars = lines[0].split()
+        if len(chars) >= 3 and all(len(part) == 1 for part in chars):
+            return "".join(chars)
+
+    return re.sub(r"\s+", " ", " | ".join(lines)).strip()
+
+
+def _normalize_rows(rows: list[list[Optional[str]]]) -> list[list[str]]:
+    if not rows:
+        return []
+
+    n_cols = max(len(r) for r in rows)
+    normalized = []
+
+    for row in rows:
+        padded = list(row) + [""] * (n_cols - len(row))
+        normalized.append([_normalize_cell(cell) for cell in padded])
+
+    return normalized
 
 
 def _forward_fill_rowspans(rows: list[list[Optional[str]]]) -> list[list[str]]:
@@ -49,7 +104,7 @@ def _forward_fill_rowspans(rows: list[list[Optional[str]]]) -> list[list[str]]:
         for ci in range(n_cols):
             if (filled[ri][ci] is None or filled[ri][ci] == "") and filled[ri - 1][ci]:
                 filled[ri][ci] = filled[ri - 1][ci]
-    return [[(c or "") for c in r] for r in filled]
+    return _normalize_rows(filled)
 
 
 def _is_sparse(rows: list[list[Optional[str]]]) -> float:
@@ -114,18 +169,114 @@ def _strategy_c(pdf_path: str, page_num: int) -> list[dict]:
         return []
 
 
+def _is_value_like(cell: str) -> bool:
+    text = _normalize_cell(cell)
+    low = text.lower()
+
+    if low in _MARK_VALUES:
+        return True
+    if "$" in text:
+        return True
+    if re.fullmatch(r"\d+(?:[,.]\d+)*(?:\.\d+)?%?", text):
+        return True
+    if re.fullmatch(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", text):
+        return True
+    if re.fullmatch(r"(?:19|20)\d{2}", text):
+        return True
+    return False
+
+
+def _header_likelihood(row: list[str]) -> float:
+    cells = [_normalize_cell(c) for c in row if _normalize_cell(c)]
+    if not cells:
+        return 0.0
+
+    short_ratio = sum(1 for c in cells if len(c) <= 70) / len(cells)
+    value_ratio = sum(1 for c in cells if _is_value_like(c)) / len(cells)
+    header_word_ratio = sum(
+        1
+        for c in cells
+        if re.search(
+            r"\b(feature|item|code|order|package|model|series|description|option|pcv|pcb|value|price|date|status|standard|mid|lux|base)\b",
+            c,
+            re.I,
+        )
+    ) / len(cells)
+
+    return (short_ratio * 0.45) + ((1 - value_ratio) * 0.35) + (header_word_ratio * 0.20)
+
+
+def _combine_header_rows(header_rows: list[list[str]], n_cols: int) -> list[str]:
+    header = []
+
+    for ci in range(n_cols):
+        parts = []
+        for row in header_rows:
+            cell = _normalize_cell(row[ci] if ci < len(row) else "")
+            if not cell:
+                continue
+            if parts and cell.lower() == parts[-1].lower():
+                continue
+            parts.append(cell)
+
+        label = " / ".join(parts).strip(" /")
+        header.append(label or f"Column {ci + 1}")
+
+    # If extraction produced only generic labels, use safe numbered columns.
+    seen = {}
+    deduped = []
+    for i, label in enumerate(header):
+        clean = label or f"Column {i + 1}"
+        seen[clean] = seen.get(clean, 0) + 1
+        if seen[clean] > 1:
+            clean = f"{clean} {seen[clean]}"
+        deduped.append(clean)
+
+    return deduped
+
+
 def _split_header_body(raw_rows: list[list[str]]) -> tuple[list[str], list[list[str]]]:
     """
     Heuristic: the header is the first row that has values in most columns
     AND is followed by at least one row that has different content.
     """
+    raw_rows = _normalize_rows(raw_rows)
     if not raw_rows:
         return [], []
-    for i, r in enumerate(raw_rows):
-        non_empty = sum(1 for c in r if c.strip())
-        if non_empty >= max(1, int(0.5 * len(r))):
-            return r, raw_rows[i + 1:]
-    return raw_rows[0], raw_rows[1:]
+
+    n_cols = max(len(r) for r in raw_rows)
+    rows = [list(r) + [""] * (n_cols - len(r)) for r in raw_rows]
+
+    header_rows: list[list[str]] = []
+    max_header_rows = min(4, len(rows) - 1)
+
+    for i in range(max_header_rows):
+        row = rows[i]
+        non_empty = sum(1 for c in row if c.strip())
+        if non_empty == 0:
+            continue
+
+        likelihood = _header_likelihood(row)
+
+        if i == 0:
+            header_rows.append(row)
+            continue
+
+        # Multi-level headers: e.g. Equipment Group / Standard Package / Mid
+        # Package, or vertical PCV labels that were normalized above.
+        if likelihood >= 0.58:
+            header_rows.append(row)
+            continue
+
+        break
+
+    if not header_rows:
+        header_rows = [rows[0]]
+
+    body = rows[len(header_rows):]
+    header = _combine_header_rows(header_rows, n_cols)
+
+    return header, body
 
 
 def _bboxes_overlap(b1, b2, tol: float = 5.0) -> bool:
