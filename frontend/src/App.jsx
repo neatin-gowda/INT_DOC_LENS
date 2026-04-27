@@ -78,11 +78,10 @@ const css = `
     border: 1px solid #b7ae9f;
     background: #f9f6ef;
     min-height: 520px;
-    max-height: min(78vh, 940px);
-    overflow: hidden;
+    overflow: visible;
   }
   .doc-frame.native {
-    overflow: auto;
+    overflow: visible;
     background: #f7f2e9;
   }
   .native-page {
@@ -175,9 +174,6 @@ const css = `
       grid-template-columns: 1fr !important;
     }
     .header-actions { justify-content: flex-start !important; }
-    .doc-frame {
-      max-height: 72vh;
-    }
   }
 `;
 
@@ -1386,6 +1382,7 @@ function TablesWorkspace({ runId }) {
   const [viewBusy, setViewBusy] = useState(false);
   const [diff, setDiff] = useState(null);
   const [compareBusy, setCompareBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
 
   useEffect(() => {
     setData(null);
@@ -1443,10 +1440,10 @@ function TablesWorkspace({ runId }) {
       try {
         const [basePayload, targetPayload] = await Promise.all([
           baseTable
-            ? fetchTableView(runId, "base", baseTable.id, unique([...baseRowColumns, ...baseValueColumns]), rowFilter)
+            ? fetchTableView(runId, "base", baseTable.id, unique([...baseRowColumns, ...baseValueColumns.filter((c) => !baseRowColumns.includes(c))]), rowFilter)
             : Promise.resolve(null),
           targetTable
-            ? fetchTableView(runId, "target", targetTable.id, unique([...targetRowColumns, ...targetValueColumns]), rowFilter)
+            ? fetchTableView(runId, "target", targetTable.id, unique([...targetRowColumns, ...targetValueColumns.filter((c) => !targetRowColumns.includes(c))]), rowFilter)
             : Promise.resolve(null),
         ]);
 
@@ -1476,6 +1473,17 @@ function TablesWorkspace({ runId }) {
     rowFilter,
   ]);
 
+  const tableComparePayload = () => ({
+    base_table_id: baseTableId,
+    target_table_id: targetTableId,
+    base_row_columns: baseRowColumns,
+    target_row_columns: targetRowColumns,
+    base_value_columns: baseValueColumns.filter((c) => !baseRowColumns.includes(c)),
+    target_value_columns: targetValueColumns.filter((c) => !targetRowColumns.includes(c)),
+    row_filter: rowFilter.trim() || null,
+    limit: 200,
+  });
+
   const compare = async () => {
     if (!baseTableId || !targetTableId) return;
 
@@ -1487,16 +1495,7 @@ function TablesWorkspace({ runId }) {
       const r = await fetch(`${API}/runs/${runId}/compare-table-columns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          base_table_id: baseTableId,
-          target_table_id: targetTableId,
-          base_row_columns: baseRowColumns,
-          target_row_columns: targetRowColumns,
-          base_value_columns: baseValueColumns,
-          target_value_columns: targetValueColumns,
-          row_filter: rowFilter.trim() || null,
-          limit: 200,
-        }),
+        body: JSON.stringify(tableComparePayload()),
       });
 
       if (!r.ok) throw new Error(await readResponseError(r));
@@ -1505,6 +1504,37 @@ function TablesWorkspace({ runId }) {
       setError(friendlyFetchError(err));
     } finally {
       setCompareBusy(false);
+    }
+  };
+
+  const exportTablePdf = async () => {
+    if (!baseTableId || !targetTableId || exportBusy) return;
+
+    setExportBusy(true);
+    setError("");
+
+    try {
+      const r = await fetch(`${API}/runs/${runId}/table-report.pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(tableComparePayload()),
+      });
+
+      if (!r.ok) throw new Error(await readResponseError(r));
+
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `table_comparison_${runId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(friendlyFetchError(err));
+    } finally {
+      setExportBusy(false);
     }
   };
 
@@ -1536,36 +1566,60 @@ function TablesWorkspace({ runId }) {
           title="Baseline columns"
           table={baseTable}
           rowColumns={baseRowColumns}
-          setRowColumns={setBaseRowColumns}
+          setRowColumns={(cols) => {
+            const clean = unique(cols);
+            setBaseRowColumns(clean);
+            setBaseValueColumns((prev) => prev.filter((c) => !clean.includes(c)));
+          }}
           valueColumns={baseValueColumns}
-          setValueColumns={setBaseValueColumns}
+          setValueColumns={(cols) => {
+            const clean = unique(cols).filter((c) => !baseRowColumns.includes(c));
+            setBaseValueColumns(clean);
+          }}
         />
         <ColumnConfig
           title="Revised columns"
           table={targetTable}
           rowColumns={targetRowColumns}
-          setRowColumns={setTargetRowColumns}
+          setRowColumns={(cols) => {
+            const clean = unique(cols);
+            setTargetRowColumns(clean);
+            setTargetValueColumns((prev) => prev.filter((c) => !clean.includes(c)));
+          }}
           valueColumns={targetValueColumns}
-          setValueColumns={setTargetValueColumns}
+          setValueColumns={(cols) => {
+            const clean = unique(cols).filter((c) => !targetRowColumns.includes(c));
+            setTargetValueColumns(clean);
+          }}
         />
       </div>
 
-      <div className="table-action-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
+      <div className="table-action-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
         <div>
-          <label style={labelStyle}>Optional row filter</label>
+          <label style={labelStyle}>Find rows in selected tables</label>
           <input
             value={rowFilter}
             onChange={(e) => setRowFilter(e.target.value)}
-            placeholder="Filter by feature, code, package, PCV, or any phrase from the row"
+            placeholder="Optional: type a feature, code, package, PCV, or phrase to narrow the rows"
             style={inputStyle}
           />
+          <div style={{ color: "#667085", fontSize: 12, marginTop: 5 }}>
+            Leave blank to compare all rows in the selected table slice.
+          </div>
         </div>
         <button
           onClick={compare}
           disabled={compareBusy || !baseTableId || !targetTableId}
           style={primaryButtonStyle(compareBusy || !baseTableId || !targetTableId, { height: 40 })}
         >
-          {compareBusy ? "Comparing" : "Compare selected tables"}
+          {compareBusy ? "Comparing" : "Apply & compare"}
+        </button>
+        <button
+          onClick={exportTablePdf}
+          disabled={exportBusy || !baseTableId || !targetTableId}
+          style={secondaryButtonStyle(exportBusy || !baseTableId || !targetTableId ? { height: 40, opacity: 0.65, cursor: "default" } : { height: 40 })}
+        >
+          {exportBusy ? "Exporting" : "Export PDF"}
         </button>
       </div>
 
@@ -1682,8 +1736,8 @@ function ColumnConfig({ title, table, rowColumns, setRowColumns, valueColumns, s
 
       <MultiSelect
         label="Value columns"
-        helper="Values to render and compare, such as PCV columns, packages, prices, marks, dots, stars, or status fields."
-        options={columns}
+        helper="Values to render and compare. Row/feature columns are excluded here to avoid duplicate output."
+        options={columns.filter((c) => !rowColumns.includes(c))}
         selected={valueColumns}
         onChange={setValueColumns}
       />
@@ -1816,6 +1870,13 @@ function TableColumnCompareResult({ diff }) {
         </div>
       )}
 
+      {diff.review_summary && (
+        <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontWeight: 650, marginBottom: 5 }}>Selected table review</div>
+          <div style={{ color: "#475467", fontSize: 13, lineHeight: 1.45 }}>{diff.review_summary}</div>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <StatChip label="Added rows" value={counts.ADDED || counts.added || 0} tone="added" />
         <StatChip label="Deleted rows" value={counts.DELETED || counts.deleted || 0} tone="deleted" />
@@ -1824,6 +1885,12 @@ function TableColumnCompareResult({ diff }) {
       </div>
 
       {alignment.length > 0 && <ColumnAlignment alignment={alignment} />}
+
+      {Array.isArray(diff.review_rows) && diff.review_rows.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <GenericRowsTable columns={diff.review_columns || ["Feature", "Change", "Seek Clarification"]} rows={diff.review_rows} />
+        </div>
+      )}
 
       <div className="table-selected-stack" style={{ marginTop: 14 }}>
         <SelectedTableView title="Baseline compared values" view={diff.base_preview} />
