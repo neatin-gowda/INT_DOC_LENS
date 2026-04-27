@@ -29,6 +29,19 @@ from .embeddings import embed_query, vector_literal
 from .models import Block, BlockDiff, ChangeType
 
 
+AI_ENV_NAMES = {
+    "endpoint": ("AZURE_OPENAI_ENDPOINT",),
+    "api_key": ("AZURE_OPENAI_API_KEY",),
+    "deployment": (
+        "AZURE_OPENAI_DEPLOYMENT",
+        "AZURE_OPENAI_CHAT_DEPLOYMENT",
+        "AZURE_OPENAI_DEPLOYMENT_NAME",
+        "AZURE_OPENAI_MODEL",
+    ),
+    "api_version": ("AZURE_OPENAI_API_VERSION",),
+}
+
+
 _KEY_RX = re.compile(r"\b([A-Z0-9]{2,6}[A-Z]?)\b")
 _NUMBER_RX = re.compile(r"\b\d{2,6}\b")
 _QUOTED_RX = re.compile(r"[\"']([^\"']{2,80})[\"']")
@@ -116,6 +129,67 @@ FEATURE_TABLE_TERMS = (
 
 def _norm(s: Any) -> str:
     return re.sub(r"\s+", " ", str(s or "").lower()).strip()
+
+
+def _env_first(names: tuple[str, ...], default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value.strip()
+    return default
+
+
+def _openai_config() -> dict[str, Any]:
+    endpoint = _env_first(AI_ENV_NAMES["endpoint"])
+    api_key = _env_first(AI_ENV_NAMES["api_key"])
+    deployment = _env_first(AI_ENV_NAMES["deployment"])
+    api_version = _env_first(AI_ENV_NAMES["api_version"], "2024-08-01-preview")
+    missing = []
+
+    if not endpoint:
+        missing.append("AZURE_OPENAI_ENDPOINT")
+    if not api_key:
+        missing.append("AZURE_OPENAI_API_KEY")
+    if not deployment:
+        missing.append("AZURE_OPENAI_DEPLOYMENT or AZURE_OPENAI_CHAT_DEPLOYMENT")
+
+    return {
+        "configured": not missing,
+        "missing": missing,
+        "endpoint_set": bool(endpoint),
+        "api_key_set": bool(api_key),
+        "deployment": deployment,
+        "api_version": api_version,
+    }
+
+
+def ai_health() -> dict[str, Any]:
+    status = _openai_config()
+    if not status["configured"]:
+        return {**status, "ok": False, "message": "Azure OpenAI chat is not fully configured."}
+
+    try:
+        from openai import AzureOpenAI
+
+        client = AzureOpenAI(
+            api_key=_env_first(AI_ENV_NAMES["api_key"]),
+            azure_endpoint=_env_first(AI_ENV_NAMES["endpoint"]),
+            api_version=status["api_version"],
+        )
+        resp = client.chat.completions.create(
+            model=status["deployment"],
+            messages=[
+                {"role": "system", "content": "Return JSON only."},
+                {"role": "user", "content": '{"ping":"ok"}'},
+            ],
+            temperature=0,
+            max_tokens=16,
+            response_format={"type": "json_object"},
+        )
+        content = resp.choices[0].message.content or ""
+        return {**status, "ok": True, "message": "Azure OpenAI chat call succeeded.", "sample": content[:120]}
+    except Exception as exc:
+        return {**status, "ok": False, "message": f"Azure OpenAI chat call failed: {type(exc).__name__}: {exc}"}
 
 
 def _preview(s: Any, limit: int = 360) -> str | None:
@@ -813,11 +887,12 @@ Question: {question}
 
 
 def llm_plan(nl: str) -> Optional[dict]:
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-    deploy = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+    config = _openai_config()
+    endpoint = _env_first(AI_ENV_NAMES["endpoint"])
+    api_key = _env_first(AI_ENV_NAMES["api_key"])
+    deploy = str(config.get("deployment") or "")
 
-    if not (endpoint and api_key and deploy):
+    if not config["configured"]:
         return None
 
     try:
@@ -826,7 +901,7 @@ def llm_plan(nl: str) -> Optional[dict]:
         client = AzureOpenAI(
             api_key=api_key,
             azure_endpoint=endpoint,
-            api_version="2024-08-01-preview",
+            api_version=str(config.get("api_version") or "2024-08-01-preview"),
         )
         resp = client.chat.completions.create(
             model=deploy,
@@ -1213,17 +1288,18 @@ Return strict JSON only with this schema:
 """
 
 
-def llm_freeform_answer(nl: str, rows: list[dict], semantic_rows: list[dict]) -> Optional[dict]:
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-    deploy = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+def llm_freeform_answer(nl: str, rows: list[dict], semantic_rows: list[dict]) -> tuple[Optional[dict], Optional[str]]:
+    config = _openai_config()
+    endpoint = _env_first(AI_ENV_NAMES["endpoint"])
+    api_key = _env_first(AI_ENV_NAMES["api_key"])
+    deploy = str(config.get("deployment") or "")
 
-    if not (endpoint and api_key and deploy):
-        return None
+    if not config["configured"]:
+        return None, "Azure OpenAI chat is not configured: missing " + ", ".join(config["missing"])
 
     evidence_rows = _curated_ai_evidence(rows, semantic_rows, limit=70)
     if not evidence_rows:
-        return None
+        return None, "No extracted/vector evidence was available to send to Azure OpenAI."
 
     try:
         from openai import AzureOpenAI
@@ -1231,7 +1307,7 @@ def llm_freeform_answer(nl: str, rows: list[dict], semantic_rows: list[dict]) ->
         client = AzureOpenAI(
             api_key=api_key,
             azure_endpoint=endpoint,
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
+            api_version=str(config.get("api_version") or "2024-08-01-preview"),
         )
         evidence = json.dumps(evidence_rows, ensure_ascii=False, default=str)
         resp = client.chat.completions.create(
@@ -1244,11 +1320,11 @@ def llm_freeform_answer(nl: str, rows: list[dict], semantic_rows: list[dict]) ->
             response_format={"type": "json_object"},
         )
         data = json.loads(resp.choices[0].message.content or "{}")
-    except Exception:
-        return None
+    except Exception as exc:
+        return None, f"Azure OpenAI chat call failed: {type(exc).__name__}: {exc}"
 
     if not isinstance(data, dict):
-        return None
+        return None, "Azure OpenAI returned a non-object response."
 
     answer = str(data.get("answer") or "").strip()
     llm_rows = data.get("rows") if isinstance(data.get("rows"), list) else []
@@ -1268,7 +1344,8 @@ def llm_freeform_answer(nl: str, rows: list[dict], semantic_rows: list[dict]) ->
         "confidence": data.get("confidence"),
         "presentation": "ai_table" if llm_rows or _wants_table_output(nl) else "ai_answer",
         "evidence_count": len(evidence_rows),
-    }
+        "ai_deployment": deploy,
+    }, None
 
 
 ANSWER_PROMPT = """\
@@ -1291,11 +1368,12 @@ Output strict JSON:
 
 
 def llm_answer(nl: str, rows: list[dict]) -> Optional[str]:
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-    deploy = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+    config = _openai_config()
+    endpoint = _env_first(AI_ENV_NAMES["endpoint"])
+    api_key = _env_first(AI_ENV_NAMES["api_key"])
+    deploy = str(config.get("deployment") or "")
 
-    if not (endpoint and api_key and deploy and rows):
+    if not (config["configured"] and rows):
         return None
 
     try:
@@ -1304,7 +1382,7 @@ def llm_answer(nl: str, rows: list[dict]) -> Optional[str]:
         client = AzureOpenAI(
             api_key=api_key,
             azure_endpoint=endpoint,
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
+            api_version=str(config.get("api_version") or "2024-08-01-preview"),
         )
         evidence = json.dumps(rows[:24], ensure_ascii=False, default=str)
         resp = client.chat.completions.create(
@@ -1395,11 +1473,13 @@ def query(
     rows = _merge_rows(rows, semantic_rows)
 
     if use_ai:
-        ai_result = llm_freeform_answer(nl, rows, semantic_rows)
+        ai_result, ai_error = llm_freeform_answer(nl, rows, semantic_rows)
         if ai_result:
             ai_result.update(
                 {
                     "mode": "ai",
+                    "ai_called": True,
+                    "ai_error": None,
                     "plan": plan,
                     "semantic_matches": len(semantic_rows),
                     "source_rows": len(rows),
@@ -1415,11 +1495,10 @@ def query(
             "semantic_matches": len(semantic_rows),
         }
         fallback["mode"] = "ai"
+        fallback["ai_called"] = False
         fallback["ai_unavailable"] = True
-        fallback["answer"] = (
-            "AI review mode could not call Azure OpenAI for this run, so I used the extracted comparison evidence instead. "
-            + str(fallback.get("answer") or "")
-        )
+        fallback["ai_error"] = ai_error or "Azure OpenAI did not return a usable response."
+        fallback["answer"] = f"AI Summarization could not call Azure OpenAI: {fallback['ai_error']}"
         return fallback
 
     if is_summary:
