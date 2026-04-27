@@ -1335,6 +1335,68 @@ def _wants_table_output(nl: str) -> bool:
     )
 
 
+def _is_out_of_scope_question(nl: str) -> bool:
+    q = _norm(nl)
+    if not q:
+        return True
+
+    casual_exact = {
+        "hi",
+        "hello",
+        "hey",
+        "how are you",
+        "how r u",
+        "who are you",
+        "what can you do",
+        "thank you",
+        "thanks",
+        "ok",
+        "okay",
+    }
+    if q in casual_exact:
+        return True
+
+    document_terms = (
+        "change",
+        "changed",
+        "compare",
+        "comparison",
+        "summary",
+        "summarize",
+        "table",
+        "row",
+        "column",
+        "cell",
+        "feature",
+        "clarification",
+        "citation",
+        "evidence",
+        "added",
+        "deleted",
+        "removed",
+        "modified",
+        "baseline",
+        "revised",
+        "previous",
+        "current",
+        "old",
+        "new",
+        "document",
+        "page",
+        "section",
+        "price",
+        "date",
+        "pcv",
+        "pcb",
+        "code",
+        "part",
+        "value",
+    )
+    identifier_like = bool(re.search(r"\b[A-Z]{1,8}[- ]?\d{2,12}[A-Z]?\b|\b\d{4,}\b", nl, re.I))
+
+    return not (identifier_like or any(term in q for term in document_terms))
+
+
 def _curated_ai_evidence(nl: str, rows: list[dict], semantic_rows: list[dict], limit: Optional[int] = None) -> list[dict]:
     limit = limit or _ai_evidence_limit(nl, rows)
     focused = _focused_identifier_rows(rows, nl, limit=max(40, min(100, limit // 2)))
@@ -1588,6 +1650,19 @@ def query(
     mode: str = "fast",
     response_language: str = "source",
 ) -> dict:
+    if _is_out_of_scope_question(nl):
+        return {
+            "answer": (
+                "I can only answer questions about the uploaded document comparison. "
+                "Ask about changes, evidence, tables, sections, pages, values, or summary."
+            ),
+            "rows": [],
+            "count": 0,
+            "plan": {"intent": "out_of_scope"},
+            "semantic_matches": 0,
+            "mode": _norm(mode) or "fast",
+        }
+
     table_result = _table_query_answer(nl, base_blocks, target_blocks)
     normalized_mode = _norm(mode) or "fast"
     use_ai = normalized_mode in {"ai", "openai", "llm", "agent"}
