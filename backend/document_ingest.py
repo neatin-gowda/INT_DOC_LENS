@@ -29,6 +29,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
+from rapidfuzz import fuzz
+
 from .models import Block, BlockType, TemplateProfile
 
 
@@ -179,6 +181,119 @@ def _row_text(payload: dict[str, str]) -> str:
         else:
             parts.append(f"{key}: {_clean(value)}")
     return " | ".join(parts)
+
+
+def _text_for_visual_match(block: Block) -> str:
+    parts = [block.text or "", block.stable_key or "", block.path or ""]
+
+    if isinstance(block.payload, dict):
+        for key, value in block.payload.items():
+            key = str(key)
+            if key.startswith("__") or key in {"page_width", "page_height", "source_extraction"}:
+                continue
+            if isinstance(value, list):
+                parts.extend(str(v or "") for v in value[:30])
+            elif isinstance(value, dict):
+                parts.extend(f"{k} {v}" for k, v in list(value.items())[:30])
+            else:
+                parts.append(str(value or ""))
+
+    return _clean(" ".join(parts))
+
+
+def _visual_match_score(native: Block, visual: Block) -> float:
+    native_text = _text_for_visual_match(native)
+    visual_text = _text_for_visual_match(visual)
+
+    if not native_text or not visual_text:
+        return 0.0
+
+    token_score = fuzz.token_set_ratio(native_text, visual_text) / 100.0
+    partial_score = fuzz.partial_ratio(native_text, visual_text) / 100.0
+    ratio_score = fuzz.ratio(native_text, visual_text) / 100.0
+    type_bonus = 0.06 if native.block_type == visual.block_type else 0.0
+
+    if native.stable_key and native.stable_key == visual.stable_key:
+        type_bonus += 0.12
+
+    return min(1.0, max(token_score, partial_score * 0.92, ratio_score * 0.85) + type_bonus)
+
+
+def _visual_candidates(native: Block, visual_blocks: list[Block]) -> list[Block]:
+    if native.block_type == BlockType.TABLE_ROW:
+        preferred = [b for b in visual_blocks if b.block_type == BlockType.TABLE_ROW and b.bbox]
+        if preferred:
+            return preferred
+
+    if native.block_type == BlockType.TABLE:
+        preferred = [b for b in visual_blocks if b.block_type == BlockType.TABLE and b.bbox]
+        if preferred:
+            return preferred
+
+    if native.block_type in {BlockType.SECTION, BlockType.HEADING}:
+        preferred = [
+            b for b in visual_blocks
+            if b.block_type in {BlockType.SECTION, BlockType.HEADING, BlockType.PARAGRAPH} and b.bbox
+        ]
+        if preferred:
+            return preferred
+
+    return [b for b in visual_blocks if b.bbox]
+
+
+def _attach_visual_bboxes(native_blocks: list[Block], visual_blocks: list[Block]) -> list[Block]:
+    """
+    Native Office extraction gives better semantic structure, but it has no PDF
+    coordinates. Match native blocks back to the converted PDF blocks so the
+    side-by-side viewer can still highlight meaningful regions.
+    """
+    if not native_blocks or not visual_blocks:
+        return native_blocks
+
+    used_visual: set[Any] = set()
+    by_type_threshold = {
+        BlockType.TABLE_ROW: 0.54,
+        BlockType.TABLE: 0.50,
+        BlockType.SECTION: 0.58,
+        BlockType.HEADING: 0.58,
+        BlockType.PARAGRAPH: 0.60,
+        BlockType.LIST_ITEM: 0.58,
+        BlockType.KV_PAIR: 0.58,
+    }
+
+    for block in native_blocks:
+        if block.bbox:
+            continue
+
+        candidates = _visual_candidates(block, visual_blocks)
+        best = None
+        best_score = 0.0
+
+        for candidate in candidates:
+            if candidate.id in used_visual and block.block_type != BlockType.TABLE:
+                continue
+
+            score = _visual_match_score(block, candidate)
+            if score > best_score:
+                best = candidate
+                best_score = score
+
+        threshold = by_type_threshold.get(block.block_type, 0.60)
+        if not best or best_score < threshold:
+            continue
+
+        block.bbox = best.bbox
+        block.page_number = best.page_number
+        if isinstance(best.payload, dict):
+            block.payload["page_width"] = best.payload.get("page_width", block.payload.get("page_width", 612))
+            block.payload["page_height"] = best.payload.get("page_height", block.payload.get("page_height", 792))
+        block.payload["visual_match_score"] = round(best_score, 3)
+        block.payload["visual_match_source"] = "converted_pdf"
+
+        if block.block_type != BlockType.TABLE:
+            used_visual.add(best.id)
+
+    return native_blocks
 
 
 def _block(
@@ -611,7 +726,8 @@ def extract_blocks_from_source(
         blocks = _extract_spreadsheet(source_path)
 
     if blocks:
-        return blocks
+        visual_blocks = pdf_extractor(str(pdf_path))
+        return _attach_visual_bboxes(blocks, visual_blocks)
 
     # DOC/legacy XLS or parser failure: use the converted PDF as a safe fallback.
     return pdf_extractor(str(pdf_path))
@@ -625,4 +741,3 @@ def coverage_for_source(source_path: Path, pdf_path: Path, blocks: list[Block], 
     if extracted > 0:
         return 100.0
     return 0.0
-
