@@ -19,6 +19,7 @@ import tempfile
 import threading
 import traceback
 import uuid
+from collections import defaultdict
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
@@ -853,6 +854,14 @@ def _native_row_payload(row: Block, fields_by_id: dict[Any, list[dict[str, Any]]
     }
 
 
+def _native_viewer_type(fmt: str | None) -> str:
+    if fmt == "spreadsheet":
+        return "spreadsheet"
+    if fmt == "word":
+        return "document"
+    return "structured"
+
+
 @app.get("/runs/{run_id}/native-page/{side}/{n}")
 def get_native_page(run_id: str, side: str, n: int):
     r = _ensure_complete(run_id)
@@ -864,17 +873,32 @@ def get_native_page(run_id: str, side: str, n: int):
     fmt = r.get("base_format") if side == "base" else r.get("target_format")
     change_by_id, fields_by_id = _native_change_maps(r, side)
 
-    table_ids_on_page = {
+    table_by_id = {
+        b.id: b for b in blocks
+        if b.block_type.value == "table"
+    }
+    rows_by_table_on_page: dict[Any, list[Block]] = defaultdict(list)
+
+    for row in blocks:
+        if row.block_type.value != "table_row":
+            continue
+        if row.page_number == n and row.parent_id in table_by_id:
+            rows_by_table_on_page[row.parent_id].append(row)
+
+    table_ids_rendered = {
         b.id for b in blocks
-        if b.page_number == n and b.block_type.value == "table"
+        if b.block_type.value == "table" and (b.page_number == n or b.id in rows_by_table_on_page)
     }
 
     items = []
     for block in sorted(blocks, key=lambda b: (b.page_number, b.sequence)):
-        if block.page_number != n:
+        if block.page_number != n and block.id not in rows_by_table_on_page:
             continue
 
-        if block.block_type.value == "table_row" and block.parent_id in table_ids_on_page:
+        if block.block_type.value == "table_row" and block.parent_id in table_ids_rendered:
+            continue
+
+        if block.block_type.value == "table_row":
             continue
 
         change_type = change_by_id.get(block.id)
@@ -891,16 +915,51 @@ def get_native_page(run_id: str, side: str, n: int):
         }
 
         if block.block_type.value == "table":
-            rows = _table_rows(block, blocks)
+            rows = rows_by_table_on_page.get(block.id) or [
+                row for row in _table_rows(block, blocks)
+                if row.page_number == n or row.page_number == block.page_number
+            ]
             header = _column_names(block, rows)
             item["header"] = header
             item["rows"] = [
                 _native_row_payload(row, fields_by_id, change_by_id)
                 for row in rows
-                if row.page_number == n or row.page_number == block.page_number
             ]
 
         items.append(item)
+
+    rendered_table_ids = {item["id"] for item in items if item.get("type") == "table"}
+    missing_table_ids = [
+        table_id for table_id in rows_by_table_on_page.keys()
+        if str(table_id) not in rendered_table_ids
+    ]
+
+    for table_id in missing_table_ids:
+        table = table_by_id.get(table_id)
+        if not table:
+            continue
+
+        rows = rows_by_table_on_page.get(table_id, [])
+        change_type = change_by_id.get(table.id)
+        header = _column_names(table, rows)
+        items.append(
+            {
+                "id": str(table.id),
+                "type": table.block_type.value,
+                "path": table.path,
+                "text": table.text,
+                "stable_key": table.stable_key,
+                "change_type": change_type.value if change_type else "UNCHANGED",
+                "highlight": _native_color(change_type),
+                "payload": _native_block_payload(table),
+                "field_diffs": fields_by_id.get(table.id, []),
+                "header": header,
+                "rows": [
+                    _native_row_payload(row, fields_by_id, change_by_id)
+                    for row in rows
+                ],
+            }
+        )
 
     max_native_page = max([b.page_number for b in blocks], default=1)
 
@@ -909,6 +968,7 @@ def get_native_page(run_id: str, side: str, n: int):
         "side": side,
         "format": fmt,
         "viewer": "native",
+        "viewer_type": _native_viewer_type(fmt),
         "max_page": max_native_page,
         "items": items,
     }
