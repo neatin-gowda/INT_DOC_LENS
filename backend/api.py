@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -60,6 +61,13 @@ _RUNS: dict[str, dict] = {}
 
 
 class CompareResponse(BaseModel):
+    run_id: str
+    status: str
+    status_message: str
+    progress: int
+
+
+class ExtractResponse(BaseModel):
     run_id: str
     status: str
     status_message: str
@@ -161,6 +169,21 @@ def _ensure_complete(run_id: str) -> dict:
     return r
 
 
+def _ensure_extraction_complete(run_id: str) -> dict:
+    r = _ensure_run(run_id)
+
+    if r.get("kind") != "extraction":
+        raise HTTPException(404, "no such extraction run")
+
+    if r.get("status") == "failed":
+        raise HTTPException(500, r.get("error", "Extraction failed"))
+
+    if r.get("status") != "complete":
+        raise HTTPException(409, r.get("status_message", "Extraction is still running"))
+
+    return r
+
+
 def _db_health_payload() -> dict:
     try:
         from .db import ping_db
@@ -218,6 +241,222 @@ def _persist_run_safely(
         return db_run_id, None
     except Exception:
         return None, traceback.format_exc()
+
+
+def _block_record(block: Block, *, include_payload: bool = True) -> dict[str, Any]:
+    payload = block.payload if isinstance(block.payload, dict) else {}
+    record = {
+        "id": str(block.id),
+        "parent_id": str(block.parent_id) if block.parent_id else None,
+        "type": block.block_type.value,
+        "path": block.path,
+        "stable_key": block.stable_key,
+        "page_number": block.page_number,
+        "bbox": block.bbox,
+        "text": block.text,
+        "sequence": block.sequence,
+    }
+    if include_payload:
+        record["payload"] = payload
+    return record
+
+
+def _extraction_summary(blocks: list[Block], coverage: float, page_count: int, source_format: str) -> dict[str, Any]:
+    counts: dict[str, int] = defaultdict(int)
+    table_count = 0
+    row_count = 0
+    figure_count = 0
+    text_chars = 0
+
+    for block in blocks:
+        counts[block.block_type.value] += 1
+        text_chars += len(block.text or "")
+        if block.block_type.value == "table":
+            table_count += 1
+        elif block.block_type.value == "table_row":
+            row_count += 1
+        elif block.block_type.value == "figure":
+            figure_count += 1
+
+    quality = "high"
+    if coverage < 65:
+        quality = "low"
+    elif coverage < 85:
+        quality = "medium"
+
+    return {
+        "source_format": source_format,
+        "page_count": page_count,
+        "coverage": coverage,
+        "quality": quality,
+        "block_counts": dict(counts),
+        "table_count": table_count,
+        "table_row_count": row_count,
+        "figure_count": figure_count,
+        "text_characters": text_chars,
+        "message": (
+            f"Extracted {len(blocks)} semantic block(s), {table_count} table(s), "
+            f"{row_count} table row(s), and {figure_count} image/figure block(s)."
+        ),
+    }
+
+
+def _curated_extraction_context(blocks: list[Block], limit_chars: int = 42000) -> str:
+    parts = []
+    used = 0
+
+    priority = {"section": 0, "heading": 1, "table": 2, "paragraph": 3, "kv_pair": 4, "list_item": 5, "figure": 6, "table_row": 7}
+    for block in sorted(blocks, key=lambda b: (priority.get(b.block_type.value, 9), b.page_number, b.sequence)):
+        payload = block.payload if isinstance(block.payload, dict) else {}
+        if block.block_type.value == "table":
+            header = payload.get("header") or []
+            rows = payload.get("rows") or []
+            text = f"Page {block.page_number} table {block.text or block.path}. Columns: {' | '.join(str(h) for h in header)}. Sample rows: {json.dumps(rows[:5], ensure_ascii=False, default=str)}"
+        elif block.block_type.value == "table_row":
+            continue
+        else:
+            text = f"Page {block.page_number} {block.block_type.value}: {block.text or payload.get('text') or ''}"
+
+        text = re.sub(r"\s+", " ", text).strip()
+        if not text:
+            continue
+        if used + len(text) > limit_chars:
+            break
+        parts.append(text)
+        used += len(text)
+
+    return "\n".join(parts)
+
+
+def _ai_extraction_summary(blocks: list[Block], summary: dict[str, Any]) -> Optional[dict[str, Any]]:
+    try:
+        from openai import AzureOpenAI
+    except Exception as exc:
+        return {"available": False, "error": f"Azure OpenAI library is unavailable: {exc}"}
+
+    endpoint = None
+    api_key = None
+    deployment = None
+    for name in ("AZURE_OPENAI_ENDPOINT",):
+        endpoint = endpoint or os.getenv(name)
+    for name in ("AZURE_OPENAI_API_KEY",):
+        api_key = api_key or os.getenv(name)
+    for name in ("AZURE_OPENAI_DEPLOYMENT", "AZURE_OPENAI_CHAT_DEPLOYMENT", "AZURE_OPENAI_DEPLOYMENT_NAME", "AZURE_OPENAI_MODEL"):
+        deployment = deployment or os.getenv(name)
+
+    if not (endpoint and api_key and deployment):
+        return {
+            "available": False,
+            "error": "Azure OpenAI is not configured. Set endpoint, API key, and chat deployment.",
+        }
+
+    context = _curated_extraction_context(blocks)
+    if not context:
+        return {"available": False, "error": "No extracted content was available for AI analysis."}
+
+    prompt = {
+        "document_stats": summary,
+        "extracted_context": context,
+    }
+
+    try:
+        client = AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
+        )
+        response = client.chat.completions.create(
+            model=deployment,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You analyze extracted document content only. "
+                        "Return concise JSON with keys: executive_summary, key_items, tables_found, "
+                        "quality_notes, recommended_review. Do not invent facts not present in context."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(prompt, ensure_ascii=False, default=str)},
+            ],
+            temperature=0.1,
+            max_tokens=1400,
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content or "{}"
+        return {"available": True, "result": json.loads(content)}
+    except Exception as exc:
+        return {"available": False, "error": f"Azure OpenAI extraction analysis failed: {type(exc).__name__}: {exc}"}
+
+
+def _process_extract(
+    run_id: str,
+    work: Path,
+    source: Path,
+    label: str,
+    use_ai: bool,
+) -> None:
+    try:
+        _set_run_status(run_id, "Preparing uploaded document", 12)
+
+        converted_dir = work / "converted"
+        pdf_path = normalize_to_pdf(source, converted_dir / "extract")
+        fmt = source_kind(source)
+
+        _RUNS[run_id].update(
+            {
+                "source": source,
+                "pdf": pdf_path,
+                "source_format": fmt,
+            }
+        )
+
+        _set_run_status(run_id, "Rendering preview pages", 24)
+        page_imgs = render_pages(str(pdf_path), str(work / "pages_extract"))
+        _RUNS[run_id]["page_imgs"] = page_imgs
+
+        _set_run_status(run_id, "Extracting text, tables, and image content", 48)
+        blocks = extract_blocks_from_source(source, pdf_path, extract_blocks)
+
+        _set_run_status(run_id, "Checking extraction coverage", 64)
+        coverage = coverage_for_source(source, pdf_path, blocks, coverage_pct)
+        summary = _extraction_summary(blocks, coverage, len(page_imgs), fmt)
+
+        ai_analysis = None
+        if use_ai:
+            _set_run_status(run_id, "Preparing AI-assisted document analysis", 78)
+            ai_analysis = _ai_extraction_summary(blocks, summary)
+
+        _set_run_status(run_id, "Finalizing extraction workspace", 92)
+
+        _RUNS[run_id].update(
+            {
+                "status": "complete",
+                "status_message": "Extraction complete",
+                "progress": 100,
+                "kind": "extraction",
+                "work": work,
+                "label": label,
+                "source": source,
+                "pdf": pdf_path,
+                "source_format": fmt,
+                "page_imgs": page_imgs,
+                "native_pages": _max_block_page(blocks),
+                "blocks": blocks,
+                "coverage": coverage,
+                "summary": summary,
+                "ai_analysis": ai_analysis,
+            }
+        )
+    except Exception as exc:
+        _RUNS[run_id].update(
+            {
+                "status": "failed",
+                "status_message": "Extraction failed",
+                "progress": _RUNS.get(run_id, {}).get("progress", 0),
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            }
+        )
 
 
 def _process_compare(
@@ -349,6 +588,12 @@ def root():
         "status": "ok",
         "name": "doculens-ai-agent",
         "endpoints": [
+            "POST /extract",
+            "GET /extract-runs/{id}",
+            "GET /extract-runs/{id}/blocks",
+            "GET /extract-runs/{id}/tables",
+            "GET /extract-runs/{id}/images",
+            "GET /extract-runs/{id}/json",
             "POST /compare",
             "GET /db-health",
             "GET /ai-health",
@@ -458,6 +703,176 @@ async def compare(
         status="queued",
         status_message="Documents uploaded. Comparison is starting.",
         progress=5,
+    )
+
+
+@app.post("/extract", response_model=ExtractResponse)
+async def extract_document(
+    document: UploadFile = File(..., description="Document or image to extract"),
+    use_ai: bool = Form(False),
+):
+    if not document.filename:
+        raise HTTPException(400, "Document file is required")
+
+    run_id = str(uuid.uuid4())
+    work = Path(tempfile.mkdtemp(prefix=f"doc_extract_{run_id}_"))
+    label = Path(document.filename).stem
+
+    _RUNS[run_id] = {
+        "kind": "extraction",
+        "status": "queued",
+        "status_message": "Uploading document",
+        "progress": 5,
+        "work": work,
+        "label": label,
+        "page_imgs": [],
+        "coverage": None,
+        "summary": {},
+        "supported_upload_formats": supported_input_extensions(),
+    }
+
+    try:
+        source = save_upload_to_source(document, work, "extract")
+        _RUNS[run_id].update(
+            {
+                "source": source,
+                "source_format": source_kind(source),
+            }
+        )
+    except Exception as exc:
+        _RUNS[run_id].update(
+            {
+                "status": "failed",
+                "status_message": "Could not save uploaded document",
+                "progress": 0,
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            }
+        )
+        raise HTTPException(500, "Could not save uploaded document")
+
+    worker = threading.Thread(
+        target=_process_extract,
+        args=(run_id, work, source, label, use_ai),
+        daemon=True,
+    )
+    worker.start()
+
+    return ExtractResponse(
+        run_id=run_id,
+        status="queued",
+        status_message="Document uploaded. Extraction is starting.",
+        progress=5,
+    )
+
+
+@app.get("/extract-runs/{run_id}")
+def extract_run_meta(run_id: str):
+    r = _ensure_run(run_id)
+
+    if r.get("kind") != "extraction":
+        raise HTTPException(404, "no such extraction run")
+
+    return {
+        "run_id": run_id,
+        "kind": "extraction",
+        "status": r.get("status", "running"),
+        "status_message": r.get("status_message", "Working"),
+        "progress": r.get("progress", 0),
+        "error": r.get("error"),
+        "traceback": r.get("traceback"),
+        "label": r.get("label"),
+        "source_format": r.get("source_format"),
+        "supported_upload_formats": supported_input_extensions(),
+        "coverage": r.get("coverage"),
+        "summary": r.get("summary", {}),
+        "ai_analysis": r.get("ai_analysis"),
+        "n_pages": len(r.get("page_imgs", [])),
+        "native_pages": r.get("native_pages") or _max_block_page(r.get("blocks", [])),
+    }
+
+
+@app.get("/extract-runs/{run_id}/pages/{n}")
+def get_extract_page(run_id: str, n: int):
+    r = _ensure_extraction_complete(run_id)
+    imgs = r.get("page_imgs", [])
+
+    if n < 1 or n > len(imgs):
+        raise HTTPException(404, "page out of range")
+
+    return FileResponse(imgs[n - 1], media_type="image/png")
+
+
+@app.get("/extract-runs/{run_id}/blocks")
+def get_extract_blocks(
+    run_id: str,
+    block_type: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: int = 500,
+):
+    r = _ensure_extraction_complete(run_id)
+    blocks = r.get("blocks", [])
+    out = []
+
+    for block in blocks:
+        if block_type and block.block_type.value != block_type:
+            continue
+        if page and block.page_number != page:
+            continue
+        out.append(_block_record(block, include_payload=True))
+        if len(out) >= max(1, min(limit, 2000)):
+            break
+
+    return {"blocks": out, "count": len(out), "total_blocks": len(blocks)}
+
+
+@app.get("/extract-runs/{run_id}/tables")
+def get_extract_tables(run_id: str, include_rows: bool = False):
+    r = _ensure_extraction_complete(run_id)
+    blocks = r.get("blocks", [])
+    tables = [
+        _table_matrix(block, blocks, include_rows=include_rows)
+        for block in blocks
+        if block.block_type.value == "table"
+    ]
+    return {"tables": tables, "count": len(tables)}
+
+
+@app.get("/extract-runs/{run_id}/images")
+def get_extract_images(run_id: str):
+    r = _ensure_extraction_complete(run_id)
+    figures = [
+        _block_record(block, include_payload=True)
+        for block in r.get("blocks", [])
+        if block.block_type.value == "figure"
+    ]
+    return {"images": figures, "count": len(figures)}
+
+
+@app.get("/extract-runs/{run_id}/json")
+def download_extract_json(run_id: str):
+    r = _ensure_extraction_complete(run_id)
+    blocks = r.get("blocks", [])
+    tables = [
+        _table_matrix(block, blocks, include_rows=True)
+        for block in blocks
+        if block.block_type.value == "table"
+    ]
+    payload = {
+        "run_id": run_id,
+        "label": r.get("label"),
+        "source_format": r.get("source_format"),
+        "coverage": r.get("coverage"),
+        "summary": r.get("summary", {}),
+        "ai_analysis": r.get("ai_analysis"),
+        "blocks": [_block_record(block, include_payload=True) for block in blocks],
+        "tables": tables,
+    }
+    filename = f"document_extraction_{run_id}.json"
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
