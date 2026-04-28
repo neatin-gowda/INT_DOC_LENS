@@ -32,6 +32,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
+import fitz
 from rapidfuzz import fuzz
 
 from .models import Block, BlockType, TemplateProfile
@@ -39,6 +40,13 @@ from .models import Block, BlockType, TemplateProfile
 
 SUPPORTED_INPUT_EXTENSIONS = {
     ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".tif",
+    ".tiff",
+    ".bmp",
+    ".webp",
     ".docx",
     ".doc",
     ".xlsx",
@@ -50,6 +58,7 @@ SUPPORTED_INPUT_EXTENSIONS = {
 
 WORD_EXTENSIONS = {".docx", ".doc"}
 SPREADSHEET_EXTENSIONS = {".xlsx", ".xlsm", ".xls", ".csv", ".tsv"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 
 
 def supported_input_extensions() -> list[str]:
@@ -60,6 +69,8 @@ def source_kind(path: str | Path) -> str:
     ext = Path(path).suffix.lower()
     if ext == ".pdf":
         return "pdf"
+    if ext in IMAGE_EXTENSIONS:
+        return "image"
     if ext in WORD_EXTENSIONS:
         return "word"
     if ext in SPREADSHEET_EXTENSIONS:
@@ -377,6 +388,22 @@ def normalize_to_pdf(source_path: Path, out_dir: Path) -> Path:
 
     if source_path.suffix.lower() == ".pdf":
         return source_path
+
+    if source_path.suffix.lower() in IMAGE_EXTENSIONS:
+        pdf_path = out_dir / f"{source_path.stem}.pdf"
+        try:
+            img_doc = fitz.open(str(source_path))
+            pdf_bytes = img_doc.convert_to_pdf()
+            img_doc.close()
+            pdf_doc = fitz.open("pdf", pdf_bytes)
+            pdf_doc.save(str(pdf_path))
+            pdf_doc.close()
+        except Exception as exc:
+            raise RuntimeError(f"Image conversion to PDF failed: {exc}") from exc
+
+        if not pdf_path.exists():
+            raise RuntimeError("Image conversion to PDF failed because no PDF was produced.")
+        return pdf_path
 
     soffice = _find_libreoffice()
     if not soffice:
@@ -719,7 +746,7 @@ def extract_blocks_from_source(
     """
     ext = source_path.suffix.lower()
 
-    if ext == ".pdf":
+    if ext in {".pdf", *IMAGE_EXTENSIONS}:
         return pdf_extractor(str(pdf_path))
 
     blocks: list[Block] = []
