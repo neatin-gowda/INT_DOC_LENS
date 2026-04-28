@@ -41,6 +41,8 @@ from .document_ingest import (
     source_kind,
     supported_input_extensions,
 )
+from .extraction.runner import enrich_blocks, extraction_intelligence_summary
+from .extraction.registry import list_providers
 from .extractor_v2 import coverage_pct, extract_blocks_v2 as extract_blocks, render_pages
 from .models import Block, ChangeType
 from .query import ai_health, query as nl_query
@@ -288,11 +290,18 @@ def _extraction_summary(blocks: list[Block], coverage: float, page_count: int, s
     elif coverage < 85:
         quality = "medium"
 
+    intelligence = extraction_intelligence_summary(
+        blocks,
+        coverage=coverage,
+        source_format=source_format,
+    )
+
     return {
         "source_format": source_format,
         "page_count": page_count,
         "coverage": coverage,
         "quality": quality,
+        "intelligence": intelligence,
         "block_counts": dict(counts),
         "table_count": table_count,
         "table_row_count": row_count,
@@ -679,6 +688,11 @@ def _structured_extraction_json(r: dict, run_id: str) -> dict[str, Any]:
 
     return {
         "run_id": run_id,
+        "intelligence": extraction_intelligence_summary(
+            blocks,
+            coverage=r.get("coverage"),
+            source_format=r.get("source_format") or "",
+        ),
         "documents": r.get("documents") or [
             {
                 "label": r.get("label"),
@@ -830,6 +844,13 @@ def _process_extract(
 
             _set_run_status(run_id, f"Checking extraction coverage for {source_label}", min(76, progress_base + 38))
             coverage = coverage_for_source(source, pdf_path, blocks, coverage_pct)
+            enrich_blocks(
+                blocks,
+                source_path=source,
+                source_format=fmt,
+                document_label=source_label,
+                coverage=coverage,
+            )
             coverages.append(coverage)
             documents_meta.append(
                 {
@@ -943,6 +964,20 @@ def _process_compare(
 
         cov_b = coverage_for_source(base_source, base_pdf, base_blocks, coverage_pct)
         cov_t = coverage_for_source(target_source, target_pdf, target_blocks, coverage_pct)
+        enrich_blocks(
+            base_blocks,
+            source_path=base_source,
+            source_format=source_kind(base_source),
+            document_label=base_label,
+            coverage=cov_b,
+        )
+        enrich_blocks(
+            target_blocks,
+            source_path=target_source,
+            source_format=source_kind(target_source),
+            document_label=target_label,
+            coverage=cov_t,
+        )
 
         _set_run_status(run_id, "Comparing semantic changes", 64)
 
@@ -1050,6 +1085,11 @@ def root():
             "POST /runs/{id}/table-report.pdf",
         ],
         "supported_upload_formats": supported_input_extensions(),
+        "extraction_intelligence": {
+            "mode": "local_deterministic",
+            "external_services_required": False,
+            "providers": list_providers(),
+        },
     }
 
 
@@ -2167,6 +2207,12 @@ def _column_quality(columns: list[str]) -> float:
 
 def _table_title(table: Block, rows: Optional[list[Block]] = None) -> str:
     payload = _safe_payload(table)
+    intelligence = payload.get("extraction_intelligence") if isinstance(payload.get("extraction_intelligence"), dict) else {}
+    table_quality = intelligence.get("table_quality") if isinstance(intelligence.get("table_quality"), dict) else {}
+
+    quality_title = _display_text(table_quality.get("title"), 160)
+    if quality_title:
+        return quality_title
 
     for key in ("table_title", "title", "caption"):
         value = _display_text(payload.get(key), 160)
@@ -2417,11 +2463,17 @@ def _guess_value_columns(columns: list[str], row_columns: list[str]) -> list[str
 
 def _column_details(columns: list[str], rows: list[Block], table: Optional[Block] = None) -> list[dict]:
     details = []
+    payload = _safe_payload(table) if table else {}
+    profile_by_name = {}
+    for profile in payload.get("column_profiles", []) if isinstance(payload.get("column_profiles"), list) else []:
+        if isinstance(profile, dict):
+            profile_by_name[str(profile.get("name") or "")] = profile
 
     for col in columns:
         non_empty = 0
         samples = []
         distinct = set()
+        profile = profile_by_name.get(col) or {}
 
         for row in rows[:120]:
             value = _display_text(_row_values_for_table(table, row, columns).get(col), 120)
@@ -2440,6 +2492,9 @@ def _column_details(columns: list[str], rows: list[Block], table: Optional[Block
                 "non_empty": non_empty,
                 "distinct_count": len(distinct),
                 "sample_values": samples,
+                "semantic_role": profile.get("semantic_role"),
+                "value_type_hint": profile.get("value_type_hint"),
+                "confidence": profile.get("confidence"),
             }
         )
 
@@ -2453,6 +2508,8 @@ def _table_matrix(table: Block, blocks: list[Block], include_rows: bool = False)
     value_columns = _guess_value_columns(columns, row_label_columns)
     pages = _table_pages(table)
     payload = _safe_payload(table)
+    intelligence = payload.get("extraction_intelligence") if isinstance(payload.get("extraction_intelligence"), dict) else {}
+    table_quality = intelligence.get("table_quality") if isinstance(intelligence.get("table_quality"), dict) else {}
     header_preview = " | ".join(str(h)[:40] for h in columns[:8])
 
     matrix = {
@@ -2473,6 +2530,11 @@ def _table_matrix(table: Block, blocks: list[Block], include_rows: bool = False)
         "header_preview": header_preview,
         "header_source": payload.get("header_sources", [None])[0] if isinstance(payload.get("header_sources"), list) and payload.get("header_sources") else None,
         "header_quality": round(_column_quality(columns), 2),
+        "extraction_confidence": payload.get("extraction_confidence") or table_quality.get("confidence"),
+        "quality_warnings": payload.get("quality_warnings") or table_quality.get("warnings") or [],
+        "table_fingerprint": payload.get("table_fingerprint") or (table_quality.get("fingerprint") or {}).get("fingerprint"),
+        "column_profiles": payload.get("column_profiles") or table_quality.get("columns") or [],
+        "intelligence": intelligence,
         "suggested_row_columns": row_label_columns,
         "suggested_value_columns": value_columns,
         "row_keys": [_row_key_for_table(table, r, row_label_columns) for r in rows[:150]],
