@@ -51,13 +51,14 @@ SUPPORTED_INPUT_EXTENSIONS = {
     ".doc",
     ".xlsx",
     ".xlsm",
+    ".xlsb",
     ".xls",
     ".csv",
     ".tsv",
 }
 
 WORD_EXTENSIONS = {".docx", ".doc"}
-SPREADSHEET_EXTENSIONS = {".xlsx", ".xlsm", ".xls", ".csv", ".tsv"}
+SPREADSHEET_EXTENSIONS = {".xlsx", ".xlsm", ".xlsb", ".xls", ".csv", ".tsv"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 
 
@@ -183,6 +184,125 @@ def _row_payload(header: list[str], row: list[str]) -> dict[str, str]:
         payload[key] = _clean(row[i]) if i < len(row) else ""
 
     return payload
+
+
+def _filled_count(row: list[str]) -> int:
+    return sum(1 for cell in row if _clean(cell))
+
+
+def _looks_like_header_row(row: list[str], body_sample: list[list[str]], n_cols: int) -> bool:
+    filled = _filled_count(row)
+    if filled == 0:
+        return False
+
+    low_text = " ".join(_clean(cell).lower() for cell in row)
+    header_terms = (
+        "feature",
+        "description",
+        "item",
+        "code",
+        "number",
+        "no",
+        "pcv",
+        "pcb",
+        "package",
+        "model",
+        "series",
+        "option",
+        "value",
+        "status",
+        "price",
+        "date",
+        "qty",
+        "quantity",
+        "size",
+        "color",
+        "colour",
+        "remarks",
+        "comments",
+    )
+    if any(term in low_text for term in header_terms):
+        return True
+
+    non_numeric = sum(
+        1
+        for cell in row
+        if _clean(cell) and not re.fullmatch(r"[-+]?[$€£]?\d[\d,]*(?:\.\d+)?%?", _clean(cell))
+    )
+    body_filled = [_filled_count(sample) for sample in body_sample if _filled_count(sample)]
+    avg_body_filled = (sum(body_filled) / len(body_filled)) if body_filled else filled
+
+    if n_cols >= 4 and filled <= max(2, int(n_cols * 0.45)) and non_numeric >= 1:
+        return True
+    if filled >= 2 and non_numeric >= max(1, filled - 1) and filled <= avg_body_filled + 1:
+        return True
+    return False
+
+
+def _merge_header_rows(header_rows: list[list[str]], n_cols: int) -> list[str]:
+    merged: list[str] = []
+    previous = ""
+
+    for col in range(n_cols):
+        parts = []
+        last = ""
+        for row in header_rows:
+            value = _clean(row[col] if col < len(row) else "")
+            if not value:
+                continue
+            if value == last:
+                continue
+            parts.append(value)
+            last = value
+
+        name = " / ".join(parts).strip()
+        if not name:
+            name = f"Column {col + 1}"
+        if name == previous and len(parts) == 1:
+            name = f"{name} {col + 1}"
+        previous = name
+        merged.append(name[:140])
+
+    return merged
+
+
+def _detect_header_band(normalized_rows: list[list[str]], n_cols: int) -> tuple[list[str], list[list[str]], list[list[str]], int, str]:
+    """
+    Detect one or more header rows and merge nested headers into stable column
+    names. This handles spreadsheets/PDF-derived tables where a group header
+    spans several value columns or where the visible header is split over
+    multiple rows.
+    """
+    if not normalized_rows:
+        return [], [], [], 0, "empty"
+
+    header_start = 0
+    for idx, row in enumerate(normalized_rows[:12]):
+        if _filled_count(row) >= max(1, min(2, n_cols)):
+            header_start = idx
+            break
+
+    body_sample = normalized_rows[header_start + 1 : header_start + 8]
+    header_count = 1
+    for offset in range(1, min(4, len(normalized_rows) - header_start)):
+        row = normalized_rows[header_start + offset]
+        next_body = normalized_rows[header_start + offset + 1 : header_start + offset + 6]
+        if _looks_like_header_row(row, next_body or body_sample, n_cols):
+            header_count += 1
+        else:
+            break
+
+    header_rows = normalized_rows[header_start : header_start + header_count]
+    header = _merge_header_rows(header_rows, n_cols)
+    body_rows = normalized_rows[header_start + header_count :]
+
+    if not body_rows:
+        body_rows = normalized_rows[header_start + 1 :] if len(normalized_rows) > header_start + 1 else normalized_rows
+        header_rows = [normalized_rows[header_start]]
+        header = [_header_name(cell, i) for i, cell in enumerate(normalized_rows[header_start])]
+        header_count = 1
+
+    return header, body_rows, header_rows, header_start, "nested_header" if header_count > 1 else "single_header"
 
 
 def _row_text(payload: dict[str, str]) -> str:
@@ -536,13 +656,16 @@ def _extract_docx(source_path: Path) -> list[Block]:
 
             n_cols = max(len(row) for row in rows)
             normalized_rows = [row + [""] * (n_cols - len(row)) for row in rows]
-            header = [_header_name(cell, i) for i, cell in enumerate(normalized_rows[0])]
-            body_rows = normalized_rows[1:] if len(normalized_rows) > 1 else normalized_rows
+            header, body_rows, header_rows, header_index, header_strategy = _detect_header_band(normalized_rows, n_cols)
 
             base_path = current_section.path if current_section else "/document"
             table_title = _clean(current_section.text if current_section else "") or f"Table {len([b for b in blocks if b.block_type == BlockType.TABLE]) + 1}"
             table_payload = {
                 "header": header,
+                "header_rows": header_rows,
+                "header_row_count": len(header_rows),
+                "header_index": header_index,
+                "header_strategy": header_strategy,
                 "rows": body_rows,
                 "spans_pages": [_page_for_sequence(seq)],
                 "table_title": table_title,
@@ -622,6 +745,25 @@ def _sheet_rows_from_xls(source_path: Path) -> Iterable[tuple[str, list[list[str
     return out
 
 
+def _sheet_rows_from_xlsb(source_path: Path) -> Iterable[tuple[str, list[list[str]]]]:
+    try:
+        from pyxlsb import open_workbook
+    except Exception:
+        return []
+
+    out = []
+    with open_workbook(str(source_path)) as workbook:
+        for sheet_name in workbook.sheets:
+            rows = []
+            with workbook.get_sheet(sheet_name) as sheet:
+                for raw_row in sheet.rows():
+                    row = [_clean(cell.v if cell is not None else "") for cell in raw_row]
+                    if any(row):
+                        rows.append(row)
+            out.append((sheet_name, rows))
+    return out
+
+
 def _sheet_rows_from_csv(source_path: Path) -> Iterable[tuple[str, list[list[str]]]]:
     delimiter = "\t" if source_path.suffix.lower() == ".tsv" else ","
     rows = []
@@ -640,6 +782,8 @@ def _extract_spreadsheet(source_path: Path) -> list[Block]:
     try:
         if ext in {".xlsx", ".xlsm"}:
             sheets = list(_sheet_rows_from_openpyxl(source_path))
+        elif ext == ".xlsb":
+            sheets = list(_sheet_rows_from_xlsb(source_path))
         elif ext == ".xls":
             sheets = list(_sheet_rows_from_xls(source_path))
         else:
@@ -658,14 +802,7 @@ def _extract_spreadsheet(source_path: Path) -> list[Block]:
         n_cols = max(len(row) for row in rows)
         normalized_rows = [row + [""] * (n_cols - len(row)) for row in rows]
 
-        header_index = 0
-        for idx, row in enumerate(normalized_rows[:10]):
-            if sum(1 for cell in row if _clean(cell)) >= max(1, min(2, n_cols)):
-                header_index = idx
-                break
-
-        header = [_header_name(cell, i) for i, cell in enumerate(normalized_rows[header_index])]
-        body_rows = normalized_rows[header_index + 1 :] if len(normalized_rows) > header_index + 1 else normalized_rows
+        header, body_rows, header_rows, header_index, header_strategy = _detect_header_band(normalized_rows, n_cols)
 
         sheet_slug = _slug(sheet_name, f"sheet_{seq}")
         section = _block(
@@ -685,6 +822,10 @@ def _extract_spreadsheet(source_path: Path) -> list[Block]:
 
         table_payload = {
             "header": header,
+            "header_rows": header_rows,
+            "header_row_count": len(header_rows),
+            "header_index": header_index,
+            "header_strategy": header_strategy,
             "rows": body_rows,
             "spans_pages": [_page_for_sequence(seq, 55)],
             "table_title": sheet_name,
