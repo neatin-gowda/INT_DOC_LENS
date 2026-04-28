@@ -305,6 +305,48 @@ def _detect_header_band(normalized_rows: list[list[str]], n_cols: int) -> tuple[
     return header, body_rows, header_rows, header_start, "nested_header" if header_count > 1 else "single_header"
 
 
+def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
+    """
+    Word documents often use borderless tables for layout: bilingual text,
+    signatures, clauses in two languages, or side-by-side notes. Those should
+    render as document content, not as data tables.
+    """
+    if n_cols < 2 or n_cols > 3 or len(rows) < 2:
+        return False
+
+    filled_rows = [row for row in rows if _filled_count(row) >= 1]
+    if not filled_rows:
+        return False
+
+    long_cell_count = 0
+    short_code_count = 0
+    numeric_like_count = 0
+    total_cells = 0
+    headerish_terms = 0
+
+    for row in filled_rows[:12]:
+        for cell in row[:n_cols]:
+            text = _clean(cell)
+            if not text:
+                continue
+            total_cells += 1
+            if len(text) > 45 or len(text.split()) >= 7:
+                long_cell_count += 1
+            if _looks_like_identifier(text):
+                short_code_count += 1
+            if re.fullmatch(r"[-+]?[$€£]?\d[\d,]*(?:\.\d+)?%?", text):
+                numeric_like_count += 1
+            if re.search(r"\b(feature|item|code|pcv|pcb|qty|quantity|price|status|value)\b", text, re.I):
+                headerish_terms += 1
+
+    if total_cells == 0:
+        return False
+
+    long_ratio = long_cell_count / total_cells
+    structured_ratio = (short_code_count + numeric_like_count + headerish_terms) / total_cells
+    return long_ratio >= 0.35 and structured_ratio < 0.35
+
+
 def _row_text(payload: dict[str, str]) -> str:
     parts = []
     for key, value in payload.items():
@@ -656,6 +698,31 @@ def _extract_docx(source_path: Path) -> list[Block]:
 
             n_cols = max(len(row) for row in rows)
             normalized_rows = [row + [""] * (n_cols - len(row)) for row in rows]
+
+            if _looks_like_layout_table(normalized_rows, n_cols):
+                base_path = current_section.path if current_section else "/document"
+                for ri, row in enumerate(normalized_rows):
+                    row_text = " / ".join(_clean(cell) for cell in row if _clean(cell))
+                    if not row_text:
+                        continue
+                    block = _block(
+                        parent_id=current_section.id if current_section else None,
+                        block_type=BlockType.PARAGRAPH,
+                        path=f"{base_path}/layout_{seq}",
+                        text=row_text,
+                        payload={
+                            "text": row_text,
+                            "source_format": "docx",
+                            "layout_table": True,
+                            "layout_columns": [_clean(cell) for cell in row if _clean(cell)],
+                        },
+                        sequence=seq,
+                        page_number=_page_for_sequence(seq),
+                    )
+                    blocks.append(block)
+                    seq += 1
+                continue
+
             header, body_rows, header_rows, header_index, header_strategy = _detect_header_band(normalized_rows, n_cols)
 
             base_path = current_section.path if current_section else "/document"
