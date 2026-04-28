@@ -78,10 +78,11 @@ const css = `
     border: 1px solid #b7ae9f;
     background: #f9f6ef;
     min-height: 520px;
-    overflow: visible;
+    max-height: calc(100vh - 290px);
+    overflow: auto;
   }
   .doc-frame.native {
-    overflow: visible;
+    overflow: auto;
     background: #f7f2e9;
   }
   .native-page {
@@ -104,6 +105,23 @@ const css = `
   .native-block {
     max-width: 100%;
     overflow-wrap: anywhere;
+  }
+  .native-token {
+    border-radius: 4px;
+    padding: 0 2px;
+  }
+  .native-token-delete,
+  .native-token-replace-base {
+    color: #9f2525;
+    background: rgba(218,54,54,.12);
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+  .native-token-insert,
+  .native-token-replace-target {
+    color: #176c38;
+    background: rgba(31,160,70,.13);
+    font-weight: 650;
   }
   .native-table-wrap {
     max-width: 100%;
@@ -210,6 +228,45 @@ export default function App() {
   const [extractBusy, setExtractBusy] = useState(false);
   const [extractError, setExtractError] = useState("");
   const [extractTab, setExtractTab] = useState("overview");
+
+  const resetAll = () => {
+    setWorkspace("home");
+    setRunId(null);
+    setMeta(null);
+    setPageNum(1);
+    setTab("viewer");
+    setError("");
+    setBusy(false);
+    setExtractRunId(null);
+    setExtractMeta(null);
+    setExtractBusy(false);
+    setExtractError("");
+    setExtractTab("overview");
+  };
+
+  const goWorkspace = (nextWorkspace) => {
+    if (nextWorkspace === "home") {
+      resetAll();
+    } else {
+      setWorkspace(nextWorkspace);
+      setError("");
+      setExtractError("");
+    }
+
+    if (typeof window !== "undefined" && window.history?.pushState) {
+      window.history.pushState({ doculensWorkspace: nextWorkspace }, "", window.location.href);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.history?.replaceState) return undefined;
+
+    window.history.replaceState({ doculensWorkspace: "home" }, "", window.location.href);
+    const onPopState = () => resetAll();
+    window.addEventListener("popstate", onPopState);
+
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   useEffect(() => {
     if (!runId || !busy) return;
@@ -354,10 +411,10 @@ export default function App() {
     e.preventDefault();
 
     const form = new FormData(e.currentTarget);
-    const document = form.get("document");
+    const documents = form.getAll("document").filter((file) => file && file.name);
 
-    if (!document || !document.name) {
-      setExtractError("Please select a PDF or image before starting extraction.");
+    if (!documents.length) {
+      setExtractError("Please select at least one document, spreadsheet, PDF, or image before starting extraction.");
       return;
     }
 
@@ -392,21 +449,6 @@ export default function App() {
     }
   };
 
-  const startOver = () => {
-    setWorkspace("home");
-    setRunId(null);
-    setMeta(null);
-    setPageNum(1);
-    setTab("viewer");
-    setError("");
-    setBusy(false);
-    setExtractRunId(null);
-    setExtractMeta(null);
-    setExtractBusy(false);
-    setExtractError("");
-    setExtractTab("overview");
-  };
-
   const downloadReport = () => {
     if (runId) window.location.href = `${API}/runs/${runId}/report.pdf`;
   };
@@ -421,20 +463,20 @@ export default function App() {
         <Header
           runId={isComplete ? runId : null}
           workspace={workspace}
-          onStartOver={startOver}
+          onStartOver={() => goWorkspace("home")}
           onDownloadReport={downloadReport}
         />
 
         {workspace === "home" && !isComplete && !isExtractComplete && (
           <LandingPage
-            onExtract={() => setWorkspace("extract")}
-            onCompare={() => setWorkspace("compare")}
+            onExtract={() => goWorkspace("extract")}
+            onCompare={() => goWorkspace("compare")}
           />
         )}
 
         {workspace === "compare" && !isComplete && (
           <section style={{ ...panelStyle, padding: 22, marginBottom: 16 }}>
-            <UploadPanel onUpload={onUpload} busy={busy} />
+            <UploadPanel onUpload={onUpload} busy={busy} onBack={() => goWorkspace("home")} />
             {busy && meta && (
               <ProcessingState
                 progress={meta.progress || 0}
@@ -448,7 +490,7 @@ export default function App() {
 
         {workspace === "extract" && !isExtractComplete && (
           <section style={{ ...panelStyle, padding: 22, marginBottom: 16 }}>
-            <ExtractUploadPanel onUpload={onExtractUpload} busy={extractBusy} />
+            <ExtractUploadPanel onUpload={onExtractUpload} busy={extractBusy} onBack={() => goWorkspace("home")} />
             {extractBusy && extractMeta && (
               <ProcessingState
                 progress={extractMeta.progress || 0}
@@ -538,14 +580,14 @@ function LandingPage({ onExtract, onCompare }) {
       <div style={{ marginBottom: 18 }}>
         <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Choose a workspace</h2>
         <p style={{ margin: "7px 0 0", color: "#667085", fontSize: 14 }}>
-          Use extraction when you want to inspect one file. Use comparison when you want to review old vs revised versions.
+          Use extraction when you want to inspect one or more files. Use comparison when you want to review old vs revised versions.
         </p>
       </div>
 
       <div className="two-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <WorkspaceCard
-          title="Extract a document"
-          description="Upload one PDF or image and review extracted text, tables, image/OCR content, extraction coverage, JSON, and optional AI analysis."
+          title="Extract documents"
+          description="Upload PDFs, images, Word files, spreadsheets, xlsb workbooks, CSV, or TSV and review extracted text, tables, image/OCR content, coverage, JSON, and optional AI analysis."
           action="Start extraction"
           onClick={onExtract}
         />
@@ -582,9 +624,19 @@ function WorkspaceCard({ title, description, action, onClick }) {
   );
 }
 
-function UploadPanel({ onUpload, busy }) {
+function UploadPanel({ onUpload, busy, onBack }) {
   return (
     <form onSubmit={onUpload}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontWeight: 650 }}>Compare two documents</div>
+          <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }}>Keep the existing side-by-side visual review, table workspace, Ask Agent, and reports.</div>
+        </div>
+        <button type="button" onClick={onBack} disabled={busy} style={secondaryButtonStyle(busy ? { opacity: 0.65, cursor: "default" } : {})}>
+          Back to workspaces
+        </button>
+      </div>
+
       <div
         className="upload-grid"
         style={{
@@ -635,9 +687,19 @@ function UploadPanel({ onUpload, busy }) {
   );
 }
 
-function ExtractUploadPanel({ onUpload, busy }) {
+function ExtractUploadPanel({ onUpload, busy, onBack }) {
   return (
     <form onSubmit={onUpload}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontWeight: 650 }}>Extract documents</div>
+          <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }}>Upload one or more files and review extracted text, tables, OCR content, and structured JSON output.</div>
+        </div>
+        <button type="button" onClick={onBack} disabled={busy} style={secondaryButtonStyle(busy ? { opacity: 0.65, cursor: "default" } : {})}>
+          Back to workspaces
+        </button>
+      </div>
+
       <div
         className="upload-grid"
         style={{
@@ -649,9 +711,10 @@ function ExtractUploadPanel({ onUpload, busy }) {
       >
         <FileInput
           label="Document or image"
-          helper="PDF or image for extraction. Other document formats can be enabled through the same pipeline."
+          helper="PDF, image, Word, Excel, xlsb, CSV, or TSV. Multiple files can be extracted together."
           name="document"
           disabled={busy}
+          multiple
         />
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -692,7 +755,7 @@ function ExtractUploadPanel({ onUpload, busy }) {
   );
 }
 
-function FileInput({ label, helper, name, disabled }) {
+function FileInput({ label, helper, name, disabled, multiple = false }) {
   const [fileName, setFileName] = useState("");
   const inputRef = useRef(null);
 
@@ -722,11 +785,15 @@ function FileInput({ label, helper, name, disabled }) {
         ref={inputRef}
         type="file"
         name={name}
-        accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.doc,.docx,.xls,.xlsx,.xlsm,.csv,.tsv,application/pdf,image/png,image/jpeg,image/tiff,image/bmp,image/webp,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/tab-separated-values"
+        accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,application/pdf,image/png,image/jpeg,image/tiff,image/bmp,image/webp,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.ms-excel.sheet.binary.macroEnabled.12,text/csv,text/tab-separated-values"
+        multiple={multiple}
         required
         disabled={disabled}
         onClick={(e) => e.stopPropagation()}
-        onChange={(e) => setFileName(e.target.files?.[0]?.name || "")}
+        onChange={(e) => {
+          const files = Array.from(e.target.files || []);
+          setFileName(files.length > 1 ? `${files.length} files selected` : files[0]?.name || "");
+        }}
         style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
       />
 
@@ -908,6 +975,7 @@ function ExtractionWorkspace({ runId, meta, tab, setTab }) {
         {tab === "overview" && <ExtractionOverview runId={runId} meta={meta} />}
         {tab === "tables" && <ExtractionTables runId={runId} />}
         {tab === "text" && <ExtractionBlocks runId={runId} />}
+        {tab === "json" && <ExtractionJsonPreview runId={runId} meta={meta} />}
         {tab === "preview" && <ExtractionPreview runId={runId} meta={meta} />}
       </main>
     </>
@@ -919,6 +987,7 @@ function ExtractionStats({ meta }) {
   return (
     <section style={{ ...panelStyle, padding: 12, display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
       <StatChip label="Format" value={(meta.source_format || "-").toUpperCase()} />
+      <StatChip label="Documents" value={meta.documents?.length || summary.document_count || 1} />
       <StatChip label="Coverage" value={typeof meta.coverage === "number" ? `${meta.coverage.toFixed(1)}%` : "-"} />
       <StatChip label="Quality" value={summary.quality || "-"} />
       <StatChip label="Tables" value={summary.table_count || 0} />
@@ -933,6 +1002,7 @@ function ExtractionTabs({ tab, setTab }) {
     ["overview", "Extraction overview"],
     ["tables", "Extracted tables"],
     ["text", "Text blocks"],
+    ["json", "Structured JSON"],
     ["preview", "Preview"],
   ];
   return (
@@ -1103,6 +1173,87 @@ function ExtractionBlocks({ runId }) {
     <GenericRowsTable columns={["Page", "Type", "Path", "Text"]} rows={rows} />
   ) : (
     <EmptyState label="No extracted text blocks were returned." />
+  );
+}
+
+function ExtractionJsonPreview({ runId, meta }) {
+  const [state, setState] = useState({ loading: true, error: "", data: null });
+  const [page, setPage] = useState(1);
+  const total = meta.n_pages || meta.native_pages || 1;
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ loading: true, error: "", data: null });
+    fetch(`${API}/extract-runs/${runId}/structured-json`)
+      .then(async (resp) => {
+        if (!resp.ok) throw new Error(await readResponseError(resp));
+        return resp.json();
+      })
+      .then((data) => {
+        if (!cancelled) setState({ loading: false, error: "", data });
+      })
+      .catch((err) => {
+        if (!cancelled) setState({ loading: false, error: friendlyFetchError(err), data: null });
+      });
+    return () => { cancelled = true; };
+  }, [runId]);
+
+  if (state.loading) return <SoftLoading label="Building structured JSON preview..." />;
+  if (state.error) return <ErrorBox message={state.error} />;
+
+  const data = state.data || {};
+  const fields = data.semantic_fields || [];
+  const tables = data.tables || [];
+
+  return (
+    <div className="two-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, .95fr) minmax(0, 1.05fr)", gap: 14, alignItems: "start" }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+          <button disabled={page <= 1} onClick={() => setPage(Math.max(1, page - 1))} style={navButtonStyle(page <= 1)}>Prev</button>
+          <strong>Actual page {page} / {total}</strong>
+          <button disabled={page >= total} onClick={() => setPage(Math.min(total, page + 1))} style={navButtonStyle(page >= total)}>Next</button>
+        </div>
+        <div className="doc-frame" style={{ display: "flex", justifyContent: "center", padding: 10, maxHeight: "calc(100vh - 330px)", overflow: "auto" }}>
+          <img
+            alt={`Actual document page ${page}`}
+            src={`${API}/extract-runs/${runId}/pages/${page}`}
+            style={{ maxWidth: "100%", height: "auto", display: "block" }}
+          />
+        </div>
+      </div>
+
+      <div style={{ minWidth: 0, display: "grid", gap: 12 }}>
+        <div style={{ ...panelStyle, padding: 12, boxShadow: "none" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 8 }}>
+            <div>
+              <div style={{ fontWeight: 650 }}>Readable extraction JSON</div>
+              <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }}>
+                {fields.length} semantic field(s), {tables.length} table(s), {data.sections?.length || 0} section(s)
+              </div>
+            </div>
+            <button onClick={() => { window.location.href = `${API}/extract-runs/${runId}/json`; }} style={secondaryButtonStyle()}>
+              Download JSON
+            </button>
+          </div>
+
+          {fields.length > 0 ? (
+            <GenericRowsTable
+              columns={["field", "value", "page", "source", "citation"]}
+              rows={fields.slice(0, 80)}
+            />
+          ) : (
+            <EmptyState label="No key-value fields were detected. Check extracted tables and text blocks." />
+          )}
+        </div>
+
+        <div style={{ ...panelStyle, padding: 12, boxShadow: "none" }}>
+          <div style={{ fontWeight: 650, marginBottom: 8 }}>JSON payload preview</div>
+          <pre className="dl-scrollbar" style={{ margin: 0, maxHeight: 360, overflow: "auto", background: "#fbfaf6", border: "1px solid #e0d8ca", borderRadius: 8, padding: 12, fontSize: 12, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
+            {JSON.stringify(data, null, 2)}
+          </pre>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1300,7 +1451,7 @@ function PageView({ runId, side, pageNum, setPageNum, totalPages, label, docName
         {!pageExists ? (
           <EmptyPage pageNum={pageNum} />
         ) : useNativeViewer ? (
-          <NativePageView page={nativePage} />
+          <NativePageView page={nativePage} side={side} />
         ) : (
           <>
             {imageState === "loading" && (
@@ -1363,7 +1514,7 @@ function EmptyPage({ pageNum }) {
   );
 }
 
-function NativePageView({ page }) {
+function NativePageView({ page, side }) {
   if (!page) {
     return (
       <div style={{ minHeight: 520, display: "grid", placeItems: "center", color: "#667085", fontWeight: 600 }}>
@@ -1386,13 +1537,13 @@ function NativePageView({ page }) {
   return (
     <div className={`native-page ${viewerType}`} dir="auto">
       {items.map((item) => (
-        <NativeItem key={item.id} item={item} viewerType={viewerType} />
+        <NativeItem key={item.id} item={item} viewerType={viewerType} side={side || page.side} />
       ))}
     </div>
   );
 }
 
-function NativeItem({ item, viewerType }) {
+function NativeItem({ item, viewerType, side }) {
   const highlight = nativeHighlightStyle(item.highlight);
 
   if (item.type === "table") {
@@ -1416,8 +1567,45 @@ function NativeItem({ item, viewerType }) {
       }}
       title={item.change_type}
     >
-      {item.text || item.payload?.text || item.path || "-"}
+      <NativeTokenText item={item} side={side} />
     </div>
+  );
+}
+
+function NativeTokenText({ item, side }) {
+  const tokens = item.token_diff || [];
+  const hasTokenDiff = item.highlight === "modified" && Array.isArray(tokens) && tokens.some((t) => t.op && t.op !== "equal");
+
+  if (!hasTokenDiff) {
+    return item.text || item.payload?.text || item.path || "-";
+  }
+
+  return (
+    <span>
+      {tokens.map((token, idx) => {
+        const op = token.op;
+        const text =
+          op === "equal"
+            ? token.text_a
+            : side === "base"
+              ? token.text_a
+              : token.text_b;
+
+        if (!text) return null;
+
+        let cls = "";
+        if (op === "delete") cls = "native-token-delete";
+        if (op === "insert") cls = "native-token-insert";
+        if (op === "replace") cls = side === "base" ? "native-token-replace-base" : "native-token-replace-target";
+
+        return (
+          <React.Fragment key={idx}>
+            {idx > 0 ? " " : ""}
+            <span className={`native-token ${cls}`}>{text}</span>
+          </React.Fragment>
+        );
+      })}
+    </span>
   );
 }
 
@@ -1513,7 +1701,7 @@ function ReviewReport({ runId }) {
     const list = rows || [];
     if (filter === "ALL") return list;
     if (filter === "REVIEW") return list.filter((r) => needsReview(r));
-    return list.filter((r) => String(r.change_type || r.type || "").toUpperCase() === filter);
+    return list.filter((r) => rowChangeType(r) === filter);
   }, [rows, filter]);
 
   const avgConfidence = average((rows || []).map((r) => normalizeConfidence(r.confidence)).filter((v) => typeof v === "number"));
@@ -1561,7 +1749,7 @@ function ReviewReport({ runId }) {
                     <div style={{ color: "#667085", marginTop: 6 }}>{trim(row.before || row.after || row.text || "", 180)}</div>
                   </td>
                   <td style={{ ...td, width: "22%" }}>
-                    <ChangeBadge type={row.change_type || row.type || "MODIFIED"} />
+                    <ChangeBadge type={rowChangeType(row)} />
                     <div style={{ marginTop: 7 }}>{trim(row.change || row.description || "", 240)}</div>
                   </td>
                   <td style={{ ...td, width: "28%" }}>
@@ -1829,7 +2017,7 @@ function QueryResult({ r }) {
   return (
     <div style={{ borderLeft: `4px solid ${c.border}`, background: "#fffdf8", padding: "10px 12px", marginBottom: 8, fontSize: 13, borderRadius: 7, boxShadow: "0 1px 1px rgba(20,20,20,.04)" }}>
       <div style={{ fontWeight: 650, marginBottom: 5 }}>
-        <ChangeBadge type={r.change_type || "MODIFIED"} />
+        <ChangeBadge type={rowChangeType(r)} />
         {r.stable_key && <code style={{ marginLeft: 6 }}>{r.stable_key}</code>}
         <span style={{ color: "#667085", marginLeft: 8 }}>{r.citation || `page ${r.page || "-"} - ${r.block_type || "block"}`}</span>
       </div>
@@ -1856,6 +2044,8 @@ function TablesWorkspace({ runId }) {
   const [diff, setDiff] = useState(null);
   const [compareBusy, setCompareBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
+  const [useTableAi, setUseTableAi] = useState(false);
+  const [tableQuestion, setTableQuestion] = useState("Summarize selected table changes, including value changes and header-only changes, with clarification questions.");
 
   useEffect(() => {
     setData(null);
@@ -1954,6 +2144,8 @@ function TablesWorkspace({ runId }) {
     base_value_columns: baseValueColumns.filter((c) => !baseRowColumns.includes(c)),
     target_value_columns: targetValueColumns.filter((c) => !targetRowColumns.includes(c)),
     row_filter: rowFilter.trim() || null,
+    use_ai: useTableAi,
+    question: tableQuestion.trim() || null,
     limit: 200,
   });
 
@@ -1990,7 +2182,7 @@ function TablesWorkspace({ runId }) {
       const r = await fetch(`${API}/runs/${runId}/table-report.pdf`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(tableComparePayload()),
+        body: JSON.stringify({ ...tableComparePayload(), use_ai: false }),
       });
 
       if (!r.ok) throw new Error(await readResponseError(r));
@@ -2034,6 +2226,8 @@ function TablesWorkspace({ runId }) {
         <TableInfo table={targetTable} emptyLabel="Select a revised table to inspect its title, page, columns, and rows." />
       </div>
 
+      <RowFilterSuggestions baseTable={baseTable} targetTable={targetTable} onSelect={setRowFilter} />
+
       <div className="table-config-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, marginBottom: 14 }}>
         <ColumnConfig
           title="Baseline columns"
@@ -2065,6 +2259,31 @@ function TablesWorkspace({ runId }) {
             setTargetValueColumns(clean);
           }}
         />
+      </div>
+
+      <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 14 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 650, color: "#344054", marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={useTableAi}
+            onChange={(e) => setUseTableAi(e.target.checked)}
+          />
+          Use AI for selected table insight
+        </label>
+        <input
+          value={tableQuestion}
+          onChange={(e) => setTableQuestion(e.target.value)}
+          disabled={!useTableAi}
+          placeholder="Ask what to review in the selected table slice"
+          style={{
+            ...inputStyle,
+            opacity: useTableAi ? 1 : 0.65,
+            background: useTableAi ? "#fffdf8" : "#f4efe6",
+          }}
+        />
+        <div style={{ color: "#667085", fontSize: 12, marginTop: 6 }}>
+          AI receives only the selected table metadata, selected columns, aligned rows, and detected cell/header changes.
+        </div>
       </div>
 
       <div className="table-action-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
@@ -2184,6 +2403,46 @@ function TableInfo({ table, emptyLabel }) {
       {Array.isArray(table.row_preview) && table.row_preview.length > 0 && (
         <TablePreview columns={columns.slice(0, 6)} rows={table.row_preview.slice(0, 5)} />
       )}
+    </div>
+  );
+}
+
+function RowFilterSuggestions({ baseTable, targetTable, onSelect }) {
+  const suggestions = unique([
+    ...((baseTable?.row_keys || []).filter(Boolean)),
+    ...((targetTable?.row_keys || []).filter(Boolean)),
+  ]).slice(0, 18);
+
+  if (!suggestions.length) return null;
+
+  return (
+    <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 10, marginBottom: 14 }}>
+      <div style={{ color: "#344054", fontSize: 13, fontWeight: 650, marginBottom: 7 }}>Quick row filters</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {suggestions.map((key) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onSelect(key)}
+            title={key}
+            style={{
+              border: "1px solid #d8d0c3",
+              background: "#fffdf8",
+              color: "#344054",
+              borderRadius: 999,
+              padding: "4px 8px",
+              fontSize: 12,
+              cursor: "pointer",
+              maxWidth: 240,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {trim(key, 38)}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2350,6 +2609,25 @@ function TableColumnCompareResult({ diff }) {
         </div>
       )}
 
+      {diff.ai_review && (
+        <div style={{ background: "#fffdf8", border: "1px solid #d8d0c3", borderLeft: `4px solid ${diff.ai_review.available ? "#2f5f4f" : COLORS.DELETED.border}`, borderRadius: 8, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontWeight: 650, marginBottom: 5 }}>
+            Selected table AI insight {diff.ai_review.available ? "- successful" : "- unavailable"}
+            {typeof normalizeConfidence(diff.ai_review.confidence) === "number" ? ` | Confidence ${Math.round(normalizeConfidence(diff.ai_review.confidence) * 100)}%` : ""}
+          </div>
+          {diff.ai_review.available ? (
+            <>
+              {diff.ai_review.answer && <div dir="auto" style={{ color: "#344054", lineHeight: 1.45, marginBottom: 10 }}>{diff.ai_review.answer}</div>}
+              {Array.isArray(diff.ai_review.rows) && diff.ai_review.rows.length > 0 && (
+                <GenericRowsTable columns={diff.ai_review.columns?.length ? diff.ai_review.columns : inferColumns(diff.ai_review.rows)} rows={diff.ai_review.rows} />
+              )}
+            </>
+          ) : (
+            <div style={{ color: COLORS.DELETED.text }}>{diff.ai_review.error || "AI review was not generated."}</div>
+          )}
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <StatChip label="Added rows" value={counts.ADDED || counts.added || 0} tone="added" />
         <StatChip label="Deleted rows" value={counts.DELETED || counts.deleted || 0} tone="deleted" />
@@ -2358,6 +2636,13 @@ function TableColumnCompareResult({ diff }) {
       </div>
 
       {alignment.length > 0 && <ColumnAlignment alignment={alignment} />}
+
+      {Array.isArray(diff.header_insights) && diff.header_insights.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontWeight: 650, marginBottom: 8 }}>Header and meaning checks</div>
+          <GenericRowsTable columns={diff.header_insight_columns || ["Baseline Header", "Revised Header", "Header Match", "Observation", "Seek Clarification"]} rows={diff.header_insights} />
+        </div>
+      )}
 
       {Array.isArray(diff.review_rows) && diff.review_rows.length > 0 && (
         <div style={{ marginTop: 14 }}>
@@ -2646,6 +2931,17 @@ function filterLabel(filter) {
   if (filter === "ALL") return "All changes";
   if (filter === "REVIEW") return "Needs review";
   return filter.toLowerCase();
+}
+
+function rowChangeType(row) {
+  const raw = String(row?.change_type || row?.changeType || row?.status || "").toUpperCase();
+  if (["ADDED", "DELETED", "MODIFIED", "UNCHANGED", "MATCH"].includes(raw)) return raw;
+
+  const text = `${row?.type || ""} ${row?.change || ""} ${row?.description || ""} ${row?.review || ""}`.toUpperCase();
+  if (text.includes("ADDED") || text.includes("NEW CONTENT") || text.includes("INTRODUCED")) return "ADDED";
+  if (text.includes("DELETED") || text.includes("REMOVED") || text.includes("DROPPED")) return "DELETED";
+  if (text.includes("MODIFIED") || text.includes("CHANGED") || text.includes("UPDATED") || text.includes("REVISED")) return "MODIFIED";
+  return raw || "MODIFIED";
 }
 
 function needsReview(row) {
