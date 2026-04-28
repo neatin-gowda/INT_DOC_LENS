@@ -353,6 +353,15 @@ def _semantic_field_candidates(blocks: list[Block], limit: int = 220) -> list[di
     fields = []
     seen = set()
     key_value_rx = re.compile(r"^\s*([^:：]{2,80})\s*[:：]\s*(.{1,300})$")
+    attribute_patterns = [
+        ("color", re.compile(r"\b(?:colou?r|shade)\s*(?:is|=|:)?\s*([A-Za-z][A-Za-z\s/-]{2,40})", re.I)),
+        ("size", re.compile(r"\b(?:size|dimension)\s*(?:is|=|:)?\s*([A-Z0-9][A-Z0-9\s./x-]{0,40})", re.I)),
+        ("quantity", re.compile(r"\b(?:qty|quantity|count|units?)\s*(?:is|=|:)?\s*(\d[\d,]*(?:\.\d+)?)", re.I)),
+        ("price", re.compile(r"([$€£]\s?\d[\d,]*(?:\.\d+)?)")),
+        ("percentage", re.compile(r"\b(\d+(?:\.\d+)?%)\b")),
+        ("date", re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})\b")),
+        ("code", re.compile(r"\b([A-Z]{1,8}[- ]?\d{2,12}[A-Z]?)\b", re.I)),
+    ]
 
     for block in blocks:
         payload = block.payload if isinstance(block.payload, dict) else {}
@@ -367,6 +376,25 @@ def _semantic_field_candidates(blocks: list[Block], limit: int = 220) -> list[di
                 fields.append(
                     {
                         "field": key,
+                        "value": value,
+                        "page": block.page_number,
+                        "source": block.block_type.value,
+                        "citation": f"p.{block.page_number} - {_path_label(block.path)}",
+                    }
+                )
+
+        for field_name, pattern in attribute_patterns:
+            for attr_match in pattern.finditer(str(text)):
+                value = re.sub(r"\s+", " ", attr_match.group(1)).strip()
+                if not value:
+                    continue
+                dedupe = (block.page_number, field_name, value.lower())
+                if dedupe in seen:
+                    continue
+                seen.add(dedupe)
+                fields.append(
+                    {
+                        "field": field_name,
                         "value": value,
                         "page": block.page_number,
                         "source": block.block_type.value,
