@@ -3302,18 +3302,58 @@ function friendlyFetchError(err) {
 
 async function fetchStructuredExtraction(runId) {
   const structuredResp = await fetch(`${API}/extract-runs/${runId}/structured-json`);
-  if (structuredResp.ok) return structuredResp.json();
+  if (structuredResp.ok) {
+    const structured = normalizeStructuredExtractionPayload(await structuredResp.json());
+    if (hasStructuredExtractionContent(structured)) return structured;
+
+    const fallback = await fetchExtractionBlocksAndTables(runId, structured);
+    if (hasStructuredExtractionContent(fallback)) return fallback;
+    return structured;
+  }
 
   const jsonResp = await fetch(`${API}/extract-runs/${runId}/json`);
   if (!jsonResp.ok) throw new Error(await readResponseError(structuredResp));
 
   const payload = await jsonResp.json();
-  return normalizeStructuredExtractionPayload(payload);
+  const normalized = normalizeStructuredExtractionPayload(payload);
+  if (hasStructuredExtractionContent(normalized)) return normalized;
+  return fetchExtractionBlocksAndTables(runId, normalized);
+}
+
+function hasStructuredExtractionContent(payload) {
+  return Boolean(
+    payload
+    && ((payload.content || []).length > 0
+      || (payload.tables || []).length > 0
+      || (payload.pages || []).some((page) => (page.content || []).length > 0 || (page.tables || []).length > 0))
+  );
+}
+
+async function fetchExtractionBlocksAndTables(runId, basePayload = {}) {
+  const [blocksResult, tablesResult] = await Promise.allSettled([
+    fetch(`${API}/extract-runs/${runId}/blocks?limit=2000`).then(async (resp) => {
+      if (!resp.ok) throw new Error(await readResponseError(resp));
+      return resp.json();
+    }),
+    fetch(`${API}/extract-runs/${runId}/tables?include_rows=true`).then(async (resp) => {
+      if (!resp.ok) throw new Error(await readResponseError(resp));
+      return resp.json();
+    }),
+  ]);
+
+  const blocks = blocksResult.status === "fulfilled" ? (blocksResult.value.blocks || []) : [];
+  const tables = tablesResult.status === "fulfilled" ? (tablesResult.value.tables || []) : [];
+
+  return normalizeStructuredExtractionPayload({
+    ...basePayload,
+    blocks,
+    tables: tables.length ? tables : basePayload.tables || [],
+  });
 }
 
 function normalizeStructuredExtractionPayload(payload) {
   if (payload?.structured_json) return payload.structured_json;
-  if (payload?.document_summary || payload?.content || payload?.pages) return payload;
+  if ((payload?.document_summary || payload?.content || payload?.pages) && hasStructuredExtractionContent(payload)) return payload;
 
   const blocks = payload?.blocks || [];
   const tables = payload?.tables || [];
@@ -3358,29 +3398,60 @@ function normalizeStructuredExtractionPayload(payload) {
     });
   });
 
+  const content = blocks
+    .filter((b) => ["paragraph", "list_item", "kv_pair", "figure", "section", "heading"].includes(b.type))
+    .map((block) => {
+      const text = block.text || block.payload?.text || "";
+      const item = {
+        page: block.page_number,
+        order: block.sequence || 0,
+        type: block.type,
+        path: block.path,
+        text,
+        citation: `p.${block.page_number || "-"} - ${block.path || "document"}`,
+      };
+      const keyValues = [];
+      const match = String(text).match(/^\s*([^:：]{2,80})\s*[:：]\s*(.{1,300})$/);
+      if (match) keyValues.push({ name: match[1].trim(), value: match[2].trim() });
+      if (keyValues.length) item.key_values = keyValues;
+      return item;
+    })
+    .filter((item) => String(item.text || "").trim());
+
+  const pages = [];
+  const pageMap = new Map();
+  content.forEach((item) => {
+    const pageNo = item.page || 1;
+    if (!pageMap.has(pageNo)) pageMap.set(pageNo, { page: pageNo, citation: `p.${pageNo}`, content: [], tables: [] });
+    pageMap.get(pageNo).content.push(item);
+  });
+  tables.forEach((table) => {
+    const pageNo = table.page_first || table.page_number || 1;
+    if (!pageMap.has(pageNo)) pageMap.set(pageNo, { page: pageNo, citation: `p.${pageNo}`, content: [], tables: [] });
+    pageMap.get(pageNo).tables.push(table);
+  });
+  Array.from(pageMap.keys()).sort((a, b) => a - b).forEach((key) => pages.push(pageMap.get(key)));
+
   return {
-    document_summary: {
-      label: payload?.summary?.label || "Extracted document",
-      source_type: payload?.summary?.source_format || "document",
+    document_summary: payload?.document_summary || {
+      label: payload?.summary?.label || payload?.label || "Extracted document",
+      source_type: payload?.summary?.source_format || payload?.source_format || "document",
       extraction_quality: {
         grade: payload?.summary?.quality || "not rated",
         coverage: payload?.coverage,
+      },
+      counts: {
+        text_blocks: content.length,
+        tables: tables.length,
+        pages: pages.length,
       },
     },
     semantic_fields: semanticFields.slice(0, 220),
     business_structure: buildBusinessStructureFromBlocks(blocks, tables, semanticFields),
     sections: blocks.filter((b) => ["section", "heading"].includes(b.type)).slice(0, 200),
     tables,
-    content: blocks
-      .filter((b) => ["paragraph", "list_item", "kv_pair", "figure", "section", "heading"].includes(b.type))
-      .map((block) => ({
-        page: block.page_number,
-        order: block.sequence || 0,
-        type: block.type,
-        path: block.path,
-        text: block.text || block.payload?.text || "",
-        citation: `p.${block.page_number || "-"} - ${block.path || "document"}`,
-      })),
+    pages,
+    content,
   };
 }
 
