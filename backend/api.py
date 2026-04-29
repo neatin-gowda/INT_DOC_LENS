@@ -32,6 +32,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from rapidfuzz import fuzz
 
+from .ai_usage import add_usage, empty_usage, usage_from_response
 from .differ_v2 import diff_blocks, diff_stats
 from .document_ingest import (
     coverage_for_source,
@@ -1004,7 +1005,11 @@ def _ai_extraction_summary(blocks: list[Block], summary: dict[str, Any]) -> Opti
             response_format={"type": "json_object"},
         )
         content = response.choices[0].message.content or "{}"
-        return {"available": True, "result": json.loads(content)}
+        return {
+            "available": True,
+            "result": json.loads(content),
+            "usage": usage_from_response(response, operation="extraction_ai_summary", model=deployment),
+        }
     except Exception as exc:
         return {"available": False, "error": f"Azure OpenAI extraction analysis failed: {type(exc).__name__}: {exc}"}
 
@@ -1089,6 +1094,8 @@ def _process_extract(
         if use_ai:
             _set_run_status(run_id, "Preparing AI-assisted document analysis", 78)
             ai_analysis = _ai_extraction_summary(blocks, summary)
+            if isinstance(ai_analysis, dict):
+                add_usage(_RUNS[run_id], ai_analysis.get("usage"))
 
         _set_run_status(run_id, "Finalizing extraction workspace", 92)
 
@@ -1200,7 +1207,13 @@ def _process_compare(
             78,
         )
 
-        summary = summarize(diffs, base_blocks, target_blocks, use_llm=use_llm)
+        summary = summarize(
+            diffs,
+            base_blocks,
+            target_blocks,
+            use_llm=use_llm,
+            usage_callback=lambda usage: add_usage(_RUNS[run_id], usage),
+        )
 
         _set_run_status(run_id, "Storing extracted tables and comparison data", 88)
 
@@ -1330,6 +1343,7 @@ def list_jobs(limit: int = 50):
                 "n_pages": len(run.get("page_imgs", [])),
                 "n_pages_base": len(run.get("base_imgs", [])),
                 "n_pages_target": len(run.get("target_imgs", [])),
+                "ai_usage": run.get("ai_usage", empty_usage()),
                 "error": run.get("error"),
             }
         )
@@ -1384,6 +1398,7 @@ async def compare(
         "target_imgs": [],
         "stats": {},
         "coverage": {},
+        "ai_usage": empty_usage(),
         "supported_upload_formats": supported_input_extensions(),
     }
 
@@ -1456,6 +1471,7 @@ async def extract_document(
         "page_imgs": [],
         "coverage": None,
         "summary": {},
+        "ai_usage": empty_usage(),
         "supported_upload_formats": supported_input_extensions(),
     }
 
@@ -1529,6 +1545,7 @@ def extract_run_meta(run_id: str):
         "coverage": r.get("coverage"),
         "summary": r.get("summary", {}),
         "ai_analysis": r.get("ai_analysis"),
+        "ai_usage": r.get("ai_usage", empty_usage()),
         "n_pages": len(r.get("page_imgs", [])),
         "native_pages": r.get("native_pages") or _max_block_page(r.get("blocks", [])),
     }
@@ -1630,6 +1647,7 @@ def run_meta(run_id: str):
         "coverage": r.get("coverage", {}),
         "db_run_id": r.get("db_run_id"),
         "db_error": r.get("db_error"),
+        "ai_usage": r.get("ai_usage", empty_usage()),
         "n_pages_base": len(r.get("base_imgs", [])),
         "n_pages_target": len(r.get("target_imgs", [])),
         "base_native_pages": r.get("base_native_pages") or _max_block_page(r.get("base_blocks", [])),
@@ -1912,6 +1930,8 @@ def post_query(run_id: str, req: QueryReq):
     )
 
     if isinstance(result, dict):
+        add_usage(r, result.get("usage"))
+        result["job_ai_usage"] = r.get("ai_usage", empty_usage())
         return result
 
     return {
@@ -3282,6 +3302,7 @@ def _ai_selected_table_review(
             "columns": [str(c) for c in data.get("columns", [])] if isinstance(data.get("columns"), list) else [],
             "rows": data.get("rows", []) if isinstance(data.get("rows"), list) else [],
             "confidence": data.get("confidence"),
+            "usage": usage_from_response(response, operation="table_ai_review", model=deployment),
         }
     except Exception as exc:
         return {
@@ -3522,6 +3543,8 @@ def compare_table_columns(run_id: str, req: CompareTableColumnsReq):
             row_results=row_results,
             header_insights=header_insights,
         )
+        if isinstance(ai_review, dict):
+            add_usage(r, ai_review.get("usage"))
 
     return {
         "view": "table_comparison",
