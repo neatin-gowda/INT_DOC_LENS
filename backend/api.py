@@ -562,10 +562,92 @@ def _extract_text_fields(text: Any, page: int, path: str, source: str) -> list[d
     return fields
 
 
+_INLINE_FIELD_ALIASES = {
+    "qty": "quantity",
+    "quantity": "quantity",
+    "count": "quantity",
+    "units": "quantity",
+    "unit": "quantity",
+    "size": "size",
+    "dimension": "size",
+    "dimensions": "size",
+    "color": "color",
+    "colour": "color",
+    "colo": "color",
+    "shade": "color",
+    "item": "item",
+    "product": "item",
+    "material": "material",
+    "description": "description",
+    "desc": "description",
+    "price": "price",
+    "amount": "amount",
+    "date": "date",
+    "code": "code",
+    "sku": "code",
+}
+
+
+def _clean_business_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _semantic_record_from_text(text: Any, page: int, path: str, source: str) -> Optional[dict[str, Any]]:
+    """
+    Convert unformatted business text into a useful JSON record where possible.
+
+    Example:
+      "qty: 1 size: 44 for woolen dress colo: red"
+    becomes:
+      {"quantity": "1", "size": "44 for woolen dress", "color": "red"}
+
+    This is intentionally generic; it does not hard-code a document template.
+    """
+    raw = _clean_business_text(text)
+    if not raw:
+        return None
+
+    key_pattern = "|".join(sorted((re.escape(k) for k in _INLINE_FIELD_ALIASES), key=len, reverse=True))
+    pattern = re.compile(
+        rf"\b(?P<key>{key_pattern})\b\s*(?:[:：=]|is)?\s*(?P<value>.*?)(?=\s+\b(?:{key_pattern})\b\s*(?:[:：=]|is)?|$)",
+        flags=re.I | re.UNICODE,
+    )
+
+    values: dict[str, str] = {}
+    for match in pattern.finditer(raw):
+        raw_key = _clean_business_text(match.group("key")).lower()
+        key = _INLINE_FIELD_ALIASES.get(raw_key, raw_key)
+        value = _clean_business_text(match.group("value")).strip(" ,;|")
+        if not key or not value:
+            continue
+        if len(value) > 320:
+            value = value[:317].rstrip() + "..."
+        values[key] = value
+
+    if len(values) < 2:
+        return None
+
+    return {
+        "record_type": "inferred_key_value_record",
+        "values": values,
+        "source_text": raw,
+        "page": page,
+        "citation": f"p.{page} - {_path_label(path)}",
+        "source": source,
+    }
+
+
 def _inline_record_from_text(text: Any) -> Optional[dict[str, Any]]:
     raw = re.sub(r"\s+", " ", str(text or "")).strip()
     if not raw:
         return None
+
+    semantic_record = _semantic_record_from_text(raw, 0, "", "inline_text")
+    if semantic_record:
+        semantic_record.pop("page", None)
+        semantic_record.pop("citation", None)
+        semantic_record.pop("source", None)
+        return semantic_record
 
     if "|" in raw:
         cells = [part.strip() for part in raw.split("|") if part.strip()]
@@ -804,6 +886,50 @@ def _business_table_for_json(table: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ordered_text_item(block: Block) -> Optional[dict[str, Any]]:
+    payload = block.payload if isinstance(block.payload, dict) else {}
+    text = _clean_business_text(block.text or payload.get("text") or payload.get("layout_text") or "")
+    if not text:
+        return None
+
+    page_no = int(block.page_number or 1)
+    item: dict[str, Any] = {
+        "page": page_no,
+        "order": int(block.sequence or 0),
+        "type": block.block_type.value,
+        "path": block.path,
+        "text": text,
+        "citation": f"p.{page_no} - {_path_label(block.path)}",
+    }
+
+    fields = _extract_text_fields(text, page_no, block.path, block.block_type.value)
+    if fields:
+        item["key_values"] = [
+            {
+                "name": field.get("field"),
+                "value": field.get("value"),
+            }
+            for field in fields
+        ]
+
+    record = _semantic_record_from_text(text, page_no, block.path, block.block_type.value)
+    if record:
+        item["inferred_record"] = record
+
+    return item
+
+
+def _document_order_content(blocks: list[Block]) -> list[dict[str, Any]]:
+    content = []
+    for block in sorted(blocks, key=lambda b: (int(b.page_number or 1), int(b.sequence or 0))):
+        if block.block_type.value in {"table", "table_row"}:
+            continue
+        item = _ordered_text_item(block)
+        if item:
+            content.append(item)
+    return content
+
+
 def _business_extraction_json(r: dict, run_id: str) -> dict[str, Any]:
     """
     User-facing extraction JSON.
@@ -813,14 +939,24 @@ def _business_extraction_json(r: dict, run_id: str) -> dict[str, Any]:
     """
     raw = _structured_extraction_json(r, run_id)
     blocks = r.get("blocks", [])
-    fields = raw.get("semantic_fields") or []
     tables = [_business_table_for_json(table) for table in raw.get("tables", [])]
+    ordered_content = _document_order_content(blocks)
 
     pages: dict[int, dict[str, Any]] = {}
-    for block in sorted(blocks, key=lambda b: (b.page_number or 1, b.sequence or 0)):
-        if block.block_type.value == "table_row":
-            continue
+    for item in ordered_content:
+        page_no = int(item.get("page") or 1)
+        page = pages.setdefault(
+            page_no,
+            {
+                "page": page_no,
+                "citation": f"p.{page_no}",
+                "content": [],
+                "tables": [],
+            },
+        )
+        page["content"].append(item)
 
+    for block in sorted(blocks, key=lambda b: (b.page_number or 1, b.sequence or 0)):
         page_no = int(block.page_number or 1)
         page = pages.setdefault(
             page_no,
@@ -828,7 +964,6 @@ def _business_extraction_json(r: dict, run_id: str) -> dict[str, Any]:
                 "page": page_no,
                 "citation": f"p.{page_no}",
                 "content": [],
-                "fields": [],
                 "tables": [],
             },
         )
@@ -839,29 +974,17 @@ def _business_extraction_json(r: dict, run_id: str) -> dict[str, Any]:
                 if table.get("page") == (f"Page {page_no}") or table.get("page", "").startswith(f"Pages {page_no}-")
             ]
             page["tables"].extend(matching[:1])
-            continue
 
-        text = re.sub(r"\s+", " ", str(block.text or "")).strip()
-        if not text:
-            continue
-
-        item = {
-            "type": block.block_type.value,
-            "text": text,
-            "citation": f"p.{page_no} - {_path_label(block.path)}",
-        }
-        extracted_fields = _extract_text_fields(text, page_no, block.path, block.block_type.value)
-        if extracted_fields:
-            item["fields"] = [
-                {
-                    "field": field.get("field"),
-                    "value": field.get("value"),
-                    "citation": field.get("citation"),
-                }
-                for field in extracted_fields
-            ]
-            page["fields"].extend(item["fields"])
-        page["content"].append(item)
+    for page in pages.values():
+        seen_tables = set()
+        unique_tables = []
+        for table in page.get("tables", []):
+            key = (table.get("title"), table.get("page"), table.get("row_count"))
+            if key in seen_tables:
+                continue
+            seen_tables.add(key)
+            unique_tables.append(table)
+        page["tables"] = unique_tables
 
     business_structure = raw.get("business_structure") or {"documents": [], "section_count": 0}
     quality = (raw.get("intelligence") or {}).get("quality") or {}
@@ -885,24 +1008,15 @@ def _business_extraction_json(r: dict, run_id: str) -> dict[str, Any]:
                 ][:8],
             },
             "counts": {
-                "fields": len(fields),
+                "text_blocks": len(ordered_content),
                 "tables": len(tables),
                 "sections": len(raw.get("sections") or []),
                 "pages": len(pages),
             },
         },
-        "business_structure": business_structure,
+        "content": ordered_content,
         "pages": [pages[key] for key in sorted(pages)],
-        "fields": [
-            {
-                "field": field.get("field"),
-                "value": field.get("value"),
-                "page": field.get("page"),
-                "source": field.get("source"),
-                "citation": field.get("citation"),
-            }
-            for field in fields
-        ],
+        "business_structure": business_structure,
         "tables": tables,
         "sections": [
             {
@@ -916,10 +1030,20 @@ def _business_extraction_json(r: dict, run_id: str) -> dict[str, Any]:
     }
 
     if r.get("ai_analysis"):
-        result["ai_analysis"] = r.get("ai_analysis")
+        ai = r.get("ai_analysis") or {}
+        result["ai_interpretation"] = ai.get("result") if isinstance(ai, dict) else ai
 
     # Backward-compatible aliases for the current UI tabs.
-    result["semantic_fields"] = result["fields"]
+    result["semantic_fields"] = [
+        {
+            "field": kv.get("name"),
+            "value": kv.get("value"),
+            "page": item.get("page"),
+            "citation": item.get("citation"),
+        }
+        for item in ordered_content
+        for kv in item.get("key_values", [])
+    ]
     return result
 
 
