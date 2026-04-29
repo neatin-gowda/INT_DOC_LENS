@@ -1811,6 +1811,25 @@ function ReviewReport({ runId }) {
 
   const avgConfidence = average((rows || []).map((r) => normalizeConfidence(r.confidence)).filter((v) => typeof v === "number"));
   const reviewCount = (rows || []).filter(needsReview).length;
+  const filterCounts = useMemo(() => {
+    const list = rows || [];
+    return {
+      ALL: list.length,
+      ADDED: list.filter((r) => rowChangeType(r) === "ADDED").length,
+      DELETED: list.filter((r) => rowChangeType(r) === "DELETED").length,
+      MODIFIED: list.filter((r) => rowChangeType(r) === "MODIFIED").length,
+      REVIEW: list.filter(needsReview).length,
+    };
+  }, [rows]);
+  const keyInsights = useMemo(() => {
+    const list = (rows || []).filter((row) => row.change || row.description || row.before || row.after);
+    const priority = [...list].sort((a, b) => {
+      const ai = impactRank(a.impact) + (needsReview(a) ? 2 : 0) + (normalizeConfidence(a.confidence) || 0);
+      const bi = impactRank(b.impact) + (needsReview(b) ? 2 : 0) + (normalizeConfidence(b.confidence) || 0);
+      return bi - ai;
+    });
+    return priority.slice(0, 6);
+  }, [rows]);
 
   if (error) return <ErrorBox message={error} />;
   if (!rows) return <SoftLoading label="Building review report" />;
@@ -1824,10 +1843,28 @@ function ReviewReport({ runId }) {
         <MetricCard label="Report" value="PDF ready" />
       </div>
 
+      {keyInsights.length > 0 && (
+        <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontWeight: 650, color: "#344054", marginBottom: 8 }}>Important changes</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {keyInsights.map((row, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8, alignItems: "start" }}>
+                <ChangeBadge type={rowChangeType(row)} />
+                <div>
+                  <span style={{ fontWeight: 650 }}>{trim(row.feature || row.item || row.area || "Document item", 120)}: </span>
+                  <span>{trim(row.change || row.description || row.before || row.after || "Change detected.", 260)}</span>
+                  {row.citation && <span style={{ color: "#667085" }}> ({friendlyCitation(row.citation)})</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         {["ALL", "ADDED", "DELETED", "MODIFIED", "REVIEW"].map((key) => (
           <button key={key} onClick={() => setFilter(key)} style={filterButtonStyle(filter === key)}>
-            {filterLabel(key)}
+            {filterLabel(key)} {filterCounts[key] ?? 0}
           </button>
         ))}
       </div>
@@ -1858,7 +1895,7 @@ function ReviewReport({ runId }) {
                     <div style={{ marginTop: 7 }}>{trim(row.change || row.description || "", 240)}</div>
                   </td>
                   <td style={{ ...td, width: "28%" }}>
-                    <div>{row.citation || row.evidence || "-"}</div>
+                    <div>{friendlyCitation(row.citation || row.evidence || "-")}</div>
                     {row.before && <div style={{ color: COLORS.DELETED.text, marginTop: 7 }}>Before: {trim(row.before, 180)}</div>}
                     {row.after && <div style={{ color: COLORS.ADDED.text, marginTop: 4 }}>After: {trim(row.after, 180)}</div>}
                   </td>
@@ -3220,7 +3257,28 @@ function unique(values) {
 function filterLabel(filter) {
   if (filter === "ALL") return "All changes";
   if (filter === "REVIEW") return "Needs review";
+  if (filter === "ADDED") return "Added";
+  if (filter === "DELETED") return "Deleted";
+  if (filter === "MODIFIED") return "Modified";
   return filter.toLowerCase();
+}
+
+function friendlyCitation(value) {
+  const text = String(value || "-");
+  return text
+    .replace(/\bbase\s*p\.?\s*(\d+)/gi, "Baseline page $1")
+    .replace(/\btarget\s*p\.?\s*(\d+)/gi, "Revised page $1")
+    .replace(/\bbaseline\s*p\.?\s*(\d+)/gi, "Baseline page $1")
+    .replace(/\brevised\s*p\.?\s*(\d+)/gi, "Revised page $1")
+    .replace(/\s*->\s*/g, " → ");
+}
+
+function impactRank(value) {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("high")) return 3;
+  if (text.includes("medium")) return 2;
+  if (text.includes("low")) return 1;
+  return 0;
 }
 
 function rowChangeType(row) {
