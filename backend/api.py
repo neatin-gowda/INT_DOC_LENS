@@ -62,6 +62,40 @@ app.add_middleware(
 _RUNS: dict[str, dict] = {}
 
 
+_USER_HIDDEN_PAYLOAD_KEYS = {
+    "anchors",
+    "__anchors__",
+    "__pages__",
+    "__row_index__",
+    "__table_title__",
+    "__table_context__",
+    "page_width",
+    "page_height",
+    "spans_pages",
+    "stitched_from",
+    "ocr",
+    "kind",
+    "caption",
+    "source_extraction",
+    "source_format",
+    "visual_match_score",
+    "visual_match_source",
+    "extraction_intelligence",
+    "table_fingerprint",
+    "column_profiles",
+    "extraction_confidence",
+    "quality_warnings",
+    "language",
+    "header_rows",
+    "header_row_count",
+    "header_index",
+    "header_strategy",
+    "header_sources",
+    "strategies",
+    "bbox_by_page",
+}
+
+
 class CompareResponse(BaseModel):
     run_id: str
     status: str
@@ -136,6 +170,31 @@ def _dump_model(obj):
     if hasattr(obj, "dict"):
         return obj.dict()
     return obj
+
+
+def _is_user_hidden_field(field: Any) -> bool:
+    key = str(field or "")
+    if not key:
+        return True
+    if key.startswith("__"):
+        return True
+    if key in _USER_HIDDEN_PAYLOAD_KEYS:
+        return True
+    if key.startswith("extraction_") or key.endswith("_confidence"):
+        return True
+    return False
+
+
+def _visible_field_diffs(field_diffs: list[Any]) -> list[dict[str, Any]]:
+    out = []
+    for fd in field_diffs or []:
+        field = getattr(fd, "field", None) if not isinstance(fd, dict) else fd.get("field")
+        if _is_user_hidden_field(field):
+            continue
+        before = getattr(fd, "before", None) if not isinstance(fd, dict) else fd.get("before")
+        after = getattr(fd, "after", None) if not isinstance(fd, dict) else fd.get("after")
+        out.append({"field": field, "before": before, "after": after})
+    return out
 
 
 def _max_block_page(blocks: list[Block]) -> int:
@@ -1067,6 +1126,8 @@ def root():
             "GET /extract-runs/{id}/structured-json",
             "GET /extract-runs/{id}/json",
             "POST /compare",
+            "GET /jobs",
+            "GET /jobs/{id}",
             "GET /db-health",
             "GET /ai-health",
             "GET /runs/{id}",
@@ -1098,6 +1159,43 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/jobs")
+def list_jobs(limit: int = 50):
+    rows = []
+    for run_id, run in _RUNS.items():
+        rows.append(
+            {
+                "run_id": run_id,
+                "kind": run.get("kind", "comparison"),
+                "status": run.get("status", "unknown"),
+                "status_message": run.get("status_message"),
+                "progress": run.get("progress", 0),
+                "label": run.get("label"),
+                "base_label": run.get("base_label"),
+                "target_label": run.get("target_label"),
+                "source_format": run.get("source_format"),
+                "base_format": run.get("base_format"),
+                "target_format": run.get("target_format"),
+                "n_pages": len(run.get("page_imgs", [])),
+                "n_pages_base": len(run.get("base_imgs", [])),
+                "n_pages_target": len(run.get("target_imgs", [])),
+                "error": run.get("error"),
+            }
+        )
+
+    rows.sort(key=lambda item: item.get("run_id", ""), reverse=True)
+    limit = max(1, min(limit, 200))
+    return {"jobs": rows[:limit], "count": min(len(rows), limit), "total": len(rows)}
+
+
+@app.get("/jobs/{run_id}")
+def job_detail(run_id: str):
+    r = _ensure_run(run_id)
+    if r.get("kind") == "extraction":
+        return extract_run_meta(run_id)
+    return run_meta(run_id)
+
+
 @app.get("/db-health")
 def db_health():
     return _db_health_payload()
@@ -1124,6 +1222,7 @@ async def compare(
     target_label = Path(target.filename).stem
 
     _RUNS[run_id] = {
+        "kind": "comparison",
         "status": "queued",
         "status_message": "Uploading documents",
         "progress": 5,
@@ -1442,7 +1541,7 @@ def get_diff(
                 "page_target": t.page_number if t else None,
                 "before": b.text if b else None,
                 "after": t.text if t else None,
-                "field_diffs": [_dump_model(fd) for fd in d.field_diffs],
+                "field_diffs": _visible_field_diffs(d.field_diffs),
                 "token_diff": [_dump_model(td) for td in d.token_diff],
                 "similarity": d.similarity,
                 "impact": d.impact_score,
@@ -1726,10 +1825,7 @@ def _native_change_maps(
             block_id = d.target_block_id
 
         change_by_id[block_id] = d.change_type
-        fields_by_id[block_id] = [
-            {"field": fd.field, "before": fd.before, "after": fd.after}
-            for fd in d.field_diffs
-        ]
+        fields_by_id[block_id] = _visible_field_diffs(d.field_diffs)
         tokens_by_id[block_id] = [_dump_model(td) for td in d.token_diff]
 
     return change_by_id, fields_by_id, tokens_by_id
@@ -1751,7 +1847,7 @@ def _native_block_payload(block: Block) -> dict[str, Any]:
 
     for key, value in payload.items():
         key = str(key)
-        if key in {"page_width", "page_height", "anchors", "__anchors__", "__pages__"}:
+        if _is_user_hidden_field(key):
             continue
         if key.startswith("__") and key not in {"__table_title__", "__table_context__", "__row_index__"}:
             continue
