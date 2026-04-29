@@ -24,6 +24,7 @@ from typing import Any, Optional
 
 from rapidfuzz import fuzz
 
+from .ai_usage import merge_usage, usage_from_response
 from .db import db_enabled, get_conn
 from .embeddings import embed_query, vector_literal
 from .models import Block, BlockDiff, ChangeType
@@ -981,26 +982,45 @@ def llm_plan(nl: str) -> Optional[dict]:
             temperature=0.0,
             response_format={"type": "json_object"},
         )
+        usage = usage_from_response(resp, operation="ask_agent_ai_answer", model=deploy)
         data = json.loads(resp.choices[0].message.content or "{}")
         if isinstance(data, dict):
             data.setdefault("filters", {})
             data["filters"]["text"] = nl
+            data["_usage"] = usage_from_response(resp, operation="ask_agent_query_planning", model=deploy)
         return data
     except Exception:
         return None
 
 
-def _semantic_search(nl: str, db_run_id: Optional[str], limit: int = 48) -> list[dict]:
+def _coerce_embedding_result(value: Any) -> tuple[Any, dict[str, Any]]:
+    """
+    Backward-compatible bridge for embedding token tracking.
+
+    Existing embed_query implementations usually return only a vector. If
+    backend/embeddings.py is updated to return {"vector": [...], "usage": ...}
+    or ([...], usage), this layer will automatically attach that usage to the
+    job response.
+    """
+    if isinstance(value, tuple) and len(value) == 2:
+        return value[0], value[1] if isinstance(value[1], dict) else merge_usage()
+    if isinstance(value, dict) and "vector" in value:
+        return value.get("vector"), value.get("usage") if isinstance(value.get("usage"), dict) else merge_usage()
+    return value, merge_usage()
+
+
+def _semantic_search(nl: str, db_run_id: Optional[str], limit: int = 48) -> tuple[list[dict], dict[str, Any]]:
     if not db_run_id or not db_enabled():
-        return []
+        return [], merge_usage()
 
     try:
-        vector = vector_literal(embed_query(nl))
+        embedding_vector, embedding_usage = _coerce_embedding_result(embed_query(nl))
+        vector = vector_literal(embedding_vector)
     except Exception:
-        return []
+        return [], merge_usage()
 
     if not vector:
-        return []
+        return [], embedding_usage
 
     try:
         with get_conn() as conn:
@@ -1034,7 +1054,7 @@ def _semantic_search(nl: str, db_run_id: Optional[str], limit: int = 48) -> list
                 (vector, db_run_id, vector, limit),
             ).fetchall()
     except Exception:
-        return []
+        return [], embedding_usage
 
     rows = []
     for row in found:
@@ -1065,7 +1085,7 @@ def _semantic_search(nl: str, db_run_id: Optional[str], limit: int = 48) -> list
             }
         )
 
-    return rows
+    return rows, embedding_usage
 
 
 def _merge_rows(primary: list[dict], semantic: list[dict], limit: int = 200) -> list[dict]:
@@ -1702,6 +1722,7 @@ def llm_freeform_answer(
         "presentation": "ai_table" if llm_rows or _wants_table_output(nl) else "ai_answer",
         "evidence_count": len(evidence_rows),
         "ai_deployment": deploy,
+        "usage": usage,
     }, None
 
 
@@ -1805,6 +1826,8 @@ def query(
     mode: str = "fast",
     response_language: str = "source",
 ) -> dict:
+    usage_accum = merge_usage()
+
     if _is_out_of_scope_question(nl):
         return {
             "answer": (
@@ -1829,11 +1852,14 @@ def query(
     is_summary = _is_summary_intent(nl) or _is_feature_review_table_intent(nl)
     plan = _broad_summary_plan(nl) if is_summary else parse_query(nl)
     rows = execute_plan(plan, diffs, base_blocks, target_blocks)
-    semantic_rows = _semantic_search(nl, db_run_id)
+    semantic_rows, semantic_usage = _semantic_search(nl, db_run_id)
+    usage_accum = merge_usage(usage_accum, semantic_usage)
 
     if not rows:
         llm = llm_plan(nl)
         if llm:
+            usage_accum = merge_usage(usage_accum, llm.get("_usage"))
+            llm.pop("_usage", None)
             plan = llm
             rows = execute_plan(plan, diffs, base_blocks, target_blocks)
 
@@ -1858,6 +1884,8 @@ def query(
     if use_ai:
         ai_result, ai_error = llm_freeform_answer(nl, rows, semantic_rows, response_language=response_language)
         if ai_result:
+            usage_accum = merge_usage(usage_accum, ai_result.get("usage"))
+            ai_result["usage"] = usage_accum
             ai_result.update(
                 {
                     "mode": "ai",
@@ -1884,11 +1912,13 @@ def query(
         fallback["ai_error"] = ai_error or "Azure OpenAI did not return a usable response."
         fallback["answer"] = "AI Summarization is unavailable right now. I could not generate a model-assisted answer from the extracted evidence."
         fallback["response_language"] = response_language
+        fallback["usage"] = usage_accum
         return fallback
 
     if is_summary:
         response = _summary_response(nl, rows, plan, semantic_rows, allow_llm=False)
         response["mode"] = "fast"
+        response["usage"] = usage_accum
         return response
 
     answer = _build_answer(nl, rows, plan)
@@ -1900,4 +1930,5 @@ def query(
         "plan": plan,
         "semantic_matches": len(semantic_rows),
         "mode": "fast",
+        "usage": usage_accum,
     }
