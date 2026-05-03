@@ -14,13 +14,18 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS document_family (
     id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id        TEXT NOT NULL DEFAULT 'default',
+    business_unit_id TEXT NOT NULL DEFAULT 'default',
     supplier         TEXT NOT NULL,
     family_name      TEXT NOT NULL,
+    domain           TEXT NOT NULL DEFAULT 'generic',
+    prompt_profile   JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ui_profile       JSONB NOT NULL DEFAULT '{}'::jsonb,
     template_profile JSONB NOT NULL DEFAULT '{}'::jsonb,
     template_version INT NOT NULL DEFAULT 1,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (supplier, family_name)
+    UNIQUE (tenant_id, business_unit_id, supplier, family_name)
 );
 
 -- ---------------------------------------------------------------------
@@ -30,6 +35,8 @@ CREATE TABLE IF NOT EXISTS document_family (
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS spec_document (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id           TEXT NOT NULL DEFAULT 'default',
+    business_unit_id    TEXT NOT NULL DEFAULT 'default',
     family_id           UUID NOT NULL REFERENCES document_family(id),
     label               TEXT NOT NULL,             -- e.g. "2024_MPF_Model_Spec"
     version_tag         TEXT,                      -- e.g. "2024MY"
@@ -45,7 +52,44 @@ CREATE TABLE IF NOT EXISTS spec_document (
 );
 
 CREATE INDEX IF NOT EXISTS idx_spec_document_family ON spec_document (family_id);
+CREATE INDEX IF NOT EXISTS idx_spec_document_scope ON spec_document (tenant_id, business_unit_id, uploaded_by, uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_spec_document_sha ON spec_document (sha256);
+
+-- ---------------------------------------------------------------------
+-- Durable job metadata and RBAC scope for async extraction/comparison runs.
+-- Heavy extracted payloads remain in document/block tables and Blob Storage;
+-- this table drives Job Status, retries, ownership, and operational support.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS doculens_job (
+    run_id              TEXT PRIMARY KEY,
+    kind                TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    status_message      TEXT,
+    progress            INT NOT NULL DEFAULT 0,
+    tenant_id           TEXT NOT NULL DEFAULT 'default',
+    business_unit_id    TEXT NOT NULL DEFAULT 'default',
+    created_by          TEXT NOT NULL DEFAULT 'anonymous',
+    created_by_role     TEXT,
+    created_by_name     TEXT,
+    label               TEXT,
+    base_label          TEXT,
+    target_label        TEXT,
+    source_format       TEXT,
+    base_format         TEXT,
+    target_format       TEXT,
+    n_pages             INT NOT NULL DEFAULT 0,
+    n_pages_base        INT NOT NULL DEFAULT 0,
+    n_pages_target      INT NOT NULL DEFAULT 0,
+    ai_usage            JSONB NOT NULL DEFAULT '{}'::jsonb,
+    result_ref          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error               TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at         TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_doculens_job_owner ON doculens_job (tenant_id, business_unit_id, created_by, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_doculens_job_status ON doculens_job (tenant_id, business_unit_id, status, updated_at DESC);
 
 -- ---------------------------------------------------------------------
 -- A "block" = the smallest semantically meaningful unit
