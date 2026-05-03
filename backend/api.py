@@ -26,7 +26,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
@@ -45,22 +45,47 @@ from .document_ingest import (
 from .extraction.runner import enrich_blocks, extraction_intelligence_summary
 from .extraction.registry import list_providers
 from .extractor_v2 import coverage_pct, extract_blocks_v2 as extract_blocks, render_pages
+from .job_store import init_job_store, list_jobs as list_stored_jobs, public_job_record, upsert_job
 from .models import Block, ChangeType
 from .query import ai_health, query as nl_query
+from .security import (
+    can_access_job,
+    current_principal,
+    job_ownership_fields,
+    principal_from_headers,
+    reset_current_principal,
+    set_current_principal,
+)
 from .summarizer import summarize
 
 
 app = FastAPI(title="Spec-Diff", version="0.1.0")
 
+_cors_origins = [
+    origin.strip()
+    for origin in os.getenv("DOCULENS_CORS_ORIGINS", "*").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins or ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
 _RUNS: dict[str, dict] = {}
+init_job_store()
+
+
+@app.middleware("http")
+async def _principal_context(request: Request, call_next):
+    token = set_current_principal(principal_from_headers(request.headers))
+    try:
+        return await call_next(request)
+    finally:
+        reset_current_principal(token)
 
 
 _USER_HIDDEN_PAYLOAD_KEYS = {
@@ -214,13 +239,58 @@ def _set_run_status(run_id: str, message: str, progress: int, status: str = "run
             "progress": progress,
         }
     )
+    _sync_job_metadata(run_id)
 
 
 def _ensure_run(run_id: str) -> dict:
     r = _RUNS.get(run_id)
     if not r:
         raise HTTPException(404, "no such run")
+    if not can_access_job(current_principal(), r):
+        raise HTTPException(403, "You do not have access to this job")
     return r
+
+
+def _job_patch_from_run(run_id: str, run: dict) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "kind": run.get("kind", "comparison"),
+        "status": run.get("status", "unknown"),
+        "status_message": run.get("status_message"),
+        "progress": run.get("progress", 0),
+        "tenant_id": run.get("tenant_id", "default"),
+        "business_unit_id": run.get("business_unit_id", "default"),
+        "created_by": run.get("created_by", "anonymous"),
+        "created_by_role": run.get("created_by_role"),
+        "created_by_name": run.get("created_by_name"),
+        "label": run.get("label"),
+        "base_label": run.get("base_label"),
+        "target_label": run.get("target_label"),
+        "source_format": run.get("source_format"),
+        "base_format": run.get("base_format"),
+        "target_format": run.get("target_format"),
+        "n_pages": len(run.get("page_imgs", [])),
+        "n_pages_base": len(run.get("base_imgs", [])),
+        "n_pages_target": len(run.get("target_imgs", [])),
+        "ai_usage": run.get("ai_usage", empty_usage()),
+        "result_ref": {
+            "db_run_id": run.get("db_run_id"),
+            "work": str(run.get("work")) if run.get("work") else None,
+            "base_pdf": str(run.get("base_pdf")) if run.get("base_pdf") else None,
+            "target_pdf": str(run.get("target_pdf")) if run.get("target_pdf") else None,
+        },
+        "error": run.get("error"),
+    }
+
+
+def _sync_job_metadata(run_id: str) -> None:
+    run = _RUNS.get(run_id)
+    if not run:
+        return
+    try:
+        upsert_job(run_id, _job_patch_from_run(run_id, run))
+    except Exception:
+        pass
 
 
 def _ensure_complete(run_id: str) -> dict:
@@ -290,6 +360,9 @@ def _persist_run_safely(
             run_id=run_id,
             family_supplier="uploaded",
             family_name="document_comparison",
+            tenant_id=str(_RUNS.get(run_id, {}).get("tenant_id") or "default"),
+            business_unit_id=str(_RUNS.get(run_id, {}).get("business_unit_id") or "default"),
+            uploaded_by=str(_RUNS.get(run_id, {}).get("created_by") or "anonymous"),
             base_label=base_label,
             target_label=target_label,
             base_pdf=base_pdf,
@@ -807,6 +880,7 @@ def _structured_extraction_json(r: dict, run_id: str) -> dict[str, Any]:
         for block in blocks
         if block.block_type.value == "table"
     ]
+    tables = [table for table in tables if table.get("is_real_table", True)]
     sections = [
         {
             "title": block.text or _path_label(block.path),
@@ -855,6 +929,9 @@ def _structured_extraction_json(r: dict, run_id: str) -> dict[str, Any]:
 
 
 def _business_table_for_json(table: dict[str, Any]) -> dict[str, Any]:
+    if not table.get("is_real_table", True):
+        return {}
+
     columns = [str(col or "").strip() for col in table.get("columns", []) if str(col or "").strip()]
     rows = []
     for row in table.get("rows") or table.get("row_preview") or []:
@@ -1245,6 +1322,7 @@ def _process_extract(
                 "ai_analysis": ai_analysis,
             }
         )
+        _sync_job_metadata(run_id)
     except Exception as exc:
         _RUNS[run_id].update(
             {
@@ -1255,6 +1333,7 @@ def _process_extract(
                 "traceback": traceback.format_exc(),
             }
         )
+        _sync_job_metadata(run_id)
 
 
 def _process_compare(
@@ -1387,6 +1466,7 @@ def _process_compare(
                 "db_error": db_error,
             }
         )
+        _sync_job_metadata(run_id)
 
     except Exception as exc:
         _RUNS[run_id].update(
@@ -1398,6 +1478,7 @@ def _process_compare(
                 "traceback": traceback.format_exc(),
             }
         )
+        _sync_job_metadata(run_id)
 
 
 @app.get("/")
@@ -1449,29 +1530,18 @@ def health():
 
 @app.get("/jobs")
 def list_jobs(limit: int = 50):
-    rows = []
-    for run_id, run in _RUNS.items():
-        rows.append(
-            {
-                "run_id": run_id,
-                "kind": run.get("kind", "comparison"),
-                "status": run.get("status", "unknown"),
-                "status_message": run.get("status_message"),
-                "progress": run.get("progress", 0),
-                "label": run.get("label"),
-                "base_label": run.get("base_label"),
-                "target_label": run.get("target_label"),
-                "source_format": run.get("source_format"),
-                "base_format": run.get("base_format"),
-                "target_format": run.get("target_format"),
-                "n_pages": len(run.get("page_imgs", [])),
-                "n_pages_base": len(run.get("base_imgs", [])),
-                "n_pages_target": len(run.get("target_imgs", [])),
-                "ai_usage": run.get("ai_usage", empty_usage()),
-                "error": run.get("error"),
-            }
-        )
+    principal = current_principal()
+    by_id = {}
 
+    for record in list_stored_jobs(limit=200):
+        if can_access_job(principal, record):
+            by_id[record["run_id"]] = public_job_record(record)
+
+    for run_id, run in _RUNS.items():
+        if can_access_job(principal, run):
+            by_id[run_id] = public_job_record(_job_patch_from_run(run_id, run))
+
+    rows = list(by_id.values())
     rows.sort(key=lambda item: item.get("run_id", ""), reverse=True)
     limit = max(1, min(limit, 200))
     return {"jobs": rows[:limit], "count": min(len(rows), limit), "total": len(rows)}
@@ -1515,6 +1585,7 @@ async def compare(
         "status": "queued",
         "status_message": "Uploading documents",
         "progress": 5,
+        **job_ownership_fields(),
         "work": work,
         "base_label": base_label,
         "target_label": target_label,
@@ -1525,6 +1596,7 @@ async def compare(
         "ai_usage": empty_usage(),
         "supported_upload_formats": supported_input_extensions(),
     }
+    _sync_job_metadata(run_id)
 
     try:
         base_source = save_upload_to_source(base, work, "base")
@@ -1537,6 +1609,7 @@ async def compare(
                 "target_format": source_kind(target_source),
             }
         )
+        _sync_job_metadata(run_id)
     except Exception as exc:
         _RUNS[run_id].update(
             {
@@ -1547,6 +1620,7 @@ async def compare(
                 "traceback": traceback.format_exc(),
             }
         )
+        _sync_job_metadata(run_id)
         raise HTTPException(500, "Could not save uploaded documents")
 
     worker = threading.Thread(
@@ -1590,6 +1664,7 @@ async def extract_document(
         "status": "queued",
         "status_message": "Uploading document",
         "progress": 5,
+        **job_ownership_fields(),
         "work": work,
         "label": label,
         "page_imgs": [],
@@ -1598,6 +1673,7 @@ async def extract_document(
         "ai_usage": empty_usage(),
         "supported_upload_formats": supported_input_extensions(),
     }
+    _sync_job_metadata(run_id)
 
     try:
         sources = [
@@ -1620,6 +1696,7 @@ async def extract_document(
                 ],
             }
         )
+        _sync_job_metadata(run_id)
     except Exception as exc:
         _RUNS[run_id].update(
             {
@@ -1630,6 +1707,7 @@ async def extract_document(
                 "traceback": traceback.format_exc(),
             }
         )
+        _sync_job_metadata(run_id)
         raise HTTPException(500, "Could not save uploaded document")
 
     worker = threading.Thread(
@@ -1718,6 +1796,7 @@ def get_extract_tables(run_id: str, include_rows: bool = False):
         for block in blocks
         if block.block_type.value == "table"
     ]
+    tables = [table for table in tables if table.get("is_real_table", True)]
     return {"tables": tables, "count": len(tables)}
 
 
@@ -2373,8 +2452,28 @@ _INTERNAL_TABLE_FIELDS = {
     "__table_title__",
     "__table_context__",
     "anchors",
+    "bbox_by_page",
+    "caption",
+    "column_profiles",
+    "extraction_confidence",
+    "extraction_intelligence",
+    "header_index",
+    "header_row_count",
+    "header_rows",
+    "header_sources",
+    "header_strategy",
+    "kind",
+    "language",
     "page_width",
     "page_height",
+    "quality_warnings",
+    "source_extraction",
+    "source_format",
+    "source_tables",
+    "strategies",
+    "table_fingerprint",
+    "visual_match_score",
+    "visual_match_source",
 }
 
 _ROW_LABEL_HINTS = (
@@ -2578,6 +2677,57 @@ def _column_quality(columns: list[str]) -> float:
             useful += 1
 
     return useful / max(1, len(columns))
+
+
+def _table_exposure(table: Block, rows: list[Block], columns: list[str]) -> dict[str, Any]:
+    payload = _safe_payload(table)
+    source_format = str(payload.get("source_format") or "").lower()
+    intelligence = payload.get("extraction_intelligence") if isinstance(payload.get("extraction_intelligence"), dict) else {}
+    table_quality = intelligence.get("table_quality") if isinstance(intelligence.get("table_quality"), dict) else {}
+    confidence = payload.get("extraction_confidence") or table_quality.get("confidence")
+    try:
+        confidence_float = float(confidence) if confidence is not None else None
+    except Exception:
+        confidence_float = None
+
+    header_quality = _column_quality(columns)
+    generic_count = sum(1 for col in columns if _is_generic_column_name(col))
+    generic_ratio = generic_count / max(1, len(columns))
+    row_texts = [_display_text(row.text, 500) for row in rows[:30]]
+    long_text_rows = sum(1 for text in row_texts if len(text) > 160 or len(text.split()) > 24)
+    long_text_ratio = long_text_rows / max(1, len(row_texts))
+    structured_columns = [
+        col for col in columns
+        if any(term in _norm_text(col) for term in (*_ROW_LABEL_HINTS, *_VALUE_COLUMN_HINTS))
+    ]
+
+    reason = "real_table"
+    is_real = True
+
+    if payload.get("layout_table"):
+        is_real = False
+        reason = "word_layout_table"
+    elif len(columns) < 2 or not rows:
+        is_real = False
+        reason = "insufficient_table_shape"
+    elif source_format in {"docx", "word"} and len(columns) <= 3 and long_text_ratio >= 0.45 and not structured_columns:
+        is_real = False
+        reason = "word_narrative_layout"
+    elif confidence_float is not None and confidence_float < 0.42 and header_quality < 0.35:
+        is_real = False
+        reason = "low_table_confidence"
+    elif generic_ratio >= 0.85 and len(rows) <= 2:
+        is_real = False
+        reason = "generic_short_table"
+
+    return {
+        "is_real_table": is_real,
+        "reason": reason,
+        "source_format": source_format or None,
+        "header_quality": round(header_quality, 2),
+        "confidence": confidence_float,
+        "generic_header_ratio": round(generic_ratio, 2),
+    }
 
 
 def _table_title(table: Block, rows: Optional[list[Block]] = None) -> str:
@@ -2886,6 +3036,7 @@ def _table_matrix(table: Block, blocks: list[Block], include_rows: bool = False)
     intelligence = payload.get("extraction_intelligence") if isinstance(payload.get("extraction_intelligence"), dict) else {}
     table_quality = intelligence.get("table_quality") if isinstance(intelligence.get("table_quality"), dict) else {}
     header_preview = " | ".join(str(h)[:40] for h in columns[:8])
+    exposure = _table_exposure(table, rows, columns)
 
     matrix = {
         "id": str(table.id),
@@ -2903,19 +3054,15 @@ def _table_matrix(table: Block, blocks: list[Block], include_rows: bool = False)
         "column_details": _column_details(columns, rows, table),
         "header": columns,
         "header_preview": header_preview,
-        "header_source": payload.get("header_sources", [None])[0] if isinstance(payload.get("header_sources"), list) and payload.get("header_sources") else None,
-        "header_quality": round(_column_quality(columns), 2),
-        "extraction_confidence": payload.get("extraction_confidence") or table_quality.get("confidence"),
+        "header_quality": exposure["header_quality"],
+        "extraction_confidence": exposure["confidence"],
         "quality_warnings": payload.get("quality_warnings") or table_quality.get("warnings") or [],
-        "table_fingerprint": payload.get("table_fingerprint") or (table_quality.get("fingerprint") or {}).get("fingerprint"),
-        "column_profiles": payload.get("column_profiles") or table_quality.get("columns") or [],
-        "intelligence": intelligence,
+        "is_real_table": exposure["is_real_table"],
+        "table_classification": exposure["reason"],
         "suggested_row_columns": row_label_columns,
         "suggested_value_columns": value_columns,
         "row_keys": [_row_key_for_table(table, r, row_label_columns) for r in rows[:150]],
         "row_preview": [_row_summary(r, i, columns=columns, row_columns=row_label_columns, table=table) for i, r in enumerate(rows[:12])],
-        "near_texts": payload.get("near_texts", []),
-        "source_tables": payload.get("source_tables", []),
     }
 
     if include_rows:
@@ -2930,6 +3077,10 @@ def _find_table_by_id(blocks: list[Block], table_id: str | None) -> Optional[Blo
 
     for block in blocks:
         if block.block_type.value == "table" and str(block.id) == str(table_id):
+            rows = _table_rows(block, blocks)
+            columns = _column_names(block, rows)
+            if not _table_exposure(block, rows, columns)["is_real_table"]:
+                return None
             return block
 
     return None
@@ -2952,6 +3103,8 @@ def _find_table_by_header(blocks: list[Block], query: str | None) -> Optional[Bl
 
         rows = _table_rows(block, blocks)
         columns = _column_names(block, rows)
+        if not _table_exposure(block, rows, columns)["is_real_table"]:
+            continue
         searchable = " ".join(
             [
                 _table_title(block, rows),
@@ -3219,16 +3372,16 @@ def _table_review_rows(row_results: list[dict], limit: int = 25) -> list[dict]:
             or row_key.get("target")
             or row_definition.get("base")
             or row_definition.get("target")
-            or "Table row"
+            or "Selected item"
         )
         field_diffs = row.get("field_diffs") or []
 
         if change_type == "ADDED":
-            change = f"New row/value appears in the revised table: {feature}"
-            clarification = "Confirm whether this newly added table entry is expected and applicable."
+            change = f"New value appears in the revised document: {feature}"
+            clarification = "Confirm whether this newly added entry is expected and applicable."
         elif change_type == "DELETED":
-            change = f"Baseline row/value is no longer present in the revised table: {feature}"
-            clarification = "Confirm whether this removed table entry is intentionally discontinued or moved."
+            change = f"Baseline value is no longer present in the revised document: {feature}"
+            clarification = "Confirm whether this removed entry is intentional or moved."
         elif field_diffs:
             examples = []
             for fd in field_diffs[:3]:
@@ -3237,7 +3390,7 @@ def _table_review_rows(row_results: list[dict], limit: int = 25) -> list[dict]:
                 after = str(fd.get("after") or "-")
                 examples.append(f"{field}: {before} -> {after}")
             change = "; ".join(examples)
-            clarification = "Confirm the selected table value changes with the responsible owner."
+            clarification = "Confirm the selected value changes with the responsible owner."
         else:
             change = "No selected value change detected."
             clarification = "No clarification required for the selected columns."
@@ -3465,6 +3618,8 @@ def _table_view_payload(
 ) -> dict:
     rows = _table_rows(table, blocks)
     all_columns = _column_names(table, rows)
+    if not _table_exposure(table, rows, all_columns)["is_real_table"]:
+        raise HTTPException(409, "This extracted content is narrative/layout text, not a structured business table.")
     row_columns = _guess_row_label_columns(all_columns, rows, table)
 
     if columns:
@@ -3516,7 +3671,9 @@ def list_tables(run_id: str, include_rows: bool = False):
         for block in blocks:
             if block.block_type.value != "table":
                 continue
-            out.append(_table_matrix(block, blocks, include_rows=include_rows))
+            matrix = _table_matrix(block, blocks, include_rows=include_rows)
+            if matrix.get("is_real_table", True):
+                out.append(matrix)
         return out
 
     return {
