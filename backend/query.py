@@ -3,7 +3,7 @@ Natural-language query layer.
 
 Returns business-facing answers over:
   - block-level document diffs
-  - table rows and table cells
+  - structured extracted records and values
   - row/key comparisons across old/new documents
 
 Response shape:
@@ -58,9 +58,32 @@ _SIDE_SPLIT_RX = re.compile(
 _INTERNAL_TABLE_FIELDS = {
     "__anchors__",
     "__pages__",
+    "__row_index__",
+    "__table_title__",
+    "__table_context__",
     "anchors",
+    "bbox_by_page",
+    "caption",
+    "column_profiles",
+    "extraction_confidence",
+    "extraction_intelligence",
+    "header_index",
+    "header_row_count",
+    "header_rows",
+    "header_sources",
+    "header_strategy",
+    "kind",
+    "language",
     "page_width",
     "page_height",
+    "quality_warnings",
+    "source_extraction",
+    "source_format",
+    "source_tables",
+    "strategies",
+    "table_fingerprint",
+    "visual_match_score",
+    "visual_match_source",
 }
 
 KNOWN_SECTIONS = {
@@ -484,13 +507,13 @@ def _row_record(row: Block, side: str, blocks: list[Block], score: float = 1.0) 
     values = _row_values(row)
 
     return {
-        "type": "table_row",
+        "type": "record",
         "side": side,
         "change_type": "MATCH",
         "stable_key": row.stable_key,
         "row_key": _row_key(row),
         "definition": _row_definition(row),
-        "block_type": row.block_type.value,
+        "block_type": "record" if row.block_type.value == "table_row" else row.block_type.value,
         "path": row.path,
         "area": context["table_area"],
         "page": row.page_number,
@@ -653,11 +676,11 @@ def _compare_table_rows(base_row: Block, target_row: Block, base_blocks: list[Bl
         change_type = "UNCHANGED"
 
     return {
-        "type": "table_row_comparison",
+        "type": "record_comparison",
         "change_type": change_type,
         "stable_key": base_row.stable_key or target_row.stable_key,
         "row_key": f"{_row_key(base_row)} -> {_row_key(target_row)}",
-        "block_type": "table_row",
+        "block_type": "record",
         "area": f"{base_ctx['table_area']} -> {target_ctx['table_area']}",
         "path": base_row.path,
         "page_base": base_row.page_number,
@@ -716,13 +739,13 @@ def _table_query_answer(nl: str, base_blocks: list[Block], target_blocks: list[B
 
         if comparison["change_type"] == "UNCHANGED":
             answer = (
-                f"I found matching table rows for {base_key} and {target_key}. "
-                "The aligned row values are equivalent based on extracted table cells."
+                f"I found matching extracted records for {base_key} and {target_key}. "
+                "The aligned values are equivalent based on extracted evidence."
             )
         else:
             answer = (
-                f"I compared table row {base_key} from the baseline with {target_key} from the revised document. "
-                f"I found {len(comparison['field_changes'])} cell-level difference"
+                f"I compared {base_key} from the baseline with {target_key} from the revised document. "
+                f"I found {len(comparison['field_changes'])} value difference"
                 f"{'' if len(comparison['field_changes']) == 1 else 's'}."
             )
 
@@ -742,14 +765,14 @@ def _table_query_answer(nl: str, base_blocks: list[Block], target_blocks: list[B
     if rows:
         found_sides = sorted({r["side"] for r in rows if r.get("side")})
         answer = (
-            f"I found {len(rows)} table row match{'es' if len(rows) != 1 else ''} "
+            f"I found {len(rows)} matching extracted record{'s' if len(rows) != 1 else ''} "
             f"for {', '.join(identifiers)} in the {' and '.join(found_sides)} document side"
             f"{'' if len(found_sides) == 1 else 's'}."
         )
     else:
         answer = (
-            "I could not find a matching table row for that identifier in the extracted tables. "
-            "Try using the exact row code, part number, PCB number, or a phrase from the row."
+            "I could not find a matching extracted record for that identifier. "
+            "Try using the exact code, part number, PCB number, or a phrase from the document."
         )
 
     return {
@@ -1295,8 +1318,6 @@ def _business_row(row: dict, feature_mode: bool = False) -> dict:
             "feature": _feature_label(row),
             "change": _human_change(row),
             "seek_clarification": _seek_clarification(row),
-            "citation": row.get("citation") or f"page {row.get('page') or row.get('page_base') or '-'}",
-            "confidence": confidence_text,
         }
 
     return {
@@ -1381,7 +1402,7 @@ def _summary_response(question: str, rows: list[dict], plan: dict, semantic_rows
     selected = _priority_rows(rows, limit=20 if feature_mode else 12)
     business_rows = [_business_row(row, feature_mode=feature_mode) for row in selected]
     columns = (
-        ["feature", "change", "seek_clarification", "citation", "confidence"]
+        ["feature", "change", "seek_clarification"]
         if feature_mode
         else ["area", "change_type", "change", "evidence", "confidence", "review"]
     )
@@ -1617,7 +1638,7 @@ Answer style:
 - Prioritize high-impact mismatches: changed numeric values, dates, obligations, availability/status, pricing/cost, requirements, exclusions, names, codes, table cell changes, added/deleted sections, and wording that changes meaning.
 - When many changes exist, group or merge similar evidence into concise user-useful rows.
 - If the question names a specific PCV, PCB, code, part number, row, column, or numeric identifier, make that identifier the center of the answer and include all available row/cell changes for it from the evidence.
-- If the evidence contains table row values or column alignment, compare those cells directly instead of giving a generic document summary.
+- If the evidence contains structured record values or column alignment, compare those values directly instead of giving a generic document summary.
 
 Question:
 {question}
@@ -1784,7 +1805,7 @@ def _build_answer(question: str, rows: list[dict], plan: dict) -> str:
         return "I could not find matching changes for that question in the extracted comparison."
 
     if plan.get("intent") == "table_row_query":
-        return f"I found {len(rows)} matching table row result{'s' if len(rows) != 1 else ''}."
+        return f"I found {len(rows)} matching extracted record result{'s' if len(rows) != 1 else ''}."
 
     added = sum(1 for r in rows if r["change_type"] == "ADDED")
     deleted = sum(1 for r in rows if r["change_type"] == "DELETED")
@@ -1841,15 +1862,15 @@ def query(
             "mode": _norm(mode) or "fast",
         }
 
-    table_result = _table_query_answer(nl, base_blocks, target_blocks)
     normalized_mode = _norm(mode) or "fast"
     use_ai = normalized_mode in {"ai", "openai", "llm", "agent"}
+    is_summary = _is_summary_intent(nl) or _is_feature_review_table_intent(nl)
+    table_result = None if is_summary else _table_query_answer(nl, base_blocks, target_blocks)
 
     if table_result is not None and not use_ai:
         table_result["mode"] = "fast"
         return table_result
 
-    is_summary = _is_summary_intent(nl) or _is_feature_review_table_intent(nl)
     plan = _broad_summary_plan(nl) if is_summary else parse_query(nl)
     rows = execute_plan(plan, diffs, base_blocks, target_blocks)
     semantic_rows, semantic_usage = _semantic_search(nl, db_run_id)
