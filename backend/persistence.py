@@ -62,8 +62,28 @@ def _row_values(row: Block) -> dict[str, Any]:
             continue
         if key in {
             "anchors",
+            "bbox_by_page",
+            "caption",
+            "column_profiles",
+            "extraction_confidence",
+            "extraction_intelligence",
+            "header_index",
+            "header_row_count",
+            "header_rows",
+            "header_sources",
+            "header_strategy",
+            "kind",
+            "language",
             "page_width",
             "page_height",
+            "quality_warnings",
+            "source_extraction",
+            "source_format",
+            "source_tables",
+            "strategies",
+            "table_fingerprint",
+            "visual_match_score",
+            "visual_match_source",
         }:
             continue
         out[key] = value
@@ -254,6 +274,9 @@ def persist_run(
     run_id: str,
     family_supplier: str,
     family_name: str,
+    tenant_id: str = "default",
+    business_unit_id: str = "default",
+    uploaded_by: str = "anonymous",
     base_label: str,
     target_label: str,
     base_pdf: Path,
@@ -279,11 +302,14 @@ def persist_run(
         return None
 
     with get_conn() as conn:
-        family_id = _upsert_family(conn, family_supplier, family_name)
+        family_id = _upsert_family(conn, family_supplier, family_name, tenant_id=tenant_id, business_unit_id=business_unit_id)
 
         base_doc_id = _upsert_document(
             conn,
             family_id=family_id,
+            tenant_id=tenant_id,
+            business_unit_id=business_unit_id,
+            uploaded_by=uploaded_by,
             label=base_label,
             pdf_path=base_pdf,
             page_count=base_page_count,
@@ -292,6 +318,9 @@ def persist_run(
         target_doc_id = _upsert_document(
             conn,
             family_id=family_id,
+            tenant_id=tenant_id,
+            business_unit_id=business_unit_id,
+            uploaded_by=uploaded_by,
             label=target_label,
             pdf_path=target_pdf,
             page_count=target_page_count,
@@ -318,16 +347,16 @@ def persist_run(
         return str(comparison_id)
 
 
-def _upsert_family(conn, supplier: str, family_name: str) -> uuid.UUID:
+def _upsert_family(conn, supplier: str, family_name: str, *, tenant_id: str, business_unit_id: str) -> uuid.UUID:
     row = conn.execute(
         """
-        INSERT INTO document_family (supplier, family_name)
-        VALUES (%s, %s)
-        ON CONFLICT (supplier, family_name)
+        INSERT INTO document_family (tenant_id, business_unit_id, supplier, family_name)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (tenant_id, business_unit_id, supplier, family_name)
         DO UPDATE SET updated_at = now()
         RETURNING id
         """,
-        (supplier, family_name),
+        (tenant_id, business_unit_id, supplier, family_name),
     ).fetchone()
 
     return row["id"]
@@ -337,6 +366,9 @@ def _upsert_document(
     conn,
     *,
     family_id,
+    tenant_id: str,
+    business_unit_id: str,
+    uploaded_by: str,
     label: str,
     pdf_path: Path,
     page_count: int,
@@ -347,6 +379,8 @@ def _upsert_document(
     row = conn.execute(
         """
         INSERT INTO spec_document (
+            tenant_id,
+            business_unit_id,
             family_id,
             label,
             raw_pdf_blob_uri,
@@ -354,18 +388,22 @@ def _upsert_document(
             page_count,
             sha256,
             extracted_at,
-            coverage_pct
+            coverage_pct,
+            uploaded_by
         )
-        VALUES (%s, %s, %s, %s, %s, %s, now(), %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now(), %s, %s)
         ON CONFLICT (family_id, sha256)
         DO UPDATE SET
             label = EXCLUDED.label,
             page_count = EXCLUDED.page_count,
             extracted_at = now(),
-            coverage_pct = EXCLUDED.coverage_pct
+            coverage_pct = EXCLUDED.coverage_pct,
+            uploaded_by = EXCLUDED.uploaded_by
         RETURNING id
         """,
         (
+            tenant_id,
+            business_unit_id,
             family_id,
             label,
             str(pdf_path),
@@ -373,6 +411,7 @@ def _upsert_document(
             page_count,
             sha,
             coverage,
+            uploaded_by,
         ),
     ).fetchone()
 
