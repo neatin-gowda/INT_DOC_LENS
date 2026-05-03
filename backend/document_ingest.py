@@ -312,7 +312,7 @@ def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
     signatures, clauses in two languages, or side-by-side notes. Those should
     render as document content, not as data tables.
     """
-    if n_cols < 2 or n_cols > 3 or len(rows) < 2:
+    if n_cols < 2 or n_cols > 4 or len(rows) < 2:
         return False
 
     filled_rows = [row for row in rows if _filled_count(row) >= 1]
@@ -324,12 +324,23 @@ def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
     numeric_like_count = 0
     total_cells = 0
     headerish_terms = 0
+    mixed_script_rows = 0
+    delimiter_light_rows = 0
 
     for row in filled_rows[:12]:
+        scripts = set()
+        row_text = " ".join(_clean(cell) for cell in row[:n_cols] if _clean(cell))
+        if "|" not in row_text and "\t" not in row_text and not re.search(r"\s{3,}", row_text):
+            delimiter_light_rows += 1
+
         for cell in row[:n_cols]:
             text = _clean(cell)
             if not text:
                 continue
+            if re.search(r"[\u0600-\u06ff]", text):
+                scripts.add("arabic")
+            if re.search(r"[A-Za-z]", text):
+                scripts.add("latin")
             total_cells += 1
             if len(text) > 45 or len(text.split()) >= 7:
                 long_cell_count += 1
@@ -339,13 +350,26 @@ def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
                 numeric_like_count += 1
             if re.search(r"\b(feature|item|code|pcv|pcb|qty|quantity|price|status|value)\b", text, re.I):
                 headerish_terms += 1
+        if len(scripts) >= 2:
+            mixed_script_rows += 1
 
     if total_cells == 0:
         return False
 
     long_ratio = long_cell_count / total_cells
     structured_ratio = (short_code_count + numeric_like_count + headerish_terms) / total_cells
-    return long_ratio >= 0.35 and structured_ratio < 0.35
+    mixed_script_ratio = mixed_script_rows / max(1, len(filled_rows[:12]))
+    delimiter_light_ratio = delimiter_light_rows / max(1, len(filled_rows[:12]))
+
+    if long_ratio >= 0.35 and structured_ratio < 0.35:
+        return True
+
+    # Bilingual contracts and leases often use 2-4 columns for side-by-side
+    # legal text. They are visually tabular but semantically narrative content.
+    if mixed_script_ratio >= 0.35 and structured_ratio < 0.45 and delimiter_light_ratio >= 0.5:
+        return True
+
+    return False
 
 
 def _row_text(payload: dict[str, str]) -> str:
