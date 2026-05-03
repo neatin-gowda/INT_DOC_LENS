@@ -57,7 +57,8 @@ Rules:
 - Do not mention extraction_intelligence, template confidence, page coordinates,
   bbox, source_format, visual matching, fingerprints, or backend metadata.
 - Prefer exact values: dates, prices, quantities, names, clause labels, row codes.
-- For table rows, explain changed cells when field_changes are available.
+- For structured records or table-derived rows, explain changed values in
+  business language. Do not prefix items with "Table row".
 - Keep the output concise and useful for business review.
 - Cap output at 50 rows.
 
@@ -237,15 +238,13 @@ def _row_key(block: Block) -> str | None:
 def _item_label(block: Block) -> str:
     if block.block_type.value == "table_row":
         key = _row_key(block)
-        return f"Table row {key}" if key else "Table row"
+        return key or _path_label(block.path)
     if block.stable_key:
         return str(block.stable_key)
     return _preview(block.text, 130) or _path_label(block.path)
 
 
 def _category(text: str, block_type: str | None, field_changes: list[dict[str, Any]]) -> str:
-    if block_type == "table_row":
-        return "table"
     combined = f"{_norm_lower(text)} {' '.join(_norm_lower(fc.get('field')) for fc in field_changes)}"
     for name, words in _KEYWORDS_CATEGORY.items():
         if any(word in combined for word in words):
@@ -306,15 +305,15 @@ def _review_need(category: str, impact: str, confidence: float, change_type: str
 
 def _citation(base: Block | None, target: Block | None, block: Block) -> str:
     if base and target:
-        page = f"Baseline page {base.page_number} -> Revised page {target.page_number}"
+        page = f"Baseline p.{base.page_number} -> Revised p.{target.page_number}"
     elif base:
-        page = f"Baseline page {base.page_number}"
+        page = f"Baseline p.{base.page_number}"
     elif target:
-        page = f"Revised page {target.page_number}"
+        page = f"Revised p.{target.page_number}"
     else:
         page = "Page unknown"
-    key = f" - key {block.stable_key}" if block.stable_key else ""
-    return f"{page} - {_path_label(block.path)}{key}"
+    area = _path_label(block.path)
+    return page if area == "Document" else f"{page} - {area}"
 
 
 def _change_sentence(change_type: str, before: str | None, after: str | None, fields: list[dict[str, Any]], block_type: str) -> str:
@@ -336,8 +335,7 @@ def _change_sentence(change_type: str, before: str | None, after: str | None, fi
     if change_type == "DELETED":
         return f"Removed: {before}" if before else "Removed from the revised document."
     if before and after:
-        prefix = "Table row changed" if block_type == "table_row" else "Changed"
-        return f"{prefix} from '{before}' to '{after}'."
+        return f"Changed from '{before}' to '{after}'."
     return "Content changed between versions."
 
 
