@@ -68,6 +68,7 @@ def _row_values(row: Block) -> dict[str, Any]:
             "column_profiles",
             "extraction_confidence",
             "extraction_intelligence",
+            "field_profiles",
             "header_index",
             "header_row_count",
             "header_rows",
