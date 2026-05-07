@@ -26,7 +26,7 @@ from rapidfuzz import fuzz
 
 from .ai_usage import merge_usage, usage_from_response
 from .db import db_enabled, get_conn
-from .embeddings import embed_query, vector_literal
+from .embeddings import embed_query, embedding_deployment, embedding_enabled, vector_literal
 from .models import Block, BlockDiff, ChangeType
 
 
@@ -208,8 +208,12 @@ def _openai_config() -> dict[str, Any]:
 
 def ai_health() -> dict[str, Any]:
     status = _openai_config()
+    embedding_status = {
+        "embedding_configured": embedding_enabled(),
+        "embedding_deployment": embedding_deployment(),
+    }
     if not status["configured"]:
-        return {**status, "ok": False, "message": "Azure OpenAI chat is not fully configured."}
+        return {**status, **embedding_status, "ok": False, "message": "Azure OpenAI chat is not fully configured."}
 
     try:
         from openai import AzureOpenAI
@@ -230,9 +234,9 @@ def ai_health() -> dict[str, Any]:
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or ""
-        return {**status, "ok": True, "message": "Azure OpenAI chat call succeeded.", "sample": content[:120]}
+        return {**status, **embedding_status, "ok": True, "message": "Azure OpenAI chat call succeeded.", "sample": content[:120]}
     except Exception as exc:
-        return {**status, "ok": False, "message": f"Azure OpenAI chat call failed: {type(exc).__name__}: {exc}"}
+        return {**status, **embedding_status, "ok": False, "message": f"Azure OpenAI chat call failed: {type(exc).__name__}: {exc}"}
 
 
 def _preview(s: Any, limit: int = 360) -> str | None:
@@ -1005,12 +1009,12 @@ def llm_plan(nl: str) -> Optional[dict]:
             temperature=0.0,
             response_format={"type": "json_object"},
         )
-        usage = usage_from_response(resp, operation="ask_agent_ai_answer", model=deploy)
+        usage = usage_from_response(resp, operation="ask_agent_query_planning", model=deploy)
         data = json.loads(resp.choices[0].message.content or "{}")
         if isinstance(data, dict):
             data.setdefault("filters", {})
             data["filters"]["text"] = nl
-            data["_usage"] = usage_from_response(resp, operation="ask_agent_query_planning", model=deploy)
+            data["_usage"] = usage
         return data
     except Exception:
         return None
@@ -1717,6 +1721,7 @@ def llm_freeform_answer(
             )
             resp = _send(evidence_rows)
 
+        usage = usage_from_response(resp, operation="ask_agent_ai_summary", model=deploy)
         data = json.loads(resp.choices[0].message.content or "{}")
     except Exception as exc:
         return None, f"Azure OpenAI chat call failed: {type(exc).__name__}: {exc}"
