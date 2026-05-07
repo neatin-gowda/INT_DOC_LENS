@@ -42,22 +42,29 @@ const css = `
     border-radius: 999px;
     overflow: hidden;
     position: relative;
-    background: linear-gradient(90deg, #2f5f4f 0%, #3f8067 48%, #2f5f4f 100%);
+    background: #9a7a10;
     transition: width 450ms ease, background 250ms ease;
   }
-  .progress-fill::after {
+  .progress-fill.running,
+  .progress-fill.queued,
+  .progress-fill.uploading {
+    background: linear-gradient(90deg, #9a7a10 0%, #d2a917 48%, #9a7a10 100%);
+  }
+  .progress-fill.complete {
+    background: #2f6f5b;
+  }
+  .progress-fill.failed {
+    background: #bb3030;
+  }
+  .progress-fill.running::after,
+  .progress-fill.queued::after,
+  .progress-fill.uploading::after {
     content: "";
     position: absolute;
     inset: 0;
     transform: translateX(-100%);
     background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
     animation: progress-shimmer 1.45s ease-in-out infinite;
-  }
-  .progress-fill.failed {
-    background: #bb3030;
-  }
-  .progress-fill.failed::after {
-    display: none;
   }
   @keyframes progress-shimmer {
     100% { transform: translateX(100%); }
@@ -746,7 +753,7 @@ function JobsDashboard({ onOpenJob, error }) {
             <tbody>
               {jobs.map((job) => {
                 const complete = job.status === "complete";
-                const failed = job.status === "failed";
+                const statusInfo = jobStatusInfo(job.status);
                 return (
                   <tr key={job.run_id}>
                     <td style={td}>
@@ -766,10 +773,10 @@ function JobsDashboard({ onOpenJob, error }) {
                     <td style={td}>
                       <JobStatusBadge status={job.status} />
                       {job.status_message && <div style={{ color: "#667085", marginTop: 5 }}>{job.status_message}</div>}
-                      {failed && job.error && <div style={{ color: COLORS.DELETED.text, marginTop: 5 }}>{trim(job.error, 160)}</div>}
+                      {statusInfo.isFailed && job.error && <div style={{ color: COLORS.DELETED.text, marginTop: 5 }}>{trim(job.error, 160)}</div>}
                     </td>
                     <td style={td}>
-                      <ProgressMini value={job.progress || 0} failed={failed} />
+                      <ProgressMini value={job.progress || 0} status={job.status} />
                     </td>
                     <td style={td}>
                       {job.kind === "extraction"
@@ -786,7 +793,7 @@ function JobsDashboard({ onOpenJob, error }) {
                         disabled={!complete}
                         style={complete ? primaryButtonStyle(false, { height: 36 }) : secondaryButtonStyle({ height: 36, opacity: 0.55, cursor: "default" })}
                       >
-                        {complete ? "Open result" : failed ? "Failed" : "Processing"}
+                        {complete ? "Open result" : statusInfo.isFailed ? "Failed" : "Processing"}
                       </button>
                     </td>
                   </tr>
@@ -826,7 +833,7 @@ function UploadPanel({ onUpload, busy, onBack }) {
         <FileInput label="Revised document" helper="Latest, proposed, or updated file" name="target" disabled={busy} />
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <label
+          <div
             style={{
               display: "flex",
               gap: 8,
@@ -840,16 +847,15 @@ function UploadPanel({ onUpload, busy, onBack }) {
               fontWeight: 600,
             }}
           >
-            <input type="checkbox" name="use_llm" value="true" defaultChecked disabled={busy} />
-            AI review summary
-          </label>
+            Classical first pass
+          </div>
 
           <button disabled={busy} style={primaryButtonStyle(busy, { height: 44 })}>
             {busy ? "Processing" : "Compare documents"}
           </button>
 
           <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.35 }}>
-            Turn off AI review summary for a faster first check.
+            First pass runs without AI by default. Use advanced AI only after review feedback.
           </div>
         </div>
       </div>
@@ -894,7 +900,7 @@ function ExtractUploadPanel({ onUpload, busy, onBack }) {
         />
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <label
+          <div
             style={{
               display: "flex",
               gap: 8,
@@ -908,16 +914,15 @@ function ExtractUploadPanel({ onUpload, busy, onBack }) {
               fontWeight: 600,
             }}
           >
-            <input type="checkbox" name="use_ai" value="true" disabled={busy} />
-            Optional AI analysis
-          </label>
+            Classical extraction
+          </div>
 
           <button disabled={busy} style={primaryButtonStyle(busy, { height: 44 })}>
             {busy ? "Extracting" : "Extract content"}
           </button>
 
           <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.35 }}>
-            Extraction runs deterministically first. AI only reviews extracted evidence when enabled.
+            Extraction runs deterministically first. Advanced AI can be added after review feedback.
           </div>
         </div>
       </div>
@@ -1025,8 +1030,9 @@ function Capability({ label, detail }) {
 }
 
 function ProcessingState({ progress, message, status }) {
+  const statusInfo = jobStatusInfo(status);
   const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));
-  const width = Math.max(7, safeProgress);
+  const width = statusInfo.isFailed ? 100 : Math.max(7, statusInfo.isComplete ? 100 : safeProgress);
 
   return (
     <div style={{ marginTop: 20 }}>
@@ -1036,7 +1042,7 @@ function ProcessingState({ progress, message, status }) {
       </div>
       <div className="progress-track">
         <div
-          className={`progress-fill ${status === "failed" ? "failed" : ""}`}
+          className={`progress-fill ${statusInfo.className}`}
           style={{
             width: `${width}%`,
           }}
@@ -2036,19 +2042,30 @@ function nativeHighlightStyle(kind, compact = false) {
 
 function ReviewReport({ runId }) {
   const [rows, setRows] = useState(null);
+  const [quality, setQuality] = useState(null);
   const [filter, setFilter] = useState("ALL");
   const [error, setError] = useState("");
 
   useEffect(() => {
     setRows(null);
+    setQuality(null);
     setError("");
 
-    fetch(`${API}/runs/${runId}/summary`)
-      .then(async (r) => {
+    Promise.all([
+      fetch(`${API}/runs/${runId}/summary`).then(async (r) => {
         if (!r.ok) throw new Error(await readResponseError(r));
         return r.json();
+      }),
+      fetch(`${API}/runs/${runId}/diff?limit=500`).then(async (r) => {
+        if (!r.ok) return { diffs: [] };
+        return r.json();
+      }),
+    ])
+      .then(([summaryData, diffData]) => {
+        const summaryRows = Array.isArray(summaryData) ? summaryData : summaryData.rows || summaryData.summary || [];
+        setRows(mergeReviewRows(summaryRows, diffData.diffs || []));
+        setQuality(summaryData.quality || null);
       })
-      .then((data) => setRows(Array.isArray(data) ? data : data.rows || data.summary || []))
       .catch((err) => setError(friendlyFetchError(err)));
   }, [runId]);
 
@@ -2092,6 +2109,8 @@ function ReviewReport({ runId }) {
         <MetricCard label="Avg confidence" value={avgConfidence == null ? "-" : `${Math.round(avgConfidence * 100)}%`} />
         <MetricCard label="Report" value="PDF ready" />
       </div>
+
+      <AccuracyImprovementPanel runId={runId} quality={quality} avgConfidence={avgConfidence} />
 
       {keyInsights.length > 0 && (
         <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 12 }}>
@@ -2163,6 +2182,115 @@ function ReviewReport({ runId }) {
         </div>
       )}
     </div>
+  );
+}
+
+function AccuracyImprovementPanel({ runId, quality, avgConfidence }) {
+  const systemScore = quality?.system_score ?? (typeof avgConfidence === "number" ? Math.round(avgConfidence * 100) : "");
+  const recommended = quality?.ai_recommended || (typeof avgConfidence === "number" && avgConfidence < 0.9);
+  const [form, setForm] = useState({
+    reviewer_name: "",
+    document_type: "",
+    user_score: systemScore === "" ? "" : systemScore,
+    missing_areas: "",
+    page_numbers: "",
+    comments: "",
+    wants_ai_enhancement: true,
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    setForm((prev) => ({ ...prev, user_score: systemScore === "" ? "" : systemScore }));
+    setError("");
+    setResult(null);
+  }, [runId, systemScore]);
+
+  if (!recommended) return null;
+
+  const update = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const rows = result?.rows || [];
+  const columns = result?.columns || inferColumns(rows);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setResult(null);
+
+    const payload = {
+      ...form,
+      user_score: Number(form.user_score),
+      wants_ai_enhancement: Boolean(form.wants_ai_enhancement),
+    };
+
+    try {
+      const endpoint = payload.wants_ai_enhancement ? "enhance-summary" : "feedback";
+      const body = payload.wants_ai_enhancement ? { feedback: payload, threshold: 0.9, response_language: "source" } : payload;
+      const r = await fetch(`${API}/runs/${runId}/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(await readResponseError(r));
+      const data = await r.json();
+      setResult(payload.wants_ai_enhancement ? data : { answer: "Feedback saved for this review session.", rows: [], usage: null });
+    } catch (err) {
+      setError(friendlyFetchError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderLeft: "4px solid #9a7a10", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontWeight: 650, color: "#344054" }}>Accuracy improvement</div>
+          <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }}>
+            Classical review score is {systemScore === "" ? "-" : systemScore}%. Add feedback before using advanced AI on focused areas.
+          </div>
+        </div>
+        <ChangeBadge type="MODIFIED" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginBottom: 10 }}>
+        <input required value={form.reviewer_name} onChange={(e) => update("reviewer_name", e.target.value)} placeholder="Reviewer name" style={inputStyle} />
+        <input required value={form.document_type} onChange={(e) => update("document_type", e.target.value)} placeholder="Document type" style={inputStyle} />
+        <input required type="number" min="0" max="100" value={form.user_score} onChange={(e) => update("user_score", e.target.value)} placeholder="Your score" style={inputStyle} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10, marginBottom: 10 }}>
+        <textarea required value={form.missing_areas} onChange={(e) => update("missing_areas", e.target.value)} placeholder="Areas that looked incorrect or missing" rows={3} style={{ ...inputStyle, resize: "vertical" }} />
+        <textarea value={form.page_numbers} onChange={(e) => update("page_numbers", e.target.value)} placeholder="Page numbers, if known" rows={3} style={{ ...inputStyle, resize: "vertical" }} />
+      </div>
+
+      <textarea required value={form.comments} onChange={(e) => update("comments", e.target.value)} placeholder="Reviewer comments for this session" rows={3} style={{ ...inputStyle, resize: "vertical", marginBottom: 10 }} />
+
+      <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#475467", fontSize: 13, marginBottom: 10 }}>
+        <input type="checkbox" checked={form.wants_ai_enhancement} onChange={(e) => update("wants_ai_enhancement", e.target.checked)} />
+        Use advanced AI on the weak or flagged areas after saving this feedback
+      </label>
+
+      {error && <ErrorBox message={error} />}
+
+      <button type="submit" disabled={busy} style={primaryButtonStyle(busy, { height: 38 })}>
+        {busy ? "Submitting" : form.wants_ai_enhancement ? "Submit feedback and improve" : "Save feedback"}
+      </button>
+
+      {result?.answer && (
+        <div style={{ marginTop: 12, background: "#fbfaf6", border: "1px solid #d8d0c3", borderRadius: 8, padding: 12, color: "#344054", lineHeight: 1.45 }}>
+          {result.answer}
+        </div>
+      )}
+      {result?.usage && <AiUsageCard usage={result.usage} />}
+      {rows.length > 0 && columns.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <GenericRowsTable columns={columns} rows={rows} />
+        </div>
+      )}
+    </form>
   );
 }
 
@@ -3251,27 +3379,39 @@ function Confidence({ value }) {
 }
 
 function JobStatusBadge({ status }) {
-  const value = String(status || "queued").toLowerCase();
-  const tone =
-    value === "complete" ? COLORS.ADDED :
-    value === "failed" ? COLORS.DELETED :
-    value === "running" ? COLORS.MODIFIED :
-    COLORS.UNCHANGED;
+  const info = jobStatusInfo(status);
   return (
-    <span style={{ display: "inline-block", background: tone.chip, color: tone.text, border: `1px solid ${tone.border}`, padding: "2px 8px", borderRadius: 999, fontWeight: 650, fontSize: 12 }}>
-      {value}
+    <span style={{ display: "inline-block", background: info.tone.chip, color: info.tone.text, border: `1px solid ${info.tone.border}`, padding: "2px 8px", borderRadius: 999, fontWeight: 650, fontSize: 12 }}>
+      {info.label}
     </span>
   );
 }
 
-function ProgressMini({ value, failed = false }) {
+function jobStatusInfo(status) {
+  const value = String(status || "queued").toLowerCase();
+  const isComplete = value === "complete" || value === "completed";
+  const isFailed = value === "failed" || value === "error";
+  const isRunning = value === "running" || value === "processing" || value === "uploading";
+  return {
+    value,
+    label: isComplete ? "complete" : isFailed ? "failed" : value,
+    className: isComplete ? "complete" : isFailed ? "failed" : isRunning ? "running" : "queued",
+    tone: isComplete ? COLORS.ADDED : isFailed ? COLORS.DELETED : isRunning ? COLORS.MODIFIED : COLORS.UNCHANGED,
+    isComplete,
+    isFailed,
+  };
+}
+
+function ProgressMini({ value, status }) {
+  const info = jobStatusInfo(status);
   const pct = Math.max(0, Math.min(100, Number(value) || 0));
+  const width = info.isFailed ? 100 : info.isComplete ? 100 : pct;
   return (
     <div>
       <div className="progress-track" style={{ height: 6, minWidth: 140 }}>
-        <div className={`progress-fill ${failed ? "failed" : ""}`} style={{ width: `${failed ? 100 : pct}%` }} />
+        <div className={`progress-fill ${info.className}`} style={{ width: `${width}%` }} />
       </div>
-      <div style={{ marginTop: 5, color: "#667085", fontSize: 12 }}>{failed ? "failed" : `${pct}%`}</div>
+      <div style={{ marginTop: 5, color: "#667085", fontSize: 12 }}>{info.isFailed ? "failed" : `${info.isComplete ? 100 : pct}%`}</div>
     </div>
   );
 }
@@ -3674,12 +3814,70 @@ function impactRank(value) {
 function rowChangeType(row) {
   const raw = String(row?.change_type || row?.changeType || row?.status || "").toUpperCase();
   if (["ADDED", "DELETED", "MODIFIED", "UNCHANGED", "MATCH"].includes(raw)) return raw;
+  if ((row?.after || row?.target_text) && !(row?.before || row?.base_text)) return "ADDED";
+  if ((row?.before || row?.base_text) && !(row?.after || row?.target_text)) return "DELETED";
 
   const text = `${row?.type || ""} ${row?.change || ""} ${row?.description || ""} ${row?.review || ""}`.toUpperCase();
   if (text.includes("ADDED") || text.includes("NEW CONTENT") || text.includes("INTRODUCED")) return "ADDED";
   if (text.includes("DELETED") || text.includes("REMOVED") || text.includes("DROPPED")) return "DELETED";
   if (text.includes("MODIFIED") || text.includes("CHANGED") || text.includes("UPDATED") || text.includes("REVISED")) return "MODIFIED";
   return raw || "MODIFIED";
+}
+
+function reviewRowFromDiff(diff) {
+  const type = rowChangeType(diff);
+  const before = diff?.before || "";
+  const after = diff?.after || "";
+  const item = diff?.stable_key || pathLeaf(diff?.path) || "Document change";
+  const citation = [
+    diff?.page_base ? `Baseline page ${diff.page_base}` : "",
+    diff?.page_target ? `Revised page ${diff.page_target}` : "",
+  ].filter(Boolean).join(" -> ");
+  const change =
+    type === "ADDED" ? `Added: ${trim(after, 260)}` :
+    type === "DELETED" ? `Deleted: ${trim(before, 260)}` :
+    `Changed from "${trim(before, 120)}" to "${trim(after, 120)}"`;
+
+  return {
+    feature: item,
+    item,
+    area: pathLeaf(diff?.path) || "Document",
+    change_type: type,
+    change,
+    before,
+    after,
+    citation,
+    impact: diff?.impact,
+    confidence: typeof diff?.similarity === "number" ? Math.max(0.55, Math.min(0.98, 1 - Math.abs(1 - diff.similarity))) : null,
+    seek_clarification: type === "UNCHANGED" ? "None" : "Review recommended.",
+  };
+}
+
+function mergeReviewRows(summaryRows, diffRows) {
+  const rows = Array.isArray(summaryRows) ? [...summaryRows] : [];
+  const diffList = Array.isArray(diffRows) ? diffRows : [];
+  const existingTypes = new Set(rows.map(rowChangeType));
+  const seen = new Set(rows.map((row) => `${rowChangeType(row)}:${row.stable_key || row.item || row.feature || row.path || row.change}`));
+
+  ["ADDED", "DELETED"].forEach((type) => {
+    if (existingTypes.has(type)) return;
+    let added = 0;
+    diffList.forEach((diff) => {
+      if (added >= 12 || rowChangeType(diff) !== type) return;
+      const key = `${type}:${diff.stable_key || diff.path || diff.before || diff.after}`;
+      if (seen.has(key)) return;
+      rows.push(reviewRowFromDiff(diff));
+      seen.add(key);
+      added += 1;
+    });
+  });
+
+  return rows;
+}
+
+function pathLeaf(value) {
+  const parts = String(value || "").split("/").map((part) => part.trim()).filter(Boolean);
+  return parts[parts.length - 1] || "";
 }
 
 function needsReview(row) {
