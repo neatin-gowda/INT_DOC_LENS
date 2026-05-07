@@ -92,6 +92,33 @@ CREATE INDEX IF NOT EXISTS idx_doculens_job_owner ON doculens_job (tenant_id, bu
 CREATE INDEX IF NOT EXISTS idx_doculens_job_status ON doculens_job (tenant_id, business_unit_id, status, updated_at DESC);
 
 -- ---------------------------------------------------------------------
+-- Human feedback captured before optional AI enhancement.
+-- This keeps the default workflow deterministic and uses AI only after the
+-- reviewer confirms which areas matter for the current document/session.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS doculens_feedback (
+    id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    run_id                TEXT NOT NULL,
+    tenant_id             TEXT NOT NULL DEFAULT 'default',
+    business_unit_id      TEXT NOT NULL DEFAULT 'default',
+    created_by            TEXT NOT NULL DEFAULT 'anonymous',
+    reviewer_name         TEXT NOT NULL,
+    document_type         TEXT NOT NULL,
+    system_score          NUMERIC(5,2),
+    user_score            NUMERIC(5,2),
+    missing_areas         TEXT NOT NULL,
+    page_numbers          TEXT,
+    comments              TEXT NOT NULL,
+    wants_ai_enhancement  BOOLEAN NOT NULL DEFAULT false,
+    quality_profile       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ai_context            JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_doculens_feedback_run ON doculens_feedback (run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_doculens_feedback_scope ON doculens_feedback (tenant_id, business_unit_id, created_at DESC);
+
+-- ---------------------------------------------------------------------
 -- A "block" = the smallest semantically meaningful unit
 -- (section heading, table row, paragraph, list item, key/value pair).
 -- block_type is one of: section | heading | paragraph | table | table_row
