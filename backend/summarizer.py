@@ -407,7 +407,36 @@ def _select_evidence(diffs: list[BlockDiff], base_blocks: list[Block], target_bl
         scored.append((score, row))
 
     scored.sort(key=lambda item: -item[0])
-    return [row for _, row in scored[:limit]]
+    ordered = [row for _, row in scored]
+
+    selected: list[dict[str, Any]] = []
+    selected_keys = set()
+
+    def add_row(row: dict[str, Any]) -> bool:
+        key = _dedupe_key(row)
+        if key in selected_keys or len(selected) >= limit:
+            return False
+        selected.append(row)
+        selected_keys.add(key)
+        return True
+
+    # Keep the report balanced. High-volume table modifications should not hide
+    # concrete additions or deletions from the business review.
+    per_type_floor = max(2, min(10, limit // 5))
+    for change_type in ("ADDED", "DELETED", "MODIFIED"):
+        added = 0
+        for row in ordered:
+            if row.get("change_type") != change_type:
+                continue
+            if add_row(row):
+                added += 1
+            if added >= per_type_floor:
+                break
+
+    for row in ordered:
+        add_row(row)
+
+    return selected
 
 
 def _call_llm(prompt: str, usage_callback=None) -> str:
@@ -457,17 +486,61 @@ def summarize(
             data = json.loads(raw)
             rows = data.get("rows") if isinstance(data, dict) else data
             if isinstance(rows, list):
-                return [_coerce_summary_row(row) for row in rows[:50] if isinstance(row, dict)]
+                return _ensure_change_type_coverage(
+                    [_coerce_summary_row(row) for row in rows[:50] if isinstance(row, dict)],
+                    evidence,
+                )
         except Exception as exc:
             print(f"[summarizer] AI path failed ({exc}); using deterministic summary.")
 
-    return _heuristic_summary(evidence)
+    return _ensure_change_type_coverage(_heuristic_summary(evidence), evidence)
+
+
+def _infer_change_type(row: dict[str, Any]) -> str:
+    raw = str(row.get("change_type") or row.get("status") or "").upper()
+    if raw in {"ADDED", "DELETED", "MODIFIED", "UNCHANGED", "MATCH"}:
+        return raw
+
+    before = _clean(row.get("before"))
+    after = _clean(row.get("after"))
+    if after and not before:
+        return "ADDED"
+    if before and not after:
+        return "DELETED"
+
+    text = " ".join(str(row.get(key) or "") for key in ("feature", "item", "change", "review_reason")).upper()
+    if any(term in text for term in ("ADDED", "NEW ", "INTRODUCED")):
+        return "ADDED"
+    if any(term in text for term in ("DELETED", "REMOVED", "DROPPED")):
+        return "DELETED"
+    return "MODIFIED"
+
+
+def _ensure_change_type_coverage(rows: list[SummaryRow], evidence: list[dict[str, Any]], limit: int = 50) -> list[SummaryRow]:
+    present = {str(row.change_type or "").upper() for row in rows if row.change_type}
+    wanted = {str(ev.get("change_type") or "").upper() for ev in evidence if ev.get("change_type")}
+    missing = [change_type for change_type in ("ADDED", "DELETED", "MODIFIED") if change_type in wanted and change_type not in present]
+
+    if not missing:
+        return rows[:limit]
+
+    fillers = _heuristic_summary([ev for ev in evidence if str(ev.get("change_type") or "").upper() in missing])
+    merged = rows[: max(0, limit - len(missing))]
+    for filler in fillers:
+        if str(filler.change_type or "").upper() in missing:
+            merged.append(filler)
+            missing.remove(str(filler.change_type or "").upper())
+        if not missing:
+            break
+
+    return merged[:limit]
 
 
 def _coerce_summary_row(row: dict[str, Any]) -> SummaryRow:
     feature = row.get("feature") or row.get("item") or row.get("area") or "Document change"
     change = row.get("change") or "Change detected."
     seek = row.get("seek_clarification") or "None"
+    change_type = _infer_change_type(row)
 
     try:
         confidence = float(row["confidence"]) if row.get("confidence") is not None else None
@@ -483,7 +556,7 @@ def _coerce_summary_row(row: dict[str, Any]) -> SummaryRow:
         seek_clarification=str(seek),
         area=row.get("area"),
         item=row.get("item") or str(feature),
-        change_type=row.get("change_type"),
+        change_type=change_type,
         category=row.get("category"),
         impact=row.get("impact"),
         confidence=confidence,
