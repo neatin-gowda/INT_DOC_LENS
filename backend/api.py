@@ -142,6 +142,23 @@ class QueryReq(BaseModel):
     response_language: str = "source"
 
 
+class FeedbackReq(BaseModel):
+    reviewer_name: str
+    document_type: str
+    user_score: float = Field(..., ge=0, le=100)
+    missing_areas: str
+    comments: str
+    page_numbers: Optional[str] = None
+    wants_ai_enhancement: bool = False
+
+
+class EnhanceSummaryReq(BaseModel):
+    feedback_id: Optional[str] = None
+    feedback: Optional[FeedbackReq] = None
+    threshold: float = Field(0.9, ge=0, le=1)
+    response_language: str = "source"
+
+
 class AiSummaryPdfReq(BaseModel):
     title: str = "AI Summary"
     answer: str = ""
@@ -305,6 +322,95 @@ def _ensure_complete(run_id: str) -> dict:
     return r
 
 
+def _summary_quality_profile(r: dict, threshold: float = 0.9) -> dict[str, Any]:
+    rows = [_dump_model(s) for s in r.get("summary", [])]
+    confidences = []
+    low_rows = []
+
+    for row in rows:
+        try:
+            conf = float(row.get("confidence"))
+        except Exception:
+            conf = None
+        if conf is None:
+            continue
+        if conf > 1:
+            conf = conf / 100
+        conf = max(0.0, min(1.0, conf))
+        confidences.append(conf)
+        if conf < threshold or row.get("needs_review"):
+            low_rows.append(
+                {
+                    "feature": row.get("feature") or row.get("item") or "Document change",
+                    "change_type": row.get("change_type"),
+                    "confidence": conf,
+                    "page_base": row.get("page_base"),
+                    "page_target": row.get("page_target"),
+                    "citation": row.get("citation"),
+                    "review_reason": row.get("review_reason") or row.get("seek_clarification"),
+                }
+            )
+
+    avg = sum(confidences) / len(confidences) if confidences else None
+    score = round(avg * 100, 2) if avg is not None else None
+    return {
+        "avg_confidence": avg,
+        "system_score": score,
+        "threshold": threshold,
+        "ai_recommended": avg is not None and avg < threshold,
+        "review_items": len(rows),
+        "low_confidence_items": len(low_rows),
+        "focus_items": low_rows[:30],
+    }
+
+
+def _validate_feedback(req: FeedbackReq) -> None:
+    required = {
+        "reviewer_name": req.reviewer_name,
+        "document_type": req.document_type,
+        "missing_areas": req.missing_areas,
+        "comments": req.comments,
+    }
+    missing = [name for name, value in required.items() if not str(value or "").strip()]
+    if missing:
+        raise HTTPException(400, "Feedback requires " + ", ".join(missing))
+
+
+def _feedback_record(run_id: str, r: dict, req: FeedbackReq, quality: dict[str, Any]) -> dict[str, Any]:
+    _validate_feedback(req)
+    focus = quality.get("focus_items") or []
+    record = {
+        "id": str(uuid.uuid4()),
+        "run_id": run_id,
+        "tenant_id": r.get("tenant_id", "default"),
+        "business_unit_id": r.get("business_unit_id", "default"),
+        "created_by": r.get("created_by", "anonymous"),
+        "reviewer_name": req.reviewer_name.strip(),
+        "document_type": req.document_type.strip(),
+        "system_score": quality.get("system_score"),
+        "user_score": req.user_score,
+        "missing_areas": req.missing_areas.strip(),
+        "page_numbers": str(req.page_numbers or "").strip(),
+        "comments": req.comments.strip(),
+        "wants_ai_enhancement": bool(req.wants_ai_enhancement),
+        "quality_profile": quality,
+        "ai_context": {
+            "focus_items": focus,
+            "instruction": "Use reviewer feedback to focus optional AI review on weak or missing areas only.",
+        },
+    }
+    return record
+
+
+def _store_feedback(record: dict[str, Any]) -> Optional[str]:
+    try:
+        from .persistence import persist_feedback
+
+        return persist_feedback(record)
+    except Exception:
+        return None
+
+
 def _ensure_extraction_complete(run_id: str) -> dict:
     r = _ensure_run(run_id)
 
@@ -349,6 +455,7 @@ def _persist_run_safely(
     base_page_count: int,
     target_page_count: int,
     enable_embeddings: bool = True,
+    usage_callback=None,
 ) -> tuple[Optional[int], Optional[str]]:
     try:
         from .persistence import persist_run
@@ -376,6 +483,7 @@ def _persist_run_safely(
             base_page_count=base_page_count,
             target_page_count=target_page_count,
             enable_embeddings=enable_embeddings,
+            usage_callback=usage_callback,
         )
         return db_run_id, None
     except Exception:
@@ -1436,6 +1544,7 @@ def _process_compare(
             base_page_count=len(base_imgs),
             target_page_count=len(target_imgs),
             enable_embeddings=use_llm,
+            usage_callback=lambda usage: add_usage(_RUNS[run_id], usage),
         )
 
         _RUNS[run_id].update(
@@ -1502,6 +1611,8 @@ def root():
             "GET /runs/{id}",
             "GET /runs/{id}/diff",
             "GET /runs/{id}/summary",
+            "POST /runs/{id}/feedback",
+            "POST /runs/{id}/enhance-summary",
             "GET /runs/{id}/report.pdf",
             "POST /runs/{id}/ai-summary.pdf",
             "POST /runs/{id}/query",
@@ -1915,7 +2026,85 @@ def get_diff(
 @app.get("/runs/{run_id}/summary")
 def get_summary(run_id: str):
     r = _ensure_complete(run_id)
-    return {"summary": [_dump_model(s) for s in r["summary"]]}
+    rows = [_dump_model(s) for s in r["summary"]]
+    return {"summary": rows, "rows": rows, "stats": r.get("stats", {}), "quality": _summary_quality_profile(r)}
+
+
+@app.post("/runs/{run_id}/feedback")
+def submit_feedback(run_id: str, req: FeedbackReq):
+    r = _ensure_complete(run_id)
+    quality = _summary_quality_profile(r)
+    record = _feedback_record(run_id, r, req, quality)
+    r.setdefault("feedback", []).append(record)
+    stored_id = _store_feedback(record)
+    return {
+        "feedback_id": record["id"],
+        "stored": bool(stored_id),
+        "quality": quality,
+        "feedback": {
+            "reviewer_name": record["reviewer_name"],
+            "document_type": record["document_type"],
+            "user_score": record["user_score"],
+            "wants_ai_enhancement": record["wants_ai_enhancement"],
+        },
+    }
+
+
+@app.post("/runs/{run_id}/enhance-summary")
+def enhance_summary(run_id: str, req: EnhanceSummaryReq):
+    r = _ensure_complete(run_id)
+    quality = _summary_quality_profile(r, threshold=req.threshold)
+
+    feedback = None
+    if req.feedback is not None:
+        feedback_record = _feedback_record(run_id, r, req.feedback, quality)
+        r.setdefault("feedback", []).append(feedback_record)
+        _store_feedback(feedback_record)
+        feedback = feedback_record
+    elif req.feedback_id:
+        feedback = next((item for item in r.get("feedback", []) if item.get("id") == req.feedback_id), None)
+
+    if not feedback:
+        raise HTTPException(400, "Feedback is required before advanced AI enhancement.")
+
+    focus_items = quality.get("focus_items") or []
+    page_hint = feedback.get("page_numbers") or "not specified"
+    prompt = (
+        "Improve the review summary using only extracted comparison evidence. "
+        "Focus on the lower-confidence or user-flagged areas. "
+        f"Document type: {feedback.get('document_type')}. "
+        f"System score: {feedback.get('system_score')}. User score: {feedback.get('user_score')}. "
+        f"Reviewer flagged areas: {feedback.get('missing_areas')}. "
+        f"Reviewer page hints: {page_hint}. "
+        f"Reviewer comment: {feedback.get('comments')}. "
+        "Return a business-facing table with columns Feature, Change, Seek Clarification, Evidence. "
+        f"Low-confidence focus items: {json.dumps(focus_items[:20], ensure_ascii=False, default=str)}"
+    )
+
+    result = nl_query(
+        prompt,
+        r["diffs"],
+        r["base_blocks"],
+        r["target_blocks"],
+        db_run_id=r.get("db_run_id"),
+        mode="ai",
+        response_language=req.response_language,
+    )
+
+    if not isinstance(result, dict):
+        result = {
+            "answer": f"I found {len(result)} matching changes for the feedback scope.",
+            "rows": result[:80],
+            "count": len(result),
+            "mode": "fast",
+        }
+
+    add_usage(r, result.get("usage"))
+    _sync_job_metadata(run_id)
+    result["feedback_id"] = feedback["id"]
+    result["quality"] = quality
+    result["job_ai_usage"] = r.get("ai_usage", empty_usage())
+    return result
 
 
 @app.get("/runs/{run_id}/report.pdf")
@@ -2134,6 +2323,7 @@ def post_query(run_id: str, req: QueryReq):
 
     if isinstance(result, dict):
         add_usage(r, result.get("usage"))
+        _sync_job_metadata(run_id)
         result["job_ai_usage"] = r.get("ai_usage", empty_usage())
         return result
 
