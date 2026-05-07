@@ -559,6 +559,7 @@ export default function App() {
               {tab === "viewer" && <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />}
               {tab === "report" && <ReviewReport runId={runId} />}
               {tab === "query" && <QueryPanel runId={runId} />}
+              {tab === "accuracy" && <AccuracyImprovementTab runId={runId} />}
               {tab === "tables" && <TablesWorkspace runId={runId} />}
             </main>
           </>
@@ -1160,6 +1161,7 @@ function Tabs({ tab, setTab }) {
     ["viewer", "Visual review"],
     ["report", "Review report"],
     ["query", "Ask agent"],
+    ["accuracy", "Improve accuracy"],
     ["tables", "Table workspace"],
   ];
 
@@ -2042,13 +2044,11 @@ function nativeHighlightStyle(kind, compact = false) {
 
 function ReviewReport({ runId }) {
   const [rows, setRows] = useState(null);
-  const [quality, setQuality] = useState(null);
   const [filter, setFilter] = useState("ALL");
   const [error, setError] = useState("");
 
   useEffect(() => {
     setRows(null);
-    setQuality(null);
     setError("");
 
     Promise.all([
@@ -2064,7 +2064,6 @@ function ReviewReport({ runId }) {
       .then(([summaryData, diffData]) => {
         const summaryRows = Array.isArray(summaryData) ? summaryData : summaryData.rows || summaryData.summary || [];
         setRows(mergeReviewRows(summaryRows, diffData.diffs || []));
-        setQuality(summaryData.quality || null);
       })
       .catch((err) => setError(friendlyFetchError(err)));
   }, [runId]);
@@ -2109,8 +2108,6 @@ function ReviewReport({ runId }) {
         <MetricCard label="Avg confidence" value={avgConfidence == null ? "-" : `${Math.round(avgConfidence * 100)}%`} />
         <MetricCard label="Report" value="PDF ready" />
       </div>
-
-      <AccuracyImprovementPanel runId={runId} quality={quality} avgConfidence={avgConfidence} />
 
       {keyInsights.length > 0 && (
         <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 12 }}>
@@ -2185,9 +2182,33 @@ function ReviewReport({ runId }) {
   );
 }
 
-function AccuracyImprovementPanel({ runId, quality, avgConfidence }) {
-  const systemScore = quality?.system_score ?? (typeof avgConfidence === "number" ? Math.round(avgConfidence * 100) : "");
-  const recommended = quality?.ai_recommended || (typeof avgConfidence === "number" && avgConfidence < 0.9);
+function AccuracyImprovementTab({ runId }) {
+  const [quality, setQuality] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setQuality(null);
+    setError("");
+
+    fetch(`${API}/runs/${runId}/summary`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(await readResponseError(r));
+        return r.json();
+      })
+      .then((data) => setQuality(data.quality || null))
+      .catch((err) => setError(friendlyFetchError(err)));
+  }, [runId]);
+
+  if (error) return <ErrorBox message={error} />;
+  if (!quality) return <SoftLoading label="Loading accuracy profile" />;
+
+  return <AccuracyImprovementPanel runId={runId} quality={quality} />;
+}
+
+function AccuracyImprovementPanel({ runId, quality }) {
+  const systemScore = quality?.system_score ?? "";
+  const recommended = Boolean(quality?.ai_recommended);
+  const focusItems = quality?.focus_items || [];
   const [form, setForm] = useState({
     reviewer_name: "",
     document_type: "",
@@ -2197,21 +2218,39 @@ function AccuracyImprovementPanel({ runId, quality, avgConfidence }) {
     comments: "",
     wants_ai_enhancement: true,
   });
+  const [selectedFocus, setSelectedFocus] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
 
   useEffect(() => {
     setForm((prev) => ({ ...prev, user_score: systemScore === "" ? "" : systemScore }));
+    setSelectedFocus([]);
     setError("");
     setResult(null);
   }, [runId, systemScore]);
 
-  if (!recommended) return null;
-
   const update = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
   const rows = result?.rows || [];
   const columns = result?.columns || inferColumns(rows);
+  const focusLabel = (item) => {
+    const page = item.page_target || item.page_base;
+    const conf = typeof item.confidence === "number" ? ` · ${Math.round(item.confidence * 100)}%` : "";
+    return `${item.feature || "Review item"}${page ? ` · page ${page}` : ""}${conf}`;
+  };
+  const setMissingAreasFromFocus = (items) => {
+    const text = items.map(focusLabel).join("\n");
+    setSelectedFocus(items);
+    setForm((prev) => ({ ...prev, missing_areas: text }));
+  };
+  const toggleFocus = (item) => {
+    const key = focusLabel(item);
+    const exists = selectedFocus.some((selected) => focusLabel(selected) === key);
+    const next = exists
+      ? selectedFocus.filter((selected) => focusLabel(selected) !== key)
+      : [...selectedFocus, item];
+    setMissingAreasFromFocus(next);
+  };
 
   const submit = async (event) => {
     event.preventDefault();
@@ -2222,6 +2261,7 @@ function AccuracyImprovementPanel({ runId, quality, avgConfidence }) {
     const payload = {
       ...form,
       user_score: Number(form.user_score),
+      missing_areas: form.missing_areas.trim() || selectedFocus.map(focusLabel).join("\n"),
       wants_ai_enhancement: Boolean(form.wants_ai_enhancement),
     };
 
@@ -2244,7 +2284,7 @@ function AccuracyImprovementPanel({ runId, quality, avgConfidence }) {
   };
 
   return (
-    <form onSubmit={submit} style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderLeft: "4px solid #9a7a10", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+    <form onSubmit={submit} style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderRadius: 8, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
         <div>
           <div style={{ fontWeight: 650, color: "#344054" }}>Accuracy improvement</div>
@@ -2252,13 +2292,53 @@ function AccuracyImprovementPanel({ runId, quality, avgConfidence }) {
             Classical review score is {systemScore === "" ? "-" : systemScore}%. Add feedback before using advanced AI on focused areas.
           </div>
         </div>
-        <ChangeBadge type="MODIFIED" />
+        <span style={{ border: `1px solid ${recommended ? COLORS.MODIFIED.border : COLORS.ADDED.border}`, color: recommended ? COLORS.MODIFIED.text : COLORS.ADDED.text, background: recommended ? COLORS.MODIFIED.chip : COLORS.ADDED.chip, borderRadius: 999, padding: "6px 10px", fontWeight: 650, fontSize: 13 }}>
+          {recommended ? "AI review recommended" : "Classical score looks good"}
+        </span>
       </div>
+
+      {focusItems.length > 0 && (
+        <div style={{ background: "#fbfaf6", border: "1px solid #e0d8ca", borderRadius: 8, padding: 10, marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+            <div style={{ color: "#344054", fontWeight: 650, fontSize: 13 }}>Low-score focus areas</div>
+            <button type="button" onClick={() => setMissingAreasFromFocus(focusItems)} style={miniButtonStyle}>Select all below 90%</button>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {focusItems.slice(0, 18).map((item) => {
+              const label = focusLabel(item);
+              const active = selectedFocus.some((selected) => focusLabel(selected) === label);
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => toggleFocus(item)}
+                  title={label}
+                  style={{
+                    border: `1px solid ${active ? COLORS.MODIFIED.border : "#d8d0c3"}`,
+                    background: active ? COLORS.MODIFIED.chip : "#fffdf8",
+                    color: active ? COLORS.MODIFIED.text : "#344054",
+                    borderRadius: 999,
+                    padding: "4px 8px",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    maxWidth: 280,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {trim(label, 52)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginBottom: 10 }}>
         <input required value={form.reviewer_name} onChange={(e) => update("reviewer_name", e.target.value)} placeholder="Reviewer name" style={inputStyle} />
         <input required value={form.document_type} onChange={(e) => update("document_type", e.target.value)} placeholder="Document type" style={inputStyle} />
-        <input required type="number" min="0" max="100" value={form.user_score} onChange={(e) => update("user_score", e.target.value)} placeholder="Your score" style={inputStyle} />
+        <input readOnly value={form.user_score} placeholder="Classical score" style={{ ...inputStyle, background: "#f2eee6", color: "#667085" }} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10, marginBottom: 10 }}>
@@ -2783,44 +2863,6 @@ function TablesWorkspace({ runId }) {
         />
       </div>
 
-      <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 650, color: "#344054" }}>
-            <input
-              type="checkbox"
-              checked={useTableAi}
-              onChange={(e) => setUseTableAi(e.target.checked)}
-            />
-            Include AI insight for this selected table slice
-          </label>
-          <button
-            type="button"
-            onClick={() => {
-              setUseTableAi(true);
-              compare({ use_ai: true });
-            }}
-            disabled={compareBusy || !baseTableId || !targetTableId}
-            style={secondaryButtonStyle(compareBusy || !baseTableId || !targetTableId ? { height: 36, opacity: 0.65, cursor: "default" } : { height: 36 })}
-          >
-            {compareBusy ? "Running" : "Run table AI insight"}
-          </button>
-        </div>
-        <input
-          value={tableQuestion}
-          onChange={(e) => setTableQuestion(e.target.value)}
-          disabled={!useTableAi}
-          placeholder="Example: summarize changed values, renamed headers, missing rows, and review questions"
-          style={{
-            ...inputStyle,
-            opacity: useTableAi ? 1 : 0.65,
-            background: useTableAi ? "#fffdf8" : "#f4efe6",
-          }}
-        />
-        <div style={{ color: "#667085", fontSize: 12, marginTop: 6 }}>
-          AI is optional and receives only the selected table metadata, selected columns, aligned rows, and detected cell/header changes.
-        </div>
-      </div>
-
       <div className="table-action-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
         <div>
           <label style={labelStyle}>Find rows in selected tables</label>
@@ -2833,13 +2875,29 @@ function TablesWorkspace({ runId }) {
           <div style={{ color: "#667085", fontSize: 12, marginTop: 5 }}>
             Leave blank to compare all rows in the selected table slice.
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#475467", fontSize: 13, marginTop: 8 }}>
+            <input
+              type="checkbox"
+              checked={useTableAi}
+              onChange={(e) => setUseTableAi(e.target.checked)}
+            />
+            Add AI insight to this compare
+          </label>
+          {useTableAi && (
+            <input
+              value={tableQuestion}
+              onChange={(e) => setTableQuestion(e.target.value)}
+              placeholder="Optional AI focus: changed values, renamed headers, missing rows, review questions"
+              style={{ ...inputStyle, marginTop: 8 }}
+            />
+          )}
         </div>
         <button
           onClick={() => compare()}
           disabled={compareBusy || !baseTableId || !targetTableId}
           style={primaryButtonStyle(compareBusy || !baseTableId || !targetTableId, { height: 40 })}
         >
-          {compareBusy ? "Comparing" : "Apply & compare"}
+          {compareBusy ? "Comparing" : useTableAi ? "Compare with AI" : "Compare tables"}
         </button>
         <button
           onClick={exportTablePdf}
@@ -2898,54 +2956,32 @@ function TablePicker({ title, value, onChange, tables }) {
 function TableInfo({ table, emptyLabel }) {
   if (!table) return <EmptyState label={emptyLabel} />;
 
-  const columns = table.columns || [];
+  const columns = (table.columns || []).filter((col) => !isInternalColumn(col));
 
   return (
     <div className="table-preview-shell" style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderRadius: 8, padding: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
         <div style={{ minWidth: 0 }}>
           <div className="cell-truncate" title={table.title || table.area || "Detected table"} style={{ fontWeight: 650 }}>
             {table.title || table.area || "Detected table"}
           </div>
           <div style={{ marginTop: 4, color: "#667085", fontSize: 13 }}>
             {table.page_label || `Page ${table.page_first || "-"}`} · {table.n_columns || columns.length} columns · {table.n_rows || 0} rows
-            {table.extraction_confidence ? ` · extraction ${Math.round(table.extraction_confidence * 100)}%` : ""}
           </div>
         </div>
-        {table.id && <code>{table.id.slice(0, 8)}</code>}
+        {table.extraction_confidence && (
+          <span style={{ color: "#667085", fontSize: 12, whiteSpace: "nowrap" }}>{Math.round(table.extraction_confidence * 100)}%</span>
+        )}
       </div>
 
-      {table.context && (
-        <div style={{ marginTop: 10, color: "#667085", fontSize: 13, lineHeight: 1.4 }}>
-          {table.context}
-        </div>
-      )}
-
-      <div className="cell-wrap" style={{ marginTop: 10, color: "#475467", fontSize: 13 }}>
-        <strong style={{ fontWeight: 650 }}>Columns:</strong> {columns.slice(0, 14).join(" | ") || "No columns detected"}
+      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {columns.slice(0, 10).map((col) => (
+          <span key={col} title={col} style={{ border: "1px solid #d8d0c3", borderRadius: 999, padding: "2px 7px", fontSize: 12, color: "#475467", background: "#fbfaf6", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {col}
+          </span>
+        ))}
+        {columns.length > 10 && <span style={{ color: "#667085", fontSize: 12, padding: "3px 0" }}>+{columns.length - 10} more</span>}
       </div>
-
-      {Array.isArray(table.column_details) && table.column_details.length > 0 && (
-        <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {table.column_details.slice(0, 14).map((col) => (
-            <span key={col.name} title={`${col.name}${col.sample_values?.[0] ? `: ${col.sample_values[0]}` : ""}`} style={{ border: "1px solid #d8d0c3", borderRadius: 999, padding: "2px 7px", fontSize: 12, color: "#475467", background: "#fbfaf6", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {col.name}
-              {col.semantic_role ? ` · ${col.semantic_role}` : ""}
-              {col.sample_values?.[0] ? `: ${trim(col.sample_values[0], 24)}` : ""}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {Array.isArray(table.quality_warnings) && table.quality_warnings.length > 0 && (
-        <div style={{ marginTop: 10, color: "#8a5a00", fontSize: 13, lineHeight: 1.35 }}>
-          {table.quality_warnings.slice(0, 2).join(" ")}
-        </div>
-      )}
-
-      {Array.isArray(table.row_preview) && table.row_preview.length > 0 && (
-        <TablePreview columns={columns.slice(0, 6)} rows={table.row_preview.slice(0, 5)} />
-      )}
     </div>
   );
 }
@@ -2993,7 +3029,7 @@ function RowFilterSuggestions({ baseTable, targetTable, onSelect }) {
 function ColumnConfig({ title, table, rowColumns, setRowColumns, valueColumns, setValueColumns }) {
   if (!table) return <EmptyState label={`${title}: select a table first.`} />;
 
-  const columns = table.columns || [];
+  const columns = (table.columns || []).filter((col) => !isInternalColumn(col));
 
   return (
     <div className="table-preview-shell" style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderRadius: 8, padding: 12 }}>
@@ -3059,6 +3095,7 @@ function MultiSelect({ label, helper, options, selected, onChange }) {
 }
 
 function TablePreview({ columns, rows }) {
+  columns = (columns || []).filter((col) => !isInternalColumn(col));
   if (!columns.length || !rows.length) return null;
 
   const minWidth = tableMinWidth(columns.length, 420, 920);
@@ -3103,6 +3140,7 @@ function SelectedTableView({ title, view }) {
 }
 
 function RenderedRowsTable({ columns, rows }) {
+  columns = (columns || []).filter((col) => !isInternalColumn(col));
   if (!columns.length) return <EmptyState label="No columns selected." />;
   if (!rows.length) return <EmptyState label="No rows match the selected table/filter." />;
 
@@ -3272,18 +3310,19 @@ function ValuesSideBySide({ base, target }) {
 }
 
 function GenericRowsTable({ columns, rows }) {
+  const visibleColumns = (columns || []).filter((col) => !isInternalColumn(col));
   return (
     <div className="dl-scrollbar" style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 780 }}>
         <thead>
           <tr style={{ background: "#1f2937", color: "white" }}>
-            {columns.map((col) => <th key={col} dir="auto" style={th}>{col}</th>)}
+            {visibleColumns.map((col) => <th key={col} dir="auto" style={th}>{col}</th>)}
           </tr>
         </thead>
         <tbody>
           {rows.slice(0, 200).map((row, i) => (
             <tr key={i}>
-              {columns.map((col) => <td key={col} dir="auto" style={td}>{displayCell(row[col])}</td>)}
+              {visibleColumns.map((col) => <td key={col} dir="auto" style={td}>{displayCell(row[col])}</td>)}
             </tr>
           ))}
         </tbody>
@@ -3720,14 +3759,14 @@ function normalizeErrorMessage(value) {
 }
 
 function defaultRowColumns(table) {
-  const columns = table?.columns || [];
+  const columns = (table?.columns || []).filter((col) => !isInternalColumn(col));
   const suggested = table?.suggested_row_columns || [];
   const picked = suggested.filter((c) => columns.includes(c));
   return picked.length ? picked : columns.slice(0, 1);
 }
 
 function defaultValueColumns(table) {
-  const columns = table?.columns || [];
+  const columns = (table?.columns || []).filter((col) => !isInternalColumn(col));
   const suggested = table?.suggested_value_columns || [];
   const rowCols = defaultRowColumns(table);
   const picked = suggested.filter((c) => columns.includes(c) && !rowCols.includes(c));
@@ -3741,17 +3780,36 @@ function inferColumns(rows) {
   rows.slice(0, 20).forEach((row) => {
     if (row && typeof row === "object" && !Array.isArray(row)) {
       Object.keys(row).forEach((key) => {
-        if (!["payload", "raw"].includes(key)) keys.add(key);
+        if (!isInternalColumn(key)) keys.add(key);
       });
     }
   });
   return Array.from(keys).slice(0, 12);
 }
 
+function isInternalColumn(key) {
+  const text = String(key || "");
+  if (!text || text.startsWith("__")) return true;
+  return [
+    "payload",
+    "raw",
+    "field_profiles",
+    "column_profiles",
+    "extraction_intelligence",
+    "source_tables",
+    "table_fingerprint",
+    "bbox_by_page",
+    "quality_warnings",
+  ].includes(text);
+}
+
 function displayCell(value) {
   if (value === null || value === undefined || value === "") return "-";
   if (Array.isArray(value)) return value.map(displayCell).join(", ");
-  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "object") {
+    const clean = Object.fromEntries(Object.entries(value).filter(([key]) => !isInternalColumn(key)));
+    return Object.keys(clean).length ? JSON.stringify(clean) : "-";
+  }
   return String(value);
 }
 
