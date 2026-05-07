@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .db import db_enabled, get_conn
-from .embeddings import embed_texts, vector_literal
+from .ai_usage import merge_usage
+from .embeddings import embed_texts_with_usage, vector_literal
 from .models import Block, BlockDiff
 
 
@@ -255,18 +256,22 @@ def _embedding_text(block: Block) -> str:
     return text[:7500]
 
 
-def _block_embeddings(blocks: list[Block]) -> dict[Any, Optional[str]]:
+def _block_embeddings(blocks: list[Block]) -> tuple[dict[Any, Optional[str]], dict[str, Any]]:
     texts = [_embedding_text(block) for block in blocks]
 
     try:
-        vectors = embed_texts(texts)
+        vectors, usage = embed_texts_with_usage(texts)
     except Exception:
         vectors = [None] * len(blocks)
+        usage = merge_usage()
 
-    return {
-        block.id: vector_literal(vector)
-        for block, vector in zip(blocks, vectors)
-    }
+    return (
+        {
+            block.id: vector_literal(vector)
+            for block, vector in zip(blocks, vectors)
+        },
+        usage,
+    )
 
 
 def persist_run(
@@ -290,6 +295,7 @@ def persist_run(
     base_page_count: int,
     target_page_count: int,
     enable_embeddings: bool = True,
+    usage_callback=None,
 ) -> Optional[str]:
     """
     Persist comparison data to PostgreSQL.
@@ -327,8 +333,8 @@ def persist_run(
             coverage=coverage.get("target"),
         )
 
-        base_block_map = _insert_blocks(conn, base_doc_id, base_blocks, enable_embeddings=enable_embeddings)
-        target_block_map = _insert_blocks(conn, target_doc_id, target_blocks, enable_embeddings=enable_embeddings)
+        base_block_map = _insert_blocks(conn, base_doc_id, base_blocks, enable_embeddings=enable_embeddings, usage_callback=usage_callback)
+        target_block_map = _insert_blocks(conn, target_doc_id, target_blocks, enable_embeddings=enable_embeddings, usage_callback=usage_callback)
 
         _insert_tables(conn, base_doc_id, base_blocks, base_block_map)
         _insert_tables(conn, target_doc_id, target_blocks, target_block_map)
@@ -418,11 +424,15 @@ def _upsert_document(
     return row["id"]
 
 
-def _insert_blocks(conn, document_id, blocks: list[Block], *, enable_embeddings: bool) -> dict[Any, uuid.UUID]:
+def _insert_blocks(conn, document_id, blocks: list[Block], *, enable_embeddings: bool, usage_callback=None) -> dict[Any, uuid.UUID]:
     conn.execute("DELETE FROM doc_block WHERE document_id = %s", (document_id,))
 
     block_id_map: dict[Any, uuid.UUID] = {}
-    embeddings = _block_embeddings(blocks) if enable_embeddings else {}
+    embeddings = {}
+    if enable_embeddings:
+        embeddings, usage = _block_embeddings(blocks)
+        if usage_callback:
+            usage_callback(usage)
 
     for block in blocks:
         sql_id = uuid.uuid4()
@@ -759,6 +769,59 @@ def _upsert_comparison_run(
     conn.execute("DELETE FROM block_diff WHERE run_id = %s", (comparison_id,))
 
     return comparison_id
+
+
+def persist_feedback(record: dict[str, Any]) -> Optional[str]:
+    """
+    Store reviewer feedback used to guide optional AI enhancement.
+
+    The app can still run without this table; callers catch failures so feedback
+    remains available in the in-memory run during the session.
+    """
+    if not db_enabled():
+        return None
+
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO doculens_feedback (
+                id,
+                run_id,
+                tenant_id,
+                business_unit_id,
+                created_by,
+                reviewer_name,
+                document_type,
+                system_score,
+                user_score,
+                missing_areas,
+                page_numbers,
+                comments,
+                wants_ai_enhancement,
+                quality_profile,
+                ai_context
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)
+            """,
+            (
+                record["id"],
+                record["run_id"],
+                record.get("tenant_id", "default"),
+                record.get("business_unit_id", "default"),
+                record.get("created_by", "anonymous"),
+                record.get("reviewer_name", ""),
+                record.get("document_type", ""),
+                record.get("system_score"),
+                record.get("user_score"),
+                record.get("missing_areas", ""),
+                record.get("page_numbers", ""),
+                record.get("comments", ""),
+                bool(record.get("wants_ai_enhancement")),
+                _json(record.get("quality_profile") or {}),
+                _json(record.get("ai_context") or {}),
+            ),
+        )
+    return str(record["id"])
 
 
 def _insert_block_diffs(
