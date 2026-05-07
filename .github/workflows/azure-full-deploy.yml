@@ -1,0 +1,143 @@
+name: Azure full deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: "Resource prefix, lowercase letters/numbers/hyphens"
+        required: true
+        default: "doculens"
+      resource_group:
+        description: "Existing resource group where resources will be created or updated"
+        required: true
+        default: "rg-doculens-prod"
+      location:
+        description: "Azure region"
+        required: true
+        default: "eastus2"
+      image_tag:
+        description: "Backend image tag"
+        required: true
+        default: "latest"
+      deploy_schema:
+        description: "Run sql/schema.sql after infra deploy"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      APP_NAME: ${{ inputs.app_name }}
+      RESOURCE_GROUP: ${{ inputs.resource_group }}
+      LOCATION: ${{ inputs.location }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      POSTGRES_ADMIN_LOGIN: ${{ secrets.POSTGRES_ADMIN_LOGIN }}
+      POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+      AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+      AZURE_OPENAI_EMBED_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_EMBED_DEPLOYMENT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy Azure infrastructure
+        id: infra
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEPLOYMENT_NAME="${APP_NAME}-${GITHUB_RUN_ID}"
+
+          az group show --name "$RESOURCE_GROUP" --query name --output tsv
+
+          az deployment group create \
+            --name "$DEPLOYMENT_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters \
+              appName="$APP_NAME" \
+              location="$LOCATION" \
+              postgresAdminLogin="$POSTGRES_ADMIN_LOGIN" \
+              postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
+              authMode="${{ vars.DOCULENS_AUTH_MODE || 'demo' }}" \
+              corsOrigins="${{ vars.DOCULENS_CORS_ORIGINS || '*' }}" \
+              azureOpenAIEndpoint="$AZURE_OPENAI_ENDPOINT" \
+              azureOpenAIKey="$AZURE_OPENAI_API_KEY" \
+              azureOpenAIDeployment="$AZURE_OPENAI_DEPLOYMENT" \
+              azureOpenAIEmbedDeployment="$AZURE_OPENAI_EMBED_DEPLOYMENT" \
+            --query properties.outputs \
+            --output json > infra-outputs.json
+
+          cat infra-outputs.json
+          echo "ACR_NAME=$(jq -r '.acrName.value' infra-outputs.json)" >> "$GITHUB_ENV"
+          echo "ACR_LOGIN_SERVER=$(jq -r '.acrLoginServer.value' infra-outputs.json)" >> "$GITHUB_ENV"
+          echo "CONTAINER_APP_NAME=$(jq -r '.containerAppName.value' infra-outputs.json)" >> "$GITHUB_ENV"
+          echo "CONTAINER_APP_FQDN=$(jq -r '.containerAppFqdn.value' infra-outputs.json)" >> "$GITHUB_ENV"
+          echo "POSTGRES_HOST=$(jq -r '.postgresHost.value' infra-outputs.json)" >> "$GITHUB_ENV"
+          echo "STATIC_WEB_APP_NAME=$(jq -r '.staticWebAppName.value' infra-outputs.json)" >> "$GITHUB_ENV"
+
+      - name: Build and push backend image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$ACR_LOGIN_SERVER/doculens-api:$IMAGE_TAG"
+          az acr login --name "$ACR_NAME"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "BACKEND_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Update backend Container App image
+        shell: bash
+        run: |
+          set -euo pipefail
+          az containerapp update \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CONTAINER_APP_NAME" \
+            --image "$BACKEND_IMAGE"
+
+      - name: Run database schema
+        if: ${{ inputs.deploy_schema }}
+        shell: bash
+        env:
+          PGPASSWORD: ${{ env.POSTGRES_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql \
+            "host=$POSTGRES_HOST port=5432 dbname=postgres user=$POSTGRES_ADMIN_LOGIN sslmode=require" \
+            -f sql/schema.sql
+
+      - name: Read Static Web Apps deployment token
+        shell: bash
+        run: |
+          set -euo pipefail
+          SWA_TOKEN="$(az staticwebapp secrets list \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$STATIC_WEB_APP_NAME" \
+            --query properties.apiKey \
+            --output tsv)"
+          echo "::add-mask::$SWA_TOKEN"
+          echo "SWA_TOKEN=$SWA_TOKEN" >> "$GITHUB_ENV"
+
+      - name: Build and deploy frontend
+        uses: Azure/static-web-apps-deploy@v1
+        env:
+          VITE_API_BASE: https://${{ env.CONTAINER_APP_FQDN }}
+        with:
+          azure_static_web_apps_api_token: ${{ env.SWA_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: /frontend
+          api_location: ""
+          output_location: dist
