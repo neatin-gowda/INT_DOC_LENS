@@ -559,7 +559,7 @@ export default function App() {
               {tab === "viewer" && <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />}
               {tab === "report" && <ReviewReport runId={runId} />}
               {tab === "query" && <QueryPanel runId={runId} />}
-              {tab === "accuracy" && <AccuracyImprovementTab runId={runId} />}
+              {tab === "accuracy" && <AccuracyImprovementTab runId={runId} meta={meta} />}
               {tab === "tables" && <TablesWorkspace runId={runId} />}
             </main>
           </>
@@ -1907,9 +1907,13 @@ function NativePageView({ page, side }) {
 function NativeItem({ item, viewerType, side }) {
   const highlight = nativeHighlightStyle(item.highlight);
 
-  if (item.type === "table" && !item.payload?.layout_table) {
+  if (item.type === "table" && !item.payload?.layout_table && !nativeTableLooksLikeLayoutText(item, viewerType)) {
     return <NativeTable item={item} viewerType={viewerType} />;
   }
+
+  const displayItem = item.type === "table"
+    ? { ...item, text: nativeTablePlainText(item), payload: { ...(item.payload || {}), layout_table: true } }
+    : item;
 
   const isHeading = item.type === "section" || item.type === "heading";
 
@@ -1928,7 +1932,7 @@ function NativeItem({ item, viewerType, side }) {
       }}
       title={item.change_type}
     >
-      <NativeTokenText item={item} side={side} />
+      <NativeTokenText item={displayItem} side={side} />
     </div>
   );
 }
@@ -1973,7 +1977,7 @@ function NativeTokenText({ item, side }) {
 }
 
 function NativeTable({ item, viewerType }) {
-  const header = item.header || [];
+  const header = visibleNativeHeader(item);
   const rows = item.rows || [];
   const title = item.payload?.table_title || item.text || "Table";
   const isSpreadsheet = viewerType === "spreadsheet";
@@ -2000,7 +2004,7 @@ function NativeTable({ item, viewerType }) {
                 <tr key={row.id} title={row.change_type} style={{ background: rowStyle.background }}>
                   {header.map((col) => (
                     <td key={col} dir="auto" style={{ ...smallTd, borderLeft: rowStyle.borderLeft }}>
-                      {displayCell(row.values?.[col])}
+                      {displayCell(visibleNativeValues(row.values)?.[col])}
                     </td>
                   ))}
                 </tr>
@@ -2011,6 +2015,56 @@ function NativeTable({ item, viewerType }) {
       </div>
     </div>
   );
+}
+
+function visibleNativeHeader(item) {
+  const header = Array.isArray(item?.header) ? item.header : [];
+  return header.map((col) => String(col || "").trim()).filter((col) => col && !isInternalColumn(col));
+}
+
+function visibleNativeValues(values) {
+  if (!values || typeof values !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(values)
+      .map(([key, value]) => [String(key || "").trim(), value])
+      .filter(([key]) => key && !isInternalColumn(key))
+  );
+}
+
+function nativeTablePlainText(item) {
+  const rows = Array.isArray(item?.rows) ? item.rows : [];
+  const lines = rows.map((row) => {
+    const values = visibleNativeValues(row.values);
+    const text = Object.values(values).map((value) => displayCell(value)).filter((value) => value && value !== "-").join(" / ");
+    return text || row.text || "";
+  }).filter(Boolean);
+
+  if (lines.length) return lines.join("\n");
+  return item?.text || visibleNativeHeader(item).join(" / ") || "Document text";
+}
+
+function nativeTableLooksLikeLayoutText(item, viewerType) {
+  if (viewerType !== "document") return false;
+
+  const originalHeader = Array.isArray(item?.header) ? item.header : [];
+  const header = visibleNativeHeader(item);
+  const rows = Array.isArray(item?.rows) ? item.rows : [];
+  const internalHeaderPresent = originalHeader.some((col) => isInternalColumn(col));
+  const cells = rows.flatMap((row) => Object.values(visibleNativeValues(row.values || {})).map((value) => String(value || "").trim()).filter(Boolean));
+
+  if (internalHeaderPresent && header.length <= 2) return true;
+  if (!rows.length || !cells.length) return false;
+
+  const longCells = cells.filter((text) => text.length > 70 || text.split(/\s+/).length >= 10).length;
+  const longCellRatio = longCells / Math.max(1, cells.length);
+  const mixedScriptCells = cells.filter((text) => /[\u0600-\u06ff]/.test(text) && /[A-Za-z]/.test(text)).length;
+  const mixedScriptRatio = mixedScriptCells / Math.max(1, cells.length);
+  const structuredHeaders = header.filter((col) => /feature|description|item|name|order|code|part|model|price|amount|status|date|term|rent|fee/i.test(col));
+  const structuredRatio = structuredHeaders.length / Math.max(1, header.length);
+
+  if (mixedScriptRatio >= 0.2 && structuredRatio < 0.35) return true;
+  if (rows.length <= 6 && longCellRatio >= 0.45 && structuredRatio < 0.35) return true;
+  return false;
 }
 
 function nativeHighlightStyle(kind, compact = false) {
@@ -2182,27 +2236,44 @@ function ReviewReport({ runId }) {
   );
 }
 
-function AccuracyImprovementTab({ runId }) {
-  const [quality, setQuality] = useState(null);
+function AccuracyImprovementTab({ runId, meta }) {
+  const [quality, setQuality] = useState(() => fallbackQualityProfile(meta));
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setQuality(null);
+    const fallback = fallbackQualityProfile(meta);
+    setQuality(fallback);
     setError("");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
 
-    fetch(`${API}/runs/${runId}/summary`)
+    fetch(`${API}/runs/${runId}/summary`, { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error(await readResponseError(r));
         return r.json();
       })
-      .then((data) => setQuality(data.quality || null))
-      .catch((err) => setError(friendlyFetchError(err)));
-  }, [runId]);
+      .then((data) => {
+        const rows = Array.isArray(data) ? data : data.rows || data.summary || [];
+        setQuality(normalizeQualityProfile(data.quality, rows, fallback));
+      })
+      .catch((err) => {
+        if (err?.name !== "AbortError") setError(friendlyFetchError(err));
+        setQuality(fallback);
+      })
+      .finally(() => clearTimeout(timer));
 
-  if (error) return <ErrorBox message={error} />;
-  if (!quality) return <SoftLoading label="Loading accuracy profile" />;
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [runId, meta]);
 
-  return <AccuracyImprovementPanel runId={runId} quality={quality} />;
+  return (
+    <>
+      {error && <ErrorBox message={`Using local score fallback. ${error}`} />}
+      <AccuracyImprovementPanel runId={runId} quality={quality || fallbackQualityProfile(meta)} />
+    </>
+  );
 }
 
 function AccuracyImprovementPanel({ runId, quality }) {
@@ -3952,6 +4023,59 @@ function normalizeConfidence(value) {
 function average(values) {
   if (!values.length) return null;
   return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+function normalizeQualityProfile(profile, rows = [], fallback = null) {
+  if (profile && typeof profile === "object" && (profile.system_score !== undefined || profile.avg_confidence !== undefined)) {
+    return {
+      ...fallback,
+      ...profile,
+      focus_items: Array.isArray(profile.focus_items) ? profile.focus_items : fallback?.focus_items || [],
+    };
+  }
+
+  const list = Array.isArray(rows) ? rows : [];
+  const confidences = list.map((row) => normalizeConfidence(row?.confidence)).filter((value) => typeof value === "number");
+  const avg = average(confidences);
+  const focusItems = list
+    .filter((row) => needsReview(row) || (typeof normalizeConfidence(row?.confidence) === "number" && normalizeConfidence(row?.confidence) < 0.9))
+    .slice(0, 30)
+    .map((row) => ({
+      feature: row.feature || row.item || row.area || "Review item",
+      change_type: rowChangeType(row),
+      confidence: normalizeConfidence(row.confidence),
+      page_base: row.page_base,
+      page_target: row.page_target,
+      citation: row.citation || row.evidence,
+      review_reason: row.seek_clarification || row.review || row.recommendation,
+    }));
+
+  if (avg === null && fallback) return fallback;
+
+  return {
+    ...(fallback || {}),
+    avg_confidence: avg,
+    system_score: avg === null ? fallback?.system_score ?? "" : Math.round(avg * 10000) / 100,
+    threshold: 0.9,
+    ai_recommended: avg === null ? Boolean(fallback?.ai_recommended) : avg < 0.9,
+    review_items: list.length || fallback?.review_items || 0,
+    low_confidence_items: focusItems.length,
+    focus_items: focusItems,
+  };
+}
+
+function fallbackQualityProfile(meta) {
+  const stats = meta?.stats || {};
+  const reviewItems = Number(stats.ADDED || 0) + Number(stats.DELETED || 0) + Number(stats.MODIFIED || 0);
+  return {
+    avg_confidence: null,
+    system_score: "",
+    threshold: 0.9,
+    ai_recommended: reviewItems > 0,
+    review_items: reviewItems,
+    low_confidence_items: 0,
+    focus_items: [],
+  };
 }
 
 const inputStyle = {
