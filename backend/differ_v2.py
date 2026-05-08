@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Any, Iterable, Optional
 
 from rapidfuzz import fuzz
@@ -128,6 +128,60 @@ def _semantic_text(s: Any) -> str:
     s = _PUNCT_RE.sub(" ", s.casefold())
     tokens = [t for t in _WS_RE.split(s.strip()) if t and t not in _STOPWORDS]
     return " ".join(tokens)
+
+
+def _meaningful_tokens(s: Any) -> list[str]:
+    return [t for t in _semantic_text(s).split() if t]
+
+
+def _critical_values(s: Any) -> tuple[list[str], list[str], list[str]]:
+    text = str(s or "")
+    return (
+        _YEAR_RE.findall(text),
+        _DATE_RE.findall(text),
+        _NUMBER_RE.findall(text),
+    )
+
+
+def _same_critical_values(before: Any, after: Any) -> bool:
+    return _critical_values(before) == _critical_values(after)
+
+
+def _layout_or_order_equivalent(before: Any, after: Any) -> bool:
+    """
+    Treat extraction-only noise as unchanged: line wraps, spacing, punctuation,
+    and reordered copies of the same meaningful words.
+
+    This deliberately refuses equivalence when years, dates, or numbers differ.
+    Those are business facts, not layout.
+    """
+    if _canonical_text(before) == _canonical_text(after):
+        return True
+    if not _same_critical_values(before, after):
+        return False
+
+    b_sem = _semantic_text(before)
+    a_sem = _semantic_text(after)
+    if b_sem == a_sem:
+        return True
+
+    b_tokens = _meaningful_tokens(before)
+    a_tokens = _meaningful_tokens(after)
+    if not b_tokens and not a_tokens:
+        return True
+    if not b_tokens or not a_tokens:
+        return False
+
+    if Counter(b_tokens) == Counter(a_tokens):
+        return True
+
+    b_set = set(b_tokens)
+    a_set = set(a_tokens)
+    overlap = len(b_set & a_set) / max(1, len(b_set | a_set))
+    length_delta = abs(len(b_tokens) - len(a_tokens)) / max(1, max(len(b_tokens), len(a_tokens)))
+    token_set = fuzz.token_set_ratio(b_sem, a_sem) / 100.0
+    token_sort = fuzz.token_sort_ratio(b_sem, a_sem) / 100.0
+    return overlap >= 0.96 and length_delta <= 0.04 and max(token_set, token_sort) >= 0.97
 
 
 def _is_internal_field(key: Any) -> bool:
@@ -331,7 +385,7 @@ def _semantic_match_score(b: Block, t: Block) -> float:
 def _is_layout_only_change(b: Block, t: Block) -> bool:
     if b.block_type != t.block_type:
         return False
-    if _canonical_text(b.text) != _canonical_text(t.text):
+    if not _layout_or_order_equivalent(b.text, t.text):
         return False
     return _visible_payload(b) == _visible_payload(t)
 
@@ -348,6 +402,8 @@ def _has_real_world_delta(b: Block, t: Block) -> bool:
         return True
     if _NUMBER_RE.findall(before) != _NUMBER_RE.findall(after):
         return True
+    if _layout_or_order_equivalent(before, after):
+        return False
     return before != after
 
 
@@ -504,12 +560,15 @@ def _field_diff(b: Block, t: Block) -> list[FieldDiff]:
             continue
         before = bp.get(key)
         after = tp.get(key)
-        if _norm_text(before) != _norm_text(after):
+        if _norm_text(before) != _norm_text(after) and not _layout_or_order_equivalent(before, after):
             out.append(FieldDiff(field=str(key), before=before, after=after))
     return out
 
 
 def _token_diff(a: str, b: str) -> list[TokenOp]:
+    if _layout_or_order_equivalent(a, b):
+        return []
+
     aw = (a or "").split()
     bw = (b or "").split()
     sm = difflib.SequenceMatcher(a=aw, b=bw)
@@ -529,6 +588,19 @@ def _token_diff(a: str, b: str) -> list[TokenOp]:
                     text_b=" ".join(bw[j1:j2]),
                 )
             )
+
+    changed_words = 0
+    for op in out:
+        if op.op == "equal":
+            continue
+        changed_words += len((op.text_a or "").split())
+        changed_words += len((op.text_b or "").split())
+    total_words = max(1, len(aw) + len(bw))
+    if changed_words / total_words >= 0.45:
+        a_sem = _semantic_text(a)
+        b_sem = _semantic_text(b)
+        if _same_critical_values(a, b) and fuzz.token_set_ratio(a_sem, b_sem) >= 92:
+            return []
     return out
 
 
