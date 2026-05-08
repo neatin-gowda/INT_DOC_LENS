@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Iterable, Optional
 
 from rapidfuzz import fuzz
@@ -35,6 +35,17 @@ from .models import (
 
 _WS_RE = re.compile(r"\s+")
 _TRADEMARK_RE = re.compile(r"[™®©]")
+_PUNCT_RE = re.compile(r"[^a-z0-9 ]+")
+_NUMBER_PREFIX_RE = re.compile(r"^\s*\d+(?:\.\d+)*\s*[.)-]?\s*")
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_DATE_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b")
+_NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
+
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
+    "has", "in", "is", "it", "of", "on", "or", "that", "the", "this",
+    "to", "with",
+}
 
 
 def _norm_text(s: str) -> str:
@@ -43,6 +54,52 @@ def _norm_text(s: str) -> str:
     s = _TRADEMARK_RE.sub("", s)
     s = _WS_RE.sub(" ", s)
     return s.strip().lower()
+
+
+def _semantic_text(s: str) -> str:
+    if not s:
+        return ""
+    s = _TRADEMARK_RE.sub("", s)
+    s = _NUMBER_PREFIX_RE.sub("", s)
+    s = _PUNCT_RE.sub(" ", s.casefold())
+    return " ".join(t for t in _WS_RE.split(s.strip()) if t and t not in _STOPWORDS)
+
+
+def _critical_values(s: str) -> tuple[list[str], list[str], list[str]]:
+    return (_YEAR_RE.findall(s or ""), _DATE_RE.findall(s or ""), _NUMBER_RE.findall(s or ""))
+
+
+def _layout_or_order_equivalent(before: str, after: str) -> bool:
+    if _norm_text(before) == _norm_text(after):
+        return True
+    if _critical_values(before or "") != _critical_values(after or ""):
+        return False
+
+    b_sem = _semantic_text(before or "")
+    a_sem = _semantic_text(after or "")
+    if b_sem == a_sem:
+        return True
+
+    b_tokens = [t for t in b_sem.split() if t]
+    a_tokens = [t for t in a_sem.split() if t]
+    if not b_tokens and not a_tokens:
+        return True
+    if not b_tokens or not a_tokens:
+        return False
+    if Counter(b_tokens) == Counter(a_tokens):
+        return True
+
+    overlap = len(set(b_tokens) & set(a_tokens)) / max(1, len(set(b_tokens) | set(a_tokens)))
+    length_delta = abs(len(b_tokens) - len(a_tokens)) / max(1, max(len(b_tokens), len(a_tokens)))
+    return (
+        overlap >= 0.96
+        and length_delta <= 0.04
+        and max(fuzz.token_set_ratio(b_sem, a_sem), fuzz.token_sort_ratio(b_sem, a_sem)) >= 97
+    )
+
+
+def _payload_text(block: Block) -> str:
+    return " ".join(f"{k} {v}" for k, v in (block.payload or {}).items())
 
 
 def _section_prefix(path: str, depth: int = 2) -> str:
@@ -155,12 +212,18 @@ def _field_diff(b: Block, t: Block) -> list[FieldDiff]:
     for k in keys:
         bv = b.payload.get(k)
         tv = t.payload.get(k)
-        if _norm_text(str(bv or "")) != _norm_text(str(tv or "")):
+        if (
+            _norm_text(str(bv or "")) != _norm_text(str(tv or ""))
+            and not _layout_or_order_equivalent(str(bv or ""), str(tv or ""))
+        ):
             out.append(FieldDiff(field=k, before=bv, after=tv))
     return out
 
 
 def _token_diff(a: str, b: str) -> list[TokenOp]:
+    if _layout_or_order_equivalent(a, b):
+        return []
+
     aw = a.split()
     bw = b.split()
     sm = difflib.SequenceMatcher(a=aw, b=bw)
@@ -178,6 +241,15 @@ def _token_diff(a: str, b: str) -> list[TokenOp]:
                 text_a=" ".join(aw[i1:i2]),
                 text_b=" ".join(bw[j1:j2]),
             ))
+    changed_words = 0
+    for op in out:
+        if op.op == "equal":
+            continue
+        changed_words += len((op.text_a or "").split())
+        changed_words += len((op.text_b or "").split())
+    if changed_words / max(1, len(aw) + len(bw)) >= 0.45:
+        if _critical_values(a or "") == _critical_values(b or "") and fuzz.token_set_ratio(_semantic_text(a), _semantic_text(b)) >= 92:
+            return []
     return out
 
 
@@ -242,6 +314,18 @@ def diff_blocks(base: list[Block], target: list[Block]) -> list[BlockDiff]:
                 ))
                 continue
             f_diffs = _field_diff(b, t)
+            if not f_diffs and _layout_or_order_equivalent(
+                " ".join([b.text or "", _payload_text(b)]),
+                " ".join([t.text or "", _payload_text(t)]),
+            ):
+                out.append(BlockDiff(
+                    base_block_id=b.id,
+                    target_block_id=t.id,
+                    change_type=ChangeType.UNCHANGED,
+                    similarity=1.0,
+                    impact_score=0.0,
+                ))
+                continue
             t_diff = []
             if b.block_type in {BlockType.PARAGRAPH, BlockType.LIST_ITEM, BlockType.HEADING}:
                 t_diff = _token_diff(b.text or "", t.text or "")
