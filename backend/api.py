@@ -217,7 +217,7 @@ def _dump_model(obj):
 
 
 def _is_user_hidden_field(field: Any) -> bool:
-    key = str(field or "")
+    key = str(field or "").strip()
     if not key:
         return True
     if key.startswith("__"):
@@ -2782,7 +2782,11 @@ def _safe_payload(block: Block) -> dict:
 
 def _table_header(block: Block) -> list[str]:
     payload = _safe_payload(block)
-    return [str(h or "").strip() for h in payload.get("header", [])]
+    return [
+        str(h or "").strip()
+        for h in payload.get("header", [])
+        if not _is_user_hidden_field(str(h or "").strip())
+    ]
 
 
 def _table_rows(table: Block, blocks: list[Block]) -> list[Block]:
@@ -2835,11 +2839,14 @@ def _row_values(row: Optional[Block]) -> dict[str, Any]:
 
     out = {}
     for key, value in row.payload.items():
-        if key in _INTERNAL_TABLE_FIELDS:
+        clean_key = str(key or "").strip()
+        if not clean_key:
             continue
-        if str(key).startswith("__"):
+        if clean_key in _INTERNAL_TABLE_FIELDS or _is_user_hidden_field(clean_key):
             continue
-        out[str(key)] = value
+        if clean_key.startswith("__"):
+            continue
+        out[clean_key] = value
 
     return out
 
@@ -2881,7 +2888,7 @@ def _column_names(table: Block, rows: list[Block]) -> list[str]:
 
     for name in names:
         name = str(name or "").strip()
-        if not name:
+        if not name or _is_user_hidden_field(name) or name in _INTERNAL_TABLE_FIELDS:
             continue
         if name not in seen:
             out.append(name)
@@ -2889,17 +2896,19 @@ def _column_names(table: Block, rows: list[Block]) -> list[str]:
 
     for row in rows:
         for key in _row_values(row).keys():
-            if key not in seen:
+            if key not in seen and not _is_user_hidden_field(key):
                 out.append(key)
                 seen.add(key)
 
-    raw_rows = _table_payload_rows(table)
-    max_width = max([len(r) for r in raw_rows] + [0])
-    for idx in range(max_width):
-        name = out[idx] if idx < len(out) and out[idx] else f"Column {idx + 1}"
-        if name not in seen:
-            out.append(name)
-            seen.add(name)
+    has_row_payload_values = any(_row_values(row) for row in rows)
+    if not has_row_payload_values:
+        raw_rows = _table_payload_rows(table)
+        max_width = max([len(r) for r in raw_rows] + [0])
+        for idx in range(max_width):
+            name = out[idx] if idx < len(out) and out[idx] else f"Column {idx + 1}"
+            if name not in seen and not _is_user_hidden_field(name):
+                out.append(name)
+                seen.add(name)
 
     return out
 
@@ -2961,6 +2970,8 @@ def _table_exposure(table: Block, rows: list[Block], columns: list[str]) -> dict
         col for col in columns
         if any(term in _norm_text(col) for term in (*_ROW_LABEL_HINTS, *_VALUE_COLUMN_HINTS))
     ]
+    word_like = source_format in {"docx", "word"}
+    structured_ratio = len(structured_columns) / max(1, len(columns))
 
     reason = "real_table"
     is_real = True
@@ -2971,15 +2982,21 @@ def _table_exposure(table: Block, rows: list[Block], columns: list[str]) -> dict
     elif len(columns) < 2 or not rows:
         is_real = False
         reason = "insufficient_table_shape"
-    elif source_format in {"docx", "word"} and len(columns) <= 3 and long_text_ratio >= 0.45 and not structured_columns:
+    elif word_like and len(columns) <= 3 and long_text_ratio >= 0.45 and not structured_columns:
         is_real = False
         reason = "word_narrative_layout"
-    elif source_format in {"docx", "word"} and len(columns) <= 4 and not structured_columns and mixed_script_ratio >= 0.2:
+    elif word_like and not structured_columns and mixed_script_ratio >= 0.2:
         is_real = False
         reason = "word_bilingual_layout"
-    elif source_format in {"docx", "word"} and len(columns) <= 4 and not structured_columns and long_cell_ratio >= 0.45 and len(rows) <= 4:
+    elif word_like and structured_ratio < 0.34 and mixed_script_ratio >= 0.2 and (long_cell_ratio >= 0.2 or long_text_ratio >= 0.2 or len(rows) <= 8):
+        is_real = False
+        reason = "word_bilingual_layout"
+    elif word_like and structured_ratio < 0.34 and long_cell_ratio >= 0.45 and len(rows) <= 6:
         is_real = False
         reason = "word_side_by_side_layout"
+    elif word_like and structured_ratio < 0.25 and long_cell_ratio >= 0.35 and long_text_ratio >= 0.35:
+        is_real = False
+        reason = "word_narrative_layout"
     elif confidence_float is not None and confidence_float < 0.42 and header_quality < 0.35:
         is_real = False
         reason = "low_table_confidence"
