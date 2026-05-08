@@ -2429,6 +2429,23 @@ def _native_viewer_type(fmt: str | None) -> str:
     return "structured"
 
 
+def _native_layout_table_text(table: Block, rows: list[Block], header: list[str]) -> str:
+    parts = []
+    for row in rows:
+        values = _row_values(row)
+        if values:
+            parts.append(" / ".join(_display_text(value, 400) for value in values.values() if _display_text(value, 400)))
+        elif row.text:
+            parts.append(_display_text(row.text, 600))
+
+    text = "\n".join(part for part in parts if part)
+    if text:
+        return text
+
+    raw_header = " / ".join(_display_text(col, 200) for col in header if _display_text(col, 200))
+    return raw_header or table.text or "Document text"
+
+
 @app.get("/runs/{run_id}/native-page/{side}/{n}")
 def get_native_page(run_id: str, side: str, n: int):
     r = _ensure_complete(run_id)
@@ -2488,11 +2505,18 @@ def get_native_page(run_id: str, side: str, n: int):
                 if row.page_number == n or row.page_number == block.page_number
             ]
             header = _column_names(block, rows)
-            item["header"] = header
-            item["rows"] = [
-                _native_row_payload(row, fields_by_id, change_by_id)
-                for row in rows
-            ]
+            exposure = _table_exposure(block, rows, header)
+            if not exposure["is_real_table"]:
+                item["type"] = "paragraph"
+                item["text"] = _native_layout_table_text(block, rows, header)
+                item["payload"]["layout_table"] = True
+                item["payload"]["table_classification"] = exposure["reason"]
+            else:
+                item["header"] = header
+                item["rows"] = [
+                    _native_row_payload(row, fields_by_id, change_by_id)
+                    for row in rows
+                ]
 
         items.append(item)
 
@@ -2510,6 +2534,27 @@ def get_native_page(run_id: str, side: str, n: int):
         rows = rows_by_table_on_page.get(table_id, [])
         change_type = change_by_id.get(table.id)
         header = _column_names(table, rows)
+        exposure = _table_exposure(table, rows, header)
+        if not exposure["is_real_table"]:
+            items.append(
+                {
+                    "id": str(table.id),
+                    "type": "paragraph",
+                    "path": table.path,
+                    "text": _native_layout_table_text(table, rows, header),
+                    "stable_key": table.stable_key,
+                    "change_type": change_type.value if change_type else "UNCHANGED",
+                    "highlight": _native_color(change_type),
+                    "payload": {
+                        **_native_block_payload(table),
+                        "layout_table": True,
+                        "table_classification": exposure["reason"],
+                    },
+                    "field_diffs": fields_by_id.get(table.id, []),
+                    "token_diff": tokens_by_id.get(table.id, []),
+                }
+            )
+            continue
         items.append(
             {
                 "id": str(table.id),
@@ -2888,6 +2933,30 @@ def _table_exposure(table: Block, rows: list[Block], columns: list[str]) -> dict
     row_texts = [_display_text(row.text, 500) for row in rows[:30]]
     long_text_rows = sum(1 for text in row_texts if len(text) > 160 or len(text.split()) > 24)
     long_text_ratio = long_text_rows / max(1, len(row_texts))
+    row_value_sets = [_row_values(row) for row in rows[:30]]
+    cell_texts = [
+        _display_text(value, 500)
+        for values in row_value_sets
+        for value in values.values()
+        if _display_text(value, 500)
+    ]
+    long_cells = sum(1 for text in cell_texts if len(text) > 70 or len(text.split()) >= 10)
+    long_cell_ratio = long_cells / max(1, len(cell_texts))
+    mixed_script_cells = sum(
+        1
+        for text in cell_texts
+        if re.search(r"[\u0600-\u06ff]", text) and re.search(r"[A-Za-z]", text)
+    )
+    mixed_script_rows = sum(
+        1
+        for values in row_value_sets
+        if any(re.search(r"[\u0600-\u06ff]", str(value or "")) for value in values.values())
+        and any(re.search(r"[A-Za-z]", str(value or "")) for value in values.values())
+    )
+    mixed_script_ratio = max(
+        mixed_script_cells / max(1, len(cell_texts)),
+        mixed_script_rows / max(1, len(row_value_sets)),
+    )
     structured_columns = [
         col for col in columns
         if any(term in _norm_text(col) for term in (*_ROW_LABEL_HINTS, *_VALUE_COLUMN_HINTS))
@@ -2905,6 +2974,12 @@ def _table_exposure(table: Block, rows: list[Block], columns: list[str]) -> dict
     elif source_format in {"docx", "word"} and len(columns) <= 3 and long_text_ratio >= 0.45 and not structured_columns:
         is_real = False
         reason = "word_narrative_layout"
+    elif source_format in {"docx", "word"} and len(columns) <= 4 and not structured_columns and mixed_script_ratio >= 0.2:
+        is_real = False
+        reason = "word_bilingual_layout"
+    elif source_format in {"docx", "word"} and len(columns) <= 4 and not structured_columns and long_cell_ratio >= 0.45 and len(rows) <= 4:
+        is_real = False
+        reason = "word_side_by_side_layout"
     elif confidence_float is not None and confidence_float < 0.42 and header_quality < 0.35:
         is_real = False
         reason = "low_table_confidence"
@@ -2919,6 +2994,8 @@ def _table_exposure(table: Block, rows: list[Block], columns: list[str]) -> dict
         "header_quality": round(header_quality, 2),
         "confidence": confidence_float,
         "generic_header_ratio": round(generic_ratio, 2),
+        "mixed_script_ratio": round(mixed_script_ratio, 2),
+        "long_cell_ratio": round(long_cell_ratio, 2),
     }
 
 
