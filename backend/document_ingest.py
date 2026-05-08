@@ -306,13 +306,23 @@ def _detect_header_band(normalized_rows: list[list[str]], n_cols: int) -> tuple[
     return header, body_rows, header_rows, header_start, "nested_header" if header_count > 1 else "single_header"
 
 
+def _text_scripts(value: Any) -> set[str]:
+    text = _clean(value)
+    scripts = set()
+    if re.search(r"[\u0600-\u06ff]", text):
+        scripts.add("arabic")
+    if re.search(r"[A-Za-z]", text):
+        scripts.add("latin")
+    return scripts
+
+
 def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
     """
     Word documents often use borderless tables for layout: bilingual text,
     signatures, clauses in two languages, or side-by-side notes. Those should
     render as document content, not as data tables.
     """
-    if n_cols < 2 or n_cols > 4 or len(rows) < 2:
+    if n_cols < 2 or n_cols > 4:
         return False
 
     filled_rows = [row for row in rows if _filled_count(row) >= 1]
@@ -325,10 +335,13 @@ def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
     total_cells = 0
     headerish_terms = 0
     mixed_script_rows = 0
+    bilingual_parallel_rows = 0
     delimiter_light_rows = 0
+    word_counts = []
 
     for row in filled_rows[:12]:
         scripts = set()
+        cell_scripts = []
         row_text = " ".join(_clean(cell) for cell in row[:n_cols] if _clean(cell))
         if "|" not in row_text and "\t" not in row_text and not re.search(r"\s{3,}", row_text):
             delimiter_light_rows += 1
@@ -337,11 +350,11 @@ def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
             text = _clean(cell)
             if not text:
                 continue
-            if re.search(r"[\u0600-\u06ff]", text):
-                scripts.add("arabic")
-            if re.search(r"[A-Za-z]", text):
-                scripts.add("latin")
+            scripts_for_cell = _text_scripts(text)
+            scripts.update(scripts_for_cell)
+            cell_scripts.append(scripts_for_cell)
             total_cells += 1
+            word_counts.append(len(text.split()))
             if len(text) > 45 or len(text.split()) >= 7:
                 long_cell_count += 1
             if _looks_like_identifier(text):
@@ -352,6 +365,8 @@ def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
                 headerish_terms += 1
         if len(scripts) >= 2:
             mixed_script_rows += 1
+        if any("latin" in item for item in cell_scripts) and any("arabic" in item for item in cell_scripts):
+            bilingual_parallel_rows += 1
 
     if total_cells == 0:
         return False
@@ -359,14 +374,29 @@ def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
     long_ratio = long_cell_count / total_cells
     structured_ratio = (short_code_count + numeric_like_count + headerish_terms) / total_cells
     mixed_script_ratio = mixed_script_rows / max(1, len(filled_rows[:12]))
+    bilingual_parallel_ratio = bilingual_parallel_rows / max(1, len(filled_rows[:12]))
     delimiter_light_ratio = delimiter_light_rows / max(1, len(filled_rows[:12]))
+    avg_words = sum(word_counts) / max(1, len(word_counts))
 
     if long_ratio >= 0.35 and structured_ratio < 0.35:
         return True
 
     # Bilingual contracts and leases often use 2-4 columns for side-by-side
     # legal text. They are visually tabular but semantically narrative content.
-    if mixed_script_ratio >= 0.35 and structured_ratio < 0.45 and delimiter_light_ratio >= 0.5:
+    if (
+        (mixed_script_ratio >= 0.25 or bilingual_parallel_ratio >= 0.25)
+        and structured_ratio < 0.55
+        and (delimiter_light_ratio >= 0.35 or long_ratio >= 0.2 or avg_words >= 4)
+    ):
+        return True
+
+    # A single Word table row with two language columns is still a layout table.
+    if (
+        len(filled_rows) <= 2
+        and n_cols <= 4
+        and bilingual_parallel_ratio > 0
+        and structured_ratio < 0.55
+    ):
         return True
 
     return False
