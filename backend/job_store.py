@@ -111,6 +111,7 @@ def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
 
 
 def public_job_record(record: dict[str, Any]) -> dict[str, Any]:
+    duration_ms = _duration_ms(record.get("created_at"), record.get("finished_at") or record.get("updated_at"))
     return {
         "run_id": record.get("run_id"),
         "kind": record.get("kind", "comparison"),
@@ -137,6 +138,7 @@ def public_job_record(record: dict[str, Any]) -> dict[str, Any]:
         "created_at": _iso(record.get("created_at")),
         "updated_at": _iso(record.get("updated_at")),
         "finished_at": _iso(record.get("finished_at")),
+        "duration_ms": duration_ms,
     }
 
 
@@ -250,3 +252,25 @@ def _iso(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
     return value
+
+
+def _parse_dt(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    try:
+        text = str(value)
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
+def _duration_ms(start: Any, end: Any) -> Optional[int]:
+    started = _parse_dt(start)
+    ended = _parse_dt(end)
+    if not started or not ended:
+        return None
+    return max(0, int((ended - started).total_seconds() * 1000))
