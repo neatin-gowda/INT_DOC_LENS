@@ -739,14 +739,16 @@ function JobsDashboard({ onOpenJob, error }) {
         <EmptyState label="No jobs are available in this backend session yet." />
       ) : (
         <div className="dl-scrollbar" style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 1120, tableLayout: "fixed" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 1320, tableLayout: "fixed" }}>
             <colgroup>
+              <col style={{ width: "12%" }} />
+              <col style={{ width: "27%" }} />
               <col style={{ width: "13%" }} />
-              <col style={{ width: "36%" }} />
-              <col style={{ width: "16%" }} />
-              <col style={{ width: "14%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "11%" }} />
               <col style={{ width: "8%" }} />
-              <col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "7%" }} />
               <col style={{ width: 150 }} />
             </colgroup>
             <thead>
@@ -755,6 +757,8 @@ function JobsDashboard({ onOpenJob, error }) {
                 <th style={th}>Documents</th>
                 <th style={th}>Status</th>
                 <th style={th}>Progress</th>
+                <th style={th}>Submitted</th>
+                <th style={th}>Duration</th>
                 <th style={th}>Pages</th>
                 <th style={th}>AI tokens</th>
                 <th style={th}>Action</th>
@@ -787,6 +791,13 @@ function JobsDashboard({ onOpenJob, error }) {
                     </td>
                     <td style={td}>
                       <ProgressMini value={job.progress || 0} status={job.status} />
+                    </td>
+                    <td style={td}>
+                      <div>{formatDateTime(job.created_at)}</div>
+                      {job.finished_at && <div style={{ color: "#667085", marginTop: 4 }}>Done {formatDateTime(job.finished_at)}</div>}
+                    </td>
+                    <td style={td}>
+                      {formatDuration(job.duration_ms, job.status)}
                     </td>
                     <td style={td}>
                       {job.kind === "extraction"
@@ -3952,6 +3963,31 @@ function formatInt(value) {
   const n = Number(value || 0);
   if (!Number.isFinite(n)) return "0";
   return Math.round(n).toLocaleString();
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDuration(value, status) {
+  const ms = Number(value || 0);
+  if (!Number.isFinite(ms) || ms <= 0) return status === "complete" || status === "failed" ? "-" : "Running";
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const minRest = minutes % 60;
+  return minRest ? `${hours}h ${minRest}m` : `${hours}h`;
 }
 
 function unique(values) {
