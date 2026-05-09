@@ -13,6 +13,8 @@ Table intelligence:
 """
 from __future__ import annotations
 
+import copy
+import hashlib
 import re
 import json
 import os
@@ -45,7 +47,7 @@ from .document_ingest import (
 from .extraction.runner import enrich_blocks, extraction_intelligence_summary
 from .extraction.registry import list_providers
 from .extractor_v2 import coverage_pct, extract_blocks_v2 as extract_blocks, render_pages
-from .job_store import init_job_store, list_jobs as list_stored_jobs, public_job_record, upsert_job
+from .job_store import init_job_store, list_jobs as list_stored_jobs, now_iso, public_job_record, upsert_job
 from .models import Block, ChangeType
 from .query import ai_health, query as nl_query
 from .security import (
@@ -76,6 +78,9 @@ app.add_middleware(
 
 
 _RUNS: dict[str, dict] = {}
+_EXTRACTION_CACHE: dict[str, dict[str, Any]] = {}
+_EXTRACTION_CACHE_LOCK = threading.RLock()
+_EXTRACTION_CACHE_MAX = int(os.getenv("DOCULENS_EXTRACTION_CACHE_MAX", "24") or "24")
 init_job_store()
 
 
@@ -256,6 +261,7 @@ def _set_run_status(run_id: str, message: str, progress: int, status: str = "run
             "status": status,
             "status_message": message,
             "progress": progress,
+            "updated_at": now_iso(),
         }
     )
     _sync_job_metadata(run_id)
@@ -292,11 +298,18 @@ def _job_patch_from_run(run_id: str, run: dict) -> dict[str, Any]:
         "n_pages_base": len(run.get("base_imgs", [])),
         "n_pages_target": len(run.get("target_imgs", [])),
         "ai_usage": run.get("ai_usage", empty_usage()),
+        "created_at": run.get("created_at"),
+        "updated_at": run.get("updated_at"),
+        "finished_at": run.get("finished_at"),
         "result_ref": {
             "db_run_id": run.get("db_run_id"),
             "work": str(run.get("work")) if run.get("work") else None,
             "base_pdf": str(run.get("base_pdf")) if run.get("base_pdf") else None,
             "target_pdf": str(run.get("target_pdf")) if run.get("target_pdf") else None,
+            "source_sha": run.get("source_sha"),
+            "base_source_sha": run.get("base_source_sha"),
+            "target_source_sha": run.get("target_source_sha"),
+            "cache_hits": run.get("cache_hits") or {},
         },
         "error": run.get("error"),
     }
@@ -310,6 +323,50 @@ def _sync_job_metadata(run_id: str) -> None:
         upsert_job(run_id, _job_patch_from_run(run_id, run))
     except Exception:
         pass
+
+
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _extraction_cache_key(source_path: Path) -> str:
+    return f"{source_path.suffix.lower()}:{_file_sha256(source_path)}"
+
+
+def _cached_extract_blocks(source_path: Path, pdf_path: Path) -> tuple[list[Block], str, bool]:
+    """
+    Reuse deterministic extraction for exact same uploaded file bytes.
+
+    The cached blocks are deep-copied before use, so concurrent/current jobs do
+    not share mutable payloads while still avoiding repeated XLSB/Word/PDF parse
+    work for identical files in the same API process.
+    """
+    cache_key = _extraction_cache_key(source_path)
+    source_sha = cache_key.split(":", 1)[1]
+
+    with _EXTRACTION_CACHE_LOCK:
+        cached = _EXTRACTION_CACHE.get(cache_key)
+        if cached:
+            cached["hits"] = int(cached.get("hits") or 0) + 1
+            return copy.deepcopy(cached["blocks"]), source_sha, True
+
+    blocks = extract_blocks_from_source(source_path, pdf_path, extract_blocks)
+
+    with _EXTRACTION_CACHE_LOCK:
+        if len(_EXTRACTION_CACHE) >= max(1, _EXTRACTION_CACHE_MAX):
+            oldest_key = next(iter(_EXTRACTION_CACHE))
+            _EXTRACTION_CACHE.pop(oldest_key, None)
+        _EXTRACTION_CACHE[cache_key] = {
+            "blocks": copy.deepcopy(blocks),
+            "source_format": source_kind(source_path),
+            "hits": 0,
+        }
+
+    return blocks, source_sha, False
 
 
 def _ensure_complete(run_id: str) -> dict:
@@ -1360,7 +1417,17 @@ def _process_extract(
             _RUNS[run_id]["page_imgs"] = all_page_imgs
 
             _set_run_status(run_id, f"Extracting text, tables, and image content from {source_label}", min(70, progress_base + 24))
-            blocks = extract_blocks_from_source(source, pdf_path, extract_blocks)
+            blocks, source_sha, cache_hit = _cached_extract_blocks(source, pdf_path)
+            _RUNS[run_id].setdefault("document_fingerprints", []).append(
+                {
+                    "label": source_label,
+                    "source_format": fmt,
+                    "sha256": source_sha,
+                    "cache_hit": cache_hit,
+                }
+            )
+            if cache_hit:
+                _RUNS[run_id].setdefault("cache_hits", {})[source_label] = True
             blocks = _adjust_extraction_blocks(
                 blocks,
                 doc_index=idx,
@@ -1385,6 +1452,8 @@ def _process_extract(
                     "label": source_label,
                     "filename": source.name,
                     "source_format": fmt,
+                    "sha256": source_sha,
+                    "cache_hit": cache_hit,
                     "pdf_path": str(pdf_path),
                     "page_start": page_offset + 1,
                     "page_count": len(page_imgs),
@@ -1416,6 +1485,7 @@ def _process_extract(
                 "status": "complete",
                 "status_message": "Extraction complete",
                 "progress": 100,
+                "finished_at": now_iso(),
                 "kind": "extraction",
                 "work": work,
                 "label": label,
@@ -1440,6 +1510,7 @@ def _process_extract(
                 "status": "failed",
                 "status_message": "Extraction failed",
                 "progress": _RUNS.get(run_id, {}).get("progress", 0),
+                "finished_at": now_iso(),
                 "error": str(exc),
                 "traceback": traceback.format_exc(),
             }
@@ -1488,8 +1559,28 @@ def _process_compare(
 
         _set_run_status(run_id, "Extracting text, tables, and document structure", 36)
 
-        base_blocks = extract_blocks_from_source(base_source, base_pdf, extract_blocks)
-        target_blocks = extract_blocks_from_source(target_source, target_pdf, extract_blocks)
+        base_blocks, base_sha, base_cache_hit = _cached_extract_blocks(base_source, base_pdf)
+        target_blocks, target_sha, target_cache_hit = _cached_extract_blocks(target_source, target_pdf)
+        _RUNS[run_id].update(
+            {
+                "base_source_sha": base_sha,
+                "target_source_sha": target_sha,
+                "same_source_file": base_sha == target_sha,
+                "cache_hits": {
+                    "base": base_cache_hit,
+                    "target": target_cache_hit,
+                },
+            }
+        )
+        if base_cache_hit or target_cache_hit or base_sha == target_sha:
+            reused = []
+            if base_cache_hit:
+                reused.append("baseline")
+            if target_cache_hit:
+                reused.append("revised")
+            if base_sha == target_sha:
+                reused.append("identical file fingerprint")
+            _set_run_status(run_id, f"Reused deterministic extraction for {', '.join(reused)}", 44)
 
         _set_run_status(run_id, "Checking extraction coverage", 50)
 
@@ -1555,6 +1646,7 @@ def _process_compare(
                 "status": "complete",
                 "status_message": "Comparison complete",
                 "progress": 100,
+                "finished_at": now_iso(),
                 "work": work,
                 "base_pdf": base_pdf,
                 "target_pdf": target_pdf,
@@ -1586,6 +1678,7 @@ def _process_compare(
                 "status": "failed",
                 "status_message": "Comparison failed",
                 "progress": _RUNS.get(run_id, {}).get("progress", 0),
+                "finished_at": now_iso(),
                 "error": str(exc),
                 "traceback": traceback.format_exc(),
             }
@@ -1656,7 +1749,7 @@ def list_jobs(limit: int = 50):
             by_id[run_id] = public_job_record(_job_patch_from_run(run_id, run))
 
     rows = list(by_id.values())
-    rows.sort(key=lambda item: item.get("run_id", ""), reverse=True)
+    rows.sort(key=lambda item: item.get("created_at") or item.get("updated_at") or item.get("run_id", ""), reverse=True)
     limit = max(1, min(limit, 200))
     return {"jobs": rows[:limit], "count": min(len(rows), limit), "total": len(rows)}
 
@@ -1699,6 +1792,7 @@ async def compare(
         "status": "queued",
         "status_message": "Uploading documents",
         "progress": 5,
+        "created_at": now_iso(),
         **job_ownership_fields(),
         "work": work,
         "base_label": base_label,
@@ -1730,6 +1824,7 @@ async def compare(
                 "status": "failed",
                 "status_message": "Could not save uploaded documents",
                 "progress": 0,
+                "finished_at": now_iso(),
                 "error": str(exc),
                 "traceback": traceback.format_exc(),
             }
@@ -1778,6 +1873,7 @@ async def extract_document(
         "status": "queued",
         "status_message": "Uploading document",
         "progress": 5,
+        "created_at": now_iso(),
         **job_ownership_fields(),
         "work": work,
         "label": label,
@@ -1817,6 +1913,7 @@ async def extract_document(
                 "status": "failed",
                 "status_message": "Could not save uploaded document",
                 "progress": 0,
+                "finished_at": now_iso(),
                 "error": str(exc),
                 "traceback": traceback.format_exc(),
             }
