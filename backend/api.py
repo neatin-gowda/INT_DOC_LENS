@@ -150,6 +150,7 @@ class FeedbackReq(BaseModel):
     missing_areas: str
     comments: str
     page_numbers: Optional[str] = None
+    selected_focus: list[dict[str, Any]] = Field(default_factory=list)
     wants_ai_enhancement: bool = False
 
 
@@ -393,6 +394,7 @@ def _feedback_record(run_id: str, r: dict, req: FeedbackReq, quality: dict[str, 
         "missing_areas": req.missing_areas.strip(),
         "page_numbers": str(req.page_numbers or "").strip(),
         "comments": req.comments.strip(),
+        "selected_focus": req.selected_focus[:50],
         "wants_ai_enhancement": bool(req.wants_ai_enhancement),
         "quality_profile": quality,
         "ai_context": {
@@ -2068,11 +2070,13 @@ def enhance_summary(run_id: str, req: EnhanceSummaryReq):
     if not feedback:
         raise HTTPException(400, "Feedback is required before advanced AI enhancement.")
 
-    focus_items = quality.get("focus_items") or []
+    focus_items = feedback.get("selected_focus") or quality.get("focus_items") or []
     page_hint = feedback.get("page_numbers") or "not specified"
     prompt = (
         "Improve the review summary using only extracted comparison evidence. "
         "Focus on the lower-confidence or user-flagged areas. "
+        "For each selected focus area, compare both the baseline document and the revised document before concluding. "
+        "Do not improve from one side only; every answer must explain the baseline-vs-revised evidence. "
         f"Document type: {feedback.get('document_type')}. "
         f"System score: {feedback.get('system_score')}. User score: {feedback.get('user_score')}. "
         f"Reviewer flagged areas: {feedback.get('missing_areas')}. "
