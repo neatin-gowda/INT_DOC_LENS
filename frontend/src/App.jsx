@@ -739,7 +739,16 @@ function JobsDashboard({ onOpenJob, error }) {
         <EmptyState label="No jobs are available in this backend session yet." />
       ) : (
         <div className="dl-scrollbar" style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 980 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 1120, tableLayout: "fixed" }}>
+            <colgroup>
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "36%" }} />
+              <col style={{ width: "16%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: 150 }} />
+            </colgroup>
             <thead>
               <tr style={{ background: "#1f2937", color: "white" }}>
                 <th style={th}>Workflow</th>
@@ -761,7 +770,7 @@ function JobsDashboard({ onOpenJob, error }) {
                       <strong style={{ fontWeight: 650 }}>{job.kind === "extraction" ? "Extraction" : "Comparison"}</strong>
                       <div style={{ color: "#667085", marginTop: 4 }}>{trim(job.run_id, 18)}</div>
                     </td>
-                    <td style={td}>
+                    <td style={{ ...td, overflowWrap: "anywhere" }}>
                       {job.kind === "extraction" ? (
                         <div>{job.label || "Uploaded document"}</div>
                       ) : (
@@ -787,12 +796,14 @@ function JobsDashboard({ onOpenJob, error }) {
                     <td style={td}>
                       <AiUsageInline usage={job.ai_usage} />
                     </td>
-                    <td style={td}>
+                    <td style={{ ...td, width: 150 }}>
                       <button
                         type="button"
                         onClick={() => onOpenJob(job)}
                         disabled={!complete}
-                        style={complete ? primaryButtonStyle(false, { height: 36 }) : secondaryButtonStyle({ height: 36, opacity: 0.55, cursor: "default" })}
+                        style={complete
+                          ? primaryButtonStyle(false, { height: 36, minWidth: 118, whiteSpace: "nowrap" })
+                          : secondaryButtonStyle({ height: 36, minWidth: 118, whiteSpace: "nowrap", opacity: 0.55, cursor: "default" })}
                       >
                         {complete ? "Open result" : statusInfo.isFailed ? "Failed" : "Processing"}
                       </button>
@@ -2278,14 +2289,14 @@ function AccuracyImprovementTab({ runId, meta }) {
 
 function AccuracyImprovementPanel({ runId, quality }) {
   const systemScore = quality?.system_score ?? "";
+  const inferredDocumentType = quality?.document_type || "";
   const recommended = Boolean(quality?.ai_recommended);
   const focusItems = quality?.focus_items || [];
   const [form, setForm] = useState({
     reviewer_name: "",
-    document_type: "",
+    document_type: inferredDocumentType,
     user_score: systemScore === "" ? "" : systemScore,
     missing_areas: "",
-    page_numbers: "",
     comments: "",
     wants_ai_enhancement: true,
   });
@@ -2295,11 +2306,26 @@ function AccuracyImprovementPanel({ runId, quality }) {
   const [result, setResult] = useState(null);
 
   useEffect(() => {
-    setForm((prev) => ({ ...prev, user_score: systemScore === "" ? "" : systemScore }));
+    setForm({
+      reviewer_name: "",
+      document_type: inferredDocumentType,
+      user_score: systemScore === "" ? "" : systemScore,
+      missing_areas: "",
+      comments: "",
+      wants_ai_enhancement: true,
+    });
     setSelectedFocus([]);
     setError("");
     setResult(null);
-  }, [runId, systemScore]);
+  }, [runId]);
+
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      user_score: systemScore === "" ? "" : systemScore,
+      document_type: prev.document_type || inferredDocumentType,
+    }));
+  }, [systemScore, inferredDocumentType]);
 
   const update = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
   const rows = result?.rows || [];
@@ -2325,14 +2351,34 @@ function AccuracyImprovementPanel({ runId, quality }) {
 
   const submit = async (event) => {
     event.preventDefault();
+    if (!form.reviewer_name.trim()) {
+      setError("Reviewer name is required.");
+      return;
+    }
+    if (!form.document_type.trim()) {
+      setError("Document type is required.");
+      return;
+    }
+    if (!form.missing_areas.trim() && selectedFocus.length === 0) {
+      setError("Please describe the area that looked incorrect or choose a low-score focus area.");
+      return;
+    }
+    if (!form.comments.trim()) {
+      setError("Reviewer comments are required.");
+      return;
+    }
     setBusy(true);
     setError("");
     setResult(null);
 
     const payload = {
       ...form,
+      reviewer_name: form.reviewer_name.trim(),
+      document_type: form.document_type.trim(),
       user_score: Number(form.user_score),
       missing_areas: form.missing_areas.trim() || selectedFocus.map(focusLabel).join("\n"),
+      comments: form.comments.trim(),
+      selected_focus: selectedFocus,
       wants_ai_enhancement: Boolean(form.wants_ai_enhancement),
     };
 
@@ -2407,14 +2453,13 @@ function AccuracyImprovementPanel({ runId, quality }) {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginBottom: 10 }}>
-        <input required value={form.reviewer_name} onChange={(e) => update("reviewer_name", e.target.value)} placeholder="Reviewer name" style={inputStyle} />
-        <input required value={form.document_type} onChange={(e) => update("document_type", e.target.value)} placeholder="Document type" style={inputStyle} />
+        <input required aria-label="Reviewer name" value={form.reviewer_name} onChange={(e) => update("reviewer_name", e.target.value)} placeholder="Reviewer name *" style={inputStyle} />
+        <input required aria-label="Document type" value={form.document_type} onChange={(e) => update("document_type", e.target.value)} placeholder="Document type *" style={inputStyle} />
         <input readOnly value={form.user_score} placeholder="Classical score" style={{ ...inputStyle, background: "#f2eee6", color: "#667085" }} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10, marginBottom: 10 }}>
+      <div style={{ marginBottom: 10 }}>
         <textarea required value={form.missing_areas} onChange={(e) => update("missing_areas", e.target.value)} placeholder="Areas that looked incorrect or missing" rows={3} style={{ ...inputStyle, resize: "vertical" }} />
-        <textarea value={form.page_numbers} onChange={(e) => update("page_numbers", e.target.value)} placeholder="Page numbers, if known" rows={3} style={{ ...inputStyle, resize: "vertical" }} />
       </div>
 
       <textarea required value={form.comments} onChange={(e) => update("comments", e.target.value)} placeholder="Reviewer comments for this session" rows={3} style={{ ...inputStyle, resize: "vertical", marginBottom: 10 }} />
@@ -4030,6 +4075,7 @@ function normalizeQualityProfile(profile, rows = [], fallback = null) {
     return {
       ...fallback,
       ...profile,
+      document_type: profile.document_type || fallback?.document_type || "",
       focus_items: Array.isArray(profile.focus_items) ? profile.focus_items : fallback?.focus_items || [],
     };
   }
@@ -4058,6 +4104,7 @@ function normalizeQualityProfile(profile, rows = [], fallback = null) {
     system_score: avg === null ? fallback?.system_score ?? "" : Math.round(avg * 10000) / 100,
     threshold: 0.9,
     ai_recommended: avg === null ? Boolean(fallback?.ai_recommended) : avg < 0.9,
+    document_type: fallback?.document_type || "",
     review_items: list.length || fallback?.review_items || 0,
     low_confidence_items: focusItems.length,
     focus_items: focusItems,
@@ -4072,10 +4119,36 @@ function fallbackQualityProfile(meta) {
     system_score: "",
     threshold: 0.9,
     ai_recommended: reviewItems > 0,
+    document_type: inferDocumentType(meta),
     review_items: reviewItems,
     low_confidence_items: 0,
     focus_items: [],
   };
+}
+
+function inferDocumentType(meta) {
+  const text = [
+    meta?.base_label,
+    meta?.target_label,
+    meta?.label,
+    meta?.base_format,
+    meta?.target_format,
+    meta?.source_format,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (!text.trim()) return "";
+  if (/\blease|tenant|landlord|rent\b/.test(text)) return "Lease agreement";
+  if (/\bcontract|agreement|terms|clause|legal\b/.test(text)) return "Contract / agreement";
+  if (/\binvoice|bill|statement\b/.test(text)) return "Invoice / statement";
+  if (/\bpurchase order|po\b/.test(text)) return "Purchase order";
+  if (/\bcatalog|sku|product|automotive|motor|vehicle|model\b/.test(text)) return "Product catalog / specification";
+  if (/\bretail|price|pricing|promotion\b/.test(text)) return "Retail pricing document";
+  if (/\bengineering|drawing|specification|technical\b/.test(text)) return "Engineering specification";
+  if (/\bpolicy|procedure|sop|process\b/.test(text)) return "Policy / procedure";
+  if (/\bspreadsheet|xlsx|xls|csv|tsv\b/.test(text)) return "Spreadsheet";
+  if (/\bdocx|word\b/.test(text)) return "Word document";
+  if (/\bpdf\b/.test(text)) return "PDF document";
+  return "Business document";
 }
 
 const inputStyle = {
