@@ -173,14 +173,17 @@ To meet "do not miss any content":
 
 ```
 backend/
-  api.py                # FastAPI app and API orchestration
+  api.py                # FastAPI app setup, middleware, health, and job listing
+  routers/              # Modular API endpoints by workflow
   api_schemas.py        # FastAPI request/response models
-  ingestion/source_documents.py    # Multi-format source handling
+  ingestion/source_documents.py    # Multi-format source orchestration
+  ingestion/parsers/    # DOCX, Excel/XLSB, CSV/TSV, OCR, and conversion helpers
   extraction/pdf_extractor.py       # PDF/page/block extraction
   extraction/table_extractor.py    # Robust table extraction
   extraction/table_stitcher.py     # Cross-page table stitching
   comparison/diff_engine.py          # Anchor-aware semantic diff engine
   services/table_tools.py            # Table previews and selected-column comparison
+  jobs/queue.py         # Database-backed worker queue for scale-out containers
   summarizer.py         # LLM or deterministic summary table
   query.py              # NL → JSONB path / SQL
   models.py             # Pydantic models for blocks, diffs

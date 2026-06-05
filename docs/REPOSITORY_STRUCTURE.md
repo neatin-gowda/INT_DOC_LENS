@@ -25,12 +25,14 @@ samples/                 Example pipeline outputs for regression/reference
 
 ```text
 backend/
-  api.py                 FastAPI surface. This is still too large and should keep shrinking.
+  api.py                 FastAPI app setup, middleware, health, and job listing.
   api_schemas.py         FastAPI request/response models.
+  api_helpers.py         Shared route helpers, run state, native-page shaping, and DB health.
   models.py              Canonical domain models: Block, BlockDiff, SummaryRow, etc.
 
   ingestion/
-    source_documents.py  Upload/source handling, conversion to PDF, native DOCX/XLSX/CSV extraction.
+    source_documents.py  Upload/source handling and parser orchestration.
+    parsers/             Format-specific DOCX, Excel/XLSB, CSV/TSV, OCR, and conversion helpers.
 
   extraction/
     pdf_extractor.py     PDF block extraction, page rendering, OCR fallback, anchor tagging.
@@ -48,8 +50,19 @@ backend/
   services/
     table_tools.py       Table discovery, viewing, row matching, and selected-column comparison helpers.
 
+  routers/
+    comparison.py        Compare upload, run metadata, diff, pages, overlays, and native views.
+    extraction.py        Single-document extraction runs, blocks, tables, images, and JSON output.
+    feedback.py          Reviewer feedback and summary enhancement.
+    queries.py           Natural-language question endpoint.
+    reports.py           PDF report and AI summary PDF endpoints.
+    tables.py            Table list, table view, selected-table comparison, and table report.
+
+  jobs/
+    queue.py             Database-backed worker queue for ACA scale-out safety.
+
   persistence.py         Database writes for documents, blocks, diffs, feedback, tables.
-  db.py                  Database connection helper.
+  db.py                  Database connection pool helper.
   query.py               Natural-language question handling over comparison output.
   summarizer.py          Deterministic and Azure OpenAI-backed review summaries.
   report.py              PDF report generation.
@@ -69,7 +82,7 @@ backend/
 
 The active comparison path is:
 
-- `backend/ingestion/source_documents.py` for multi-format source handling.
+- `backend/ingestion/source_documents.py` and `backend/ingestion/parsers/` for multi-format source handling.
 - `backend/extraction/pdf_extractor.py` for PDF/page/block extraction.
 - `backend/extraction/table_extractor.py` and `backend/extraction/table_stitcher.py` for table handling.
 - `backend/comparison/diff_engine.py` for anchor-aware semantic diffing.
@@ -88,11 +101,12 @@ The active comparison path is:
 
 ## Current Refactor Targets
 
-These files are still intentionally called out because they are too large for
-comfortable maintenance:
+The main production boundaries are now in place. The remaining improvements are
+smaller and should stay focused:
 
-- `backend/api.py`: currently owns API routes, job orchestration, native-page shaping, feedback, and reports. Split into routers next.
-- `frontend/src/App.jsx`: currently owns most UI components and helper functions. Split by workspace (`jobs`, `upload`, `extraction`, `comparison`, `tables`, `reports`) next.
-- `backend/ingestion/source_documents.py`: owns conversion plus native DOCX/spreadsheet/image extraction. Split provider implementations after route/service extraction.
+- `backend/api_helpers.py`: move native-page rendering helpers into a dedicated service when the viewer evolves again.
+- `backend/services/table_tools.py`: keep improving table intelligence here instead of leaking table heuristics into routers.
+- `frontend/src/components/common.jsx`: split broad display helpers from extraction normalization helpers if it keeps growing.
+- `frontend/src/components/tables.jsx`: keep the default workflow simple and place nested-header/manual-column tuning behind advanced controls.
 
 Older prototype copies of the extractor, differ, and frontend app were removed so the repository has one obvious implementation path.

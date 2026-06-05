@@ -4,7 +4,6 @@ import {
   inputStyle,
   labelStyle,
   miniButtonStyle,
-  presetButtonStyle,
   primaryButtonStyle,
   secondaryButtonStyle,
   smallTh,
@@ -15,6 +14,7 @@ import {
   friendlyFetchError,
   SoftLoading,
   EmptyState,
+  ErrorBox,
   StatChip,
   AiUsageCard,
   isInternalColumn,
@@ -22,9 +22,9 @@ import {
   unique,
   trim,
   tableMinWidth,
-  rowChangeType,
   ChangeBadge,
   normalizeConfidence,
+  normalizeErrorMessage,
   defaultRowColumns,
   defaultValueColumns,
   inferColumns,
@@ -46,7 +46,6 @@ export function TablesWorkspace({ runId }) {
   const [diff, setDiff] = useState(null);
   const [compareBusy, setCompareBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
-  const [useTableAi, setUseTableAi] = useState(false);
   const [tableQuestion, setTableQuestion] = useState("Summarize selected table changes, including value changes and header-only changes, with clarification questions.");
   const [showConfig, setShowConfig] = useState(false);
 
@@ -70,6 +69,17 @@ export function TablesWorkspace({ runId }) {
   const targetTables = data?.target || [];
   const baseTable = baseTables.find((t) => t.id === baseTableId);
   const targetTable = targetTables.find((t) => t.id === targetTableId);
+  const suggestedTarget = baseTable ? recommendTargetTable(baseTable, targetTables) : null;
+
+  useEffect(() => {
+    if (!data || baseTableId || !baseTables.length) return;
+    setBaseTableId(baseTables[0].id);
+  }, [data, baseTableId, baseTables]);
+
+  useEffect(() => {
+    if (!data || !baseTable || targetTableId || !targetTables.length) return;
+    setTargetTableId((suggestedTarget || targetTables[0]).id);
+  }, [data, baseTable, targetTableId, targetTables, suggestedTarget]);
 
   useEffect(() => {
     setDiff(null);
@@ -149,7 +159,7 @@ export function TablesWorkspace({ runId }) {
     base_value_columns: baseValueColumns.filter((c) => !baseRowColumns.includes(c)),
     target_value_columns: targetValueColumns.filter((c) => !targetRowColumns.includes(c)),
     row_filter: rowFilter.trim() || null,
-    use_ai: overrides.use_ai ?? useTableAi,
+    use_ai: overrides.use_ai ?? false,
     question: tableQuestion.trim() || null,
     limit: 200,
   });
@@ -178,10 +188,22 @@ export function TablesWorkspace({ runId }) {
   };
 
   useEffect(() => {
-    if (baseTableId && targetTableId && baseRowColumns.length > 0 && targetRowColumns.length > 0) {
-      compare();
-    }
-  }, [baseTableId, targetTableId, baseRowColumns.length, targetRowColumns.length]);
+    if (!baseTableId || !targetTableId || baseRowColumns.length === 0 || targetRowColumns.length === 0) return undefined;
+
+    const timer = setTimeout(() => {
+      compare({ use_ai: false });
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [
+    baseTableId,
+    targetTableId,
+    baseRowColumns.join("|"),
+    targetRowColumns.join("|"),
+    baseValueColumns.join("|"),
+    targetValueColumns.join("|"),
+    rowFilter,
+  ]);
 
   const exportTablePdf = async () => {
     if (!baseTableId || !targetTableId || exportBusy) return;
@@ -218,29 +240,95 @@ export function TablesWorkspace({ runId }) {
 
   return (
     <div>
-      <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 14 }}>
-        <div style={{ fontWeight: 650, marginBottom: 4 }}>Table workspace</div>
-        <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.45 }}>
-          Select tables by page and topic, choose the row/feature columns and value columns, preview the selected rows, then compare only those table slices.
-        </div>
-      </div>
+      <TableWorkspaceHeader
+        baseCount={baseTables.length}
+        targetCount={targetTables.length}
+        hasSelection={Boolean(baseTableId && targetTableId)}
+        compareBusy={compareBusy}
+        hasResult={Boolean(diff)}
+      />
 
       {error && <ErrorBox message={error} />}
 
       <div className="table-picker-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, marginBottom: 14 }}>
-        <TablePicker title="Baseline document table" value={baseTableId} onChange={setBaseTableId} tables={baseTables} />
-        <TablePicker title="Revised document table" value={targetTableId} onChange={setTargetTableId} tables={targetTables} />
+        <TableSelectionPanel
+          title="Baseline table"
+          value={baseTableId}
+          onChange={setBaseTableId}
+          tables={baseTables}
+          table={baseTable}
+          emptyLabel="No baseline tables were detected."
+        />
+        <TableSelectionPanel
+          title="Revised table"
+          value={targetTableId}
+          onChange={setTargetTableId}
+          tables={targetTables}
+          table={targetTable}
+          emptyLabel="No revised tables were detected."
+          suggestion={suggestedTarget}
+          onUseSuggestion={() => suggestedTarget && setTargetTableId(suggestedTarget.id)}
+        />
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+      <div className="table-action-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
+        <div>
+          <label style={labelStyle}>Focus row or item</label>
+          <input
+            value={rowFilter}
+            onChange={(e) => setRowFilter(e.target.value)}
+            placeholder="Optional: filter to one feature, code, package, clause, PCV, or row label"
+            style={inputStyle}
+            dir="auto"
+          />
+          <div style={{ color: "#667085", fontSize: 12, marginTop: 5 }}>
+            Leave blank for a full-table comparison. Results refresh automatically.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => compare({ use_ai: false })}
+          disabled={compareBusy || !baseTableId || !targetTableId}
+          style={secondaryButtonStyle(compareBusy || !baseTableId || !targetTableId ? { height: 40, opacity: 0.65, cursor: "default" } : { height: 40 })}
+        >
+          {compareBusy ? "Refreshing" : "Refresh"}
+        </button>
+        <button
+          type="button"
+          onClick={() => compare({ use_ai: true })}
+          disabled={compareBusy || !baseTableId || !targetTableId}
+          style={primaryButtonStyle(compareBusy || !baseTableId || !targetTableId, { height: 40 })}
+        >
+          AI review
+        </button>
+        <button
+          type="button"
+          onClick={exportTablePdf}
+          disabled={exportBusy || !baseTableId || !targetTableId}
+          style={secondaryButtonStyle(exportBusy || !baseTableId || !targetTableId ? { height: 40, opacity: 0.65, cursor: "default" } : { height: 40 })}
+        >
+          {exportBusy ? "Exporting" : "Export PDF"}
+        </button>
+      </div>
+
+      {(baseTable || targetTable) && (
+        <TableAutoMatchNote
+          baseTable={baseTable}
+          targetTable={targetTable}
+          suggestedTarget={suggestedTarget}
+          compareBusy={compareBusy}
+        />
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+        <div style={{ color: "#667085", fontSize: 13 }}>
+          Advanced is only for unusual tables with nested headers, vertical header text, or a row label the app guessed incorrectly.
+        </div>
         <button
           type="button"
           onClick={() => setShowConfig(!showConfig)}
           style={{
             ...secondaryButtonStyle(),
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
             fontSize: 13,
             padding: "8px 14px",
             borderColor: showConfig ? "#1f2937" : "#c9c0b0",
@@ -248,17 +336,23 @@ export function TablesWorkspace({ runId }) {
             fontWeight: 600,
           }}
         >
-          {showConfig ? "Hide column configuration ✕" : "Adjust columns (Advanced) ⚙"}
+          {showConfig ? "Hide advanced controls" : "Advanced controls"}
         </button>
-      </div>
-
-      <div className="table-picker-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, marginBottom: 14 }}>
-        <TableInfo table={baseTable} emptyLabel="Select a baseline table to inspect its title, page, columns, and rows." />
-        <TableInfo table={targetTable} emptyLabel="Select a revised table to inspect its title, page, columns, and rows." />
       </div>
 
       {showConfig && (
         <>
+          <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 14 }}>
+            <label style={labelStyle}>AI review focus</label>
+            <input
+              value={tableQuestion}
+              onChange={(e) => setTableQuestion(e.target.value)}
+              placeholder="Optional AI focus: changed values, renamed headers, missing rows, review questions"
+              style={inputStyle}
+              dir="auto"
+            />
+          </div>
+
           <RowFilterSuggestions baseTable={baseTable} targetTable={targetTable} onSelect={setRowFilter} />
 
           <div className="table-config-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, marginBottom: 14 }}>
@@ -303,53 +397,7 @@ export function TablesWorkspace({ runId }) {
         </>
       )}
 
-      <div className="table-action-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
-        <div>
-          <label style={labelStyle}>Find rows in selected tables</label>
-          <input
-            value={rowFilter}
-            onChange={(e) => setRowFilter(e.target.value)}
-            placeholder="Optional: type a feature, code, package, PCV, or phrase to narrow the rows"
-            style={inputStyle}
-            dir="auto"
-          />
-          <div style={{ color: "#667085", fontSize: 12, marginTop: 5 }}>
-            Leave blank to compare all rows in the selected table slice.
-          </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#475467", fontSize: 13, marginTop: 8 }}>
-            <input
-              type="checkbox"
-              checked={useTableAi}
-              onChange={(e) => setUseTableAi(e.target.checked)}
-            />
-            Add AI insight to this compare
-          </label>
-          {useTableAi && (
-            <input
-              value={tableQuestion}
-              onChange={(e) => setTableQuestion(e.target.value)}
-              placeholder="Optional AI focus: changed values, renamed headers, missing rows, review questions"
-              style={{ ...inputStyle, marginTop: 8 }}
-              dir="auto"
-            />
-          )}
-        </div>
-        <button
-          onClick={() => compare()}
-          disabled={compareBusy || !baseTableId || !targetTableId}
-          style={primaryButtonStyle(compareBusy || !baseTableId || !targetTableId, { height: 40 })}
-        >
-          {compareBusy ? "Comparing" : useTableAi ? "Compare with AI" : "Compare tables"}
-        </button>
-        <button
-          onClick={exportTablePdf}
-          disabled={exportBusy || !baseTableId || !targetTableId}
-          style={secondaryButtonStyle(exportBusy || !baseTableId || !targetTableId ? { height: 40, opacity: 0.65, cursor: "default" } : { height: 40 })}
-        >
-          {exportBusy ? "Exporting" : "Export PDF"}
-        </button>
-      </div>
-
+      {compareBusy && !diff && <SoftLoading label="Comparing selected tables" />}
       {diff && <TableColumnCompareResult diff={diff} />}
     </div>
   );
@@ -372,6 +420,166 @@ async function fetchTableView(runId, side, tableId, columns, rowFilter) {
   return r.json();
 }
 
+function tableText(table) {
+  if (!table) return "";
+  return [
+    table.title,
+    table.display_name,
+    table.header_preview,
+    table.area,
+    ...(table.columns || []),
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function tokenOverlapScore(a, b) {
+  const left = new Set(String(a || "").split(/[^\p{L}\p{N}_]+/u).filter((x) => x.length > 2));
+  const right = new Set(String(b || "").split(/[^\p{L}\p{N}_]+/u).filter((x) => x.length > 2));
+  if (!left.size || !right.size) return 0;
+  let overlap = 0;
+  left.forEach((token) => {
+    if (right.has(token)) overlap += 1;
+  });
+  return overlap / Math.max(left.size, right.size);
+}
+
+function recommendTargetTable(baseTable, targetTables) {
+  if (!baseTable || !targetTables.length) return null;
+  const basePage = Number(baseTable.page_first || baseTable.page_number || 0);
+  const baseColumns = Number(baseTable.n_columns || (baseTable.columns || []).length || 0);
+  const baseText = tableText(baseTable);
+
+  return targetTables
+    .map((table) => {
+      const page = Number(table.page_first || table.page_number || 0);
+      const columns = Number(table.n_columns || (table.columns || []).length || 0);
+      const pageScore = basePage && page ? Math.max(0, 1 - Math.abs(basePage - page) / 12) : 0.2;
+      const columnScore = baseColumns && columns ? Math.max(0, 1 - Math.abs(baseColumns - columns) / Math.max(baseColumns, columns)) : 0.2;
+      const textScore = tokenOverlapScore(baseText, tableText(table));
+      return { table, score: textScore * 0.55 + pageScore * 0.25 + columnScore * 0.2 };
+    })
+    .sort((a, b) => b.score - a.score)[0]?.table || targetTables[0];
+}
+
+export function TableWorkspaceHeader({ baseCount, targetCount, hasSelection, compareBusy, hasResult }) {
+  const steps = [
+    { label: "Select tables", active: !hasSelection, done: hasSelection },
+    { label: "Auto-compare", active: hasSelection && (compareBusy || !hasResult), done: hasResult },
+    { label: "Review changes", active: hasResult, done: false },
+  ];
+
+  return (
+    <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 14, marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Table comparison</div>
+          <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.45 }}>
+            Pick the baseline and revised tables. The app aligns rows and columns automatically; advanced controls are only for unusual table structures.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <StatChip label="Baseline tables" value={baseCount} />
+          <StatChip label="Revised tables" value={targetCount} />
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        {steps.map((step, index) => (
+          <span
+            key={step.label}
+            style={{
+              border: `1px solid ${step.active ? "#1f2937" : "#d8d0c3"}`,
+              background: step.active ? "#1f2937" : step.done ? "#eef7f1" : "#fffdf8",
+              color: step.active ? "white" : step.done ? "#176c38" : "#667085",
+              borderRadius: 999,
+              padding: "5px 9px",
+              fontSize: 12,
+              fontWeight: 650,
+            }}
+          >
+            {index + 1}. {step.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function TableSelectionPanel({ title, value, onChange, tables, table, emptyLabel, suggestion, onUseSuggestion }) {
+  const showSuggestion = suggestion && suggestion.id !== value;
+
+  return (
+    <div style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, minWidth: 0 }}>
+      <TablePicker title={title} value={value} onChange={onChange} tables={tables} />
+      {showSuggestion && (
+        <button
+          type="button"
+          onClick={onUseSuggestion}
+          style={{
+            ...secondaryButtonStyle(),
+            marginTop: 8,
+            fontSize: 12,
+            padding: "6px 9px",
+            maxWidth: "100%",
+          }}
+          title={suggestion.display_name || suggestion.title || "Suggested revised table"}
+        >
+          Use suggested match: {trim(suggestion.display_name || suggestion.title || suggestion.page_label || "detected table", 58)}
+        </button>
+      )}
+      <TableMiniSummary table={table} emptyLabel={emptyLabel} />
+    </div>
+  );
+}
+
+export function TableMiniSummary({ table, emptyLabel }) {
+  if (!table) return <div style={{ color: "#667085", fontSize: 13, marginTop: 10 }}>{emptyLabel}</div>;
+
+  const columns = (table.columns || []).filter((col) => !isInternalColumn(col));
+  const confidence = typeof table.extraction_confidence === "number" ? Math.round(table.extraction_confidence * 100) : null;
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="cell-wrap" style={{ fontWeight: 650, color: "#202936" }} dir="auto">
+        {table.title || table.display_name || table.area || "Detected table"}
+      </div>
+      <div style={{ marginTop: 5, color: "#667085", fontSize: 13 }}>
+        {table.page_label || `Page ${table.page_first || "-"}`} · {table.n_columns || columns.length} columns · {table.n_rows || 0} rows
+        {confidence !== null ? ` · ${confidence}% confidence` : ""}
+      </div>
+      <div style={{ marginTop: 9, display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {columns.slice(0, 7).map((col) => (
+          <span key={col} title={col} style={{ border: "1px solid #d8d0c3", borderRadius: 999, padding: "2px 7px", fontSize: 12, color: "#475467", background: "#fbfaf6", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} dir="auto">
+            {col}
+          </span>
+        ))}
+        {columns.length > 7 && <span style={{ color: "#667085", fontSize: 12, padding: "3px 0" }}>+{columns.length - 7} more</span>}
+      </div>
+    </div>
+  );
+}
+
+export function TableAutoMatchNote({ baseTable, targetTable, suggestedTarget, compareBusy }) {
+  if (!baseTable || !targetTable) {
+    return (
+      <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 14, color: "#667085", fontSize: 13 }}>
+        Select one table from each document to start the comparison.
+      </div>
+    );
+  }
+
+  const usingSuggestion = suggestedTarget?.id === targetTable.id;
+  return (
+    <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 14, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ color: "#475467", fontSize: 13, lineHeight: 1.45 }}>
+        {usingSuggestion ? "Using the suggested revised table based on page, title, and header similarity." : "Using your selected table pair."}
+        {" "}Rows and columns are aligned automatically.
+      </div>
+      <div style={{ color: compareBusy ? "#9a7a10" : "#176c38", fontSize: 13, fontWeight: 650 }}>
+        {compareBusy ? "Refreshing comparison" : "Automatic comparison ready"}
+      </div>
+    </div>
+  );
+}
+
 export function TablePicker({ title, value, onChange, tables }) {
   return (
     <div>
@@ -384,39 +592,6 @@ export function TablePicker({ title, value, onChange, tables }) {
           </option>
         ))}
       </select>
-    </div>
-  );
-}
-
-export function TableInfo({ table, emptyLabel }) {
-  if (!table) return <EmptyState label={emptyLabel} />;
-
-  const columns = (table.columns || []).filter((col) => !isInternalColumn(col));
-
-  return (
-    <div className="table-preview-shell" style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderRadius: 8, padding: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-        <div style={{ minWidth: 0 }}>
-          <div className="cell-truncate" title={table.title || table.area || "Detected table"} style={{ fontWeight: 650 }} dir="auto">
-            {table.title || table.area || "Detected table"}
-          </div>
-          <div style={{ marginTop: 4, color: "#667085", fontSize: 13 }}>
-            {table.page_label || `Page ${table.page_first || "-"}`} · {table.n_columns || columns.length} columns · {table.n_rows || 0} rows
-          </div>
-        </div>
-        {table.extraction_confidence && (
-          <span style={{ color: "#667085", fontSize: 12, whiteSpace: "nowrap" }}>{Math.round(table.extraction_confidence * 100)}%</span>
-        )}
-      </div>
-
-      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {columns.slice(0, 10).map((col) => (
-          <span key={col} title={col} style={{ border: "1px solid #d8d0c3", borderRadius: 999, padding: "2px 7px", fontSize: 12, color: "#475467", background: "#fbfaf6", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} dir="auto">
-            {col}
-          </span>
-        ))}
-        {columns.length > 10 && <span style={{ color: "#667085", fontSize: 12, padding: "3px 0" }}>+{columns.length - 10} more</span>}
-      </div>
     </div>
   );
 }
@@ -529,32 +704,6 @@ export function MultiSelect({ label, helper, options, selected, onChange }) {
   );
 }
 
-export function TablePreview({ columns, rows }) {
-  columns = (columns || []).filter((col) => !isInternalColumn(col));
-  if (!columns.length || !rows.length) return null;
-
-  const minWidth = tableMinWidth(columns.length, 420, 920);
-
-  return (
-    <div className="dl-scrollbar table-scroll-frame" style={{ marginTop: 12 }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth }}>
-        <thead>
-          <tr style={{ background: "#f2eee6" }}>
-            {columns.map((col) => <th key={col} title={col} style={smallTh} dir="auto">{col}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i}>
-              {columns.map((col) => <td key={col} style={smallTd} dir="auto">{displayCell(row.values?.[col])}</td>)}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 export function SelectedTableView({ title, view }) {
   if (!view) return <EmptyState label={`${title}: select a table and columns to render values.`} />;
 
@@ -609,24 +758,30 @@ export function TableColumnCompareResult({ diff }) {
   const counts = diff.counts || {};
   const rows = diff.rows || diff.row_diffs || [];
   const alignment = diff.value_column_alignment || diff.header_alignment || [];
+  const hasReviewRows = Array.isArray(diff.review_rows) && diff.review_rows.length > 0;
+  const hasHeaderInsights = Array.isArray(diff.header_insights) && diff.header_insights.length > 0;
 
   return (
     <div style={{ marginTop: 14 }}>
-      {diff.answer && (
-        <div style={{ background: "#fffdf8", border: "1px solid #d8d0c3", borderLeft: "4px solid #2f5f4f", borderRadius: 8, padding: 12, marginBottom: 12, color: "#344054" }}>
-          {diff.answer}
+      <div style={{ background: "#fffdf8", border: "1px solid #d8d0c3", borderInlineStart: "4px solid #2f5f4f", borderRadius: 8, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 700, marginBottom: 5 }}>Comparison result</div>
+            <div style={{ color: "#475467", fontSize: 13, lineHeight: 1.45 }} dir="auto">
+              {diff.answer || diff.review_summary || "The selected table pair was compared."}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <StatChip label="Added" value={counts.ADDED || counts.added || 0} tone="added" />
+            <StatChip label="Deleted" value={counts.DELETED || counts.deleted || 0} tone="deleted" />
+            <StatChip label="Modified" value={counts.MODIFIED || counts.modified || 0} tone="modified" />
+            <StatChip label="Rows shown" value={rows.length} />
+          </div>
         </div>
-      )}
-
-      {diff.review_summary && (
-        <div style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 12 }}>
-          <div style={{ fontWeight: 650, marginBottom: 5 }}>Selected table review</div>
-          <div style={{ color: "#475467", fontSize: 13, lineHeight: 1.45 }}>{diff.review_summary}</div>
-        </div>
-      )}
+      </div>
 
       {diff.ai_review && (
-        <div style={{ background: "#fffdf8", border: "1px solid #d8d0c3", borderLeft: `4px solid ${diff.ai_review.available ? "#2f5f4f" : COLORS.DELETED.border}`, borderRadius: 8, padding: 12, marginBottom: 12 }}>
+        <div style={{ background: "#fffdf8", border: "1px solid #d8d0c3", borderInlineStart: `4px solid ${diff.ai_review.available ? "#2f5f4f" : COLORS.DELETED.border}`, borderRadius: 8, padding: 12, marginBottom: 12 }}>
           <div style={{ fontWeight: 650, marginBottom: 5 }}>
             Selected table AI insight {diff.ai_review.available ? "- successful" : "- unavailable"}
             {typeof normalizeConfidence(diff.ai_review.confidence) === "number" ? ` | Confidence ${Math.round(normalizeConfidence(diff.ai_review.confidence) * 100)}%` : ""}
@@ -645,39 +800,52 @@ export function TableColumnCompareResult({ diff }) {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <StatChip label="Added rows" value={counts.ADDED || counts.added || 0} tone="added" />
-        <StatChip label="Deleted rows" value={counts.DELETED || counts.deleted || 0} tone="deleted" />
-        <StatChip label="Modified rows" value={counts.MODIFIED || counts.modified || 0} tone="modified" />
-        <StatChip label="Compared changes" value={rows.length} />
-      </div>
-
-      {alignment.length > 0 && <ColumnAlignment alignment={alignment} />}
-
-      {Array.isArray(diff.header_insights) && diff.header_insights.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ fontWeight: 650, marginBottom: 8 }}>Header and meaning checks</div>
-          <GenericRowsTable columns={diff.header_insight_columns || ["Baseline Header", "Revised Header", "Header Match", "Observation", "Seek Clarification"]} rows={diff.header_insights} />
-        </div>
-      )}
-
-      {Array.isArray(diff.review_rows) && diff.review_rows.length > 0 && (
-        <div style={{ marginTop: 14 }}>
+      {hasReviewRows ? (
+        <div style={{ marginTop: 14, marginBottom: 14 }}>
+          <div style={{ fontWeight: 650, marginBottom: 8 }}>Review checklist</div>
           <GenericRowsTable columns={diff.review_columns || ["Feature", "Change", "Seek Clarification"]} rows={diff.review_rows} />
         </div>
+      ) : (
+        <EmptyState label="No business-level table changes were found for the selected pair." />
       )}
 
-      <div className="table-selected-stack" style={{ marginTop: 14 }}>
-        <SelectedTableView title="Baseline compared values" view={diff.base_preview} />
-        <SelectedTableView title="Revised compared values" view={diff.target_preview} />
-      </div>
+      {hasHeaderInsights && (
+        <details style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 650 }}>Header checks</summary>
+          <div style={{ marginTop: 10 }}>
+            <GenericRowsTable columns={diff.header_insight_columns || ["Baseline Header", "Revised Header", "Header Match", "Observation", "Seek Clarification"]} rows={diff.header_insights} />
+          </div>
+        </details>
+      )}
+
+      {alignment.length > 0 && (
+        <details style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 650 }}>Column alignment details</summary>
+          <div style={{ marginTop: 10 }}>
+            <ColumnAlignment alignment={alignment} />
+          </div>
+        </details>
+      )}
 
       {rows.length === 0 ? (
         <EmptyState label="No row-level differences were found for the selected columns." />
       ) : (
-        <div style={{ marginTop: 14 }}>
-          {rows.slice(0, 200).map((row, i) => <TableColumnRowDiff key={i} row={row} />)}
-        </div>
+        <details style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 650 }}>Row-level evidence ({rows.length})</summary>
+          <div style={{ marginTop: 12 }}>
+            {rows.slice(0, 200).map((row, i) => <TableColumnRowDiff key={i} row={row} />)}
+          </div>
+        </details>
+      )}
+
+      {(diff.base_preview || diff.target_preview) && (
+        <details style={{ background: "#fbfaf6", border: "1px solid #ded6c8", borderRadius: 8, padding: 12 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 650 }}>Compared table values</summary>
+          <div className="table-selected-stack" style={{ marginTop: 12 }}>
+            <SelectedTableView title="Baseline compared values" view={diff.base_preview} />
+            <SelectedTableView title="Revised compared values" view={diff.target_preview} />
+          </div>
+        </details>
       )}
     </div>
   );
@@ -706,7 +874,7 @@ export function TableColumnRowDiff({ row }) {
   const diffs = row.field_diffs || row.cell_diffs || row.value_diffs || row.diffs || [];
 
   return (
-    <div style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderLeft: `4px solid ${(COLORS[type] || COLORS.MODIFIED).border}`, borderRadius: 8, padding: 12, marginBottom: 10 }}>
+    <div style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderInlineStart: `4px solid ${(COLORS[type] || COLORS.MODIFIED).border}`, borderRadius: 8, padding: 12, marginBottom: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div>
           <ChangeBadge type={type} />

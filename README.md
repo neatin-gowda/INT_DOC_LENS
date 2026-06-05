@@ -32,14 +32,17 @@ Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full reasoning. The 
 
 ```
 backend/
-  api.py               FastAPI app and API orchestration
+  api.py               FastAPI app setup, middleware, health, and job listing
+  routers/             Modular API endpoints by workflow
   api_schemas.py       FastAPI request/response models
-  ingestion/source_documents.py   Multi-format source handling
+  ingestion/source_documents.py   Multi-format source orchestration
+  ingestion/parsers/   DOCX, Excel/XLSB, CSV/TSV, OCR, and conversion helpers
   extraction/pdf_extractor.py      PDF/page/block extraction
   extraction/table_extractor.py   Robust table extraction
   extraction/table_stitcher.py    Cross-page table stitching
   comparison/diff_engine.py         Anchor-aware diff engine
   services/table_tools.py           Table previews and selected-column comparison
+  jobs/queue.py        Database-backed worker queue for scale-out containers
   summarizer.py        LLM or deterministic summary table
   query.py             NL query interpreter
   models.py            Canonical Pydantic models
@@ -48,7 +51,8 @@ backend/
 sql/
   schema.sql           Postgres + pgvector schema
 frontend/
-  src/App.jsx          React SPA (viewer + summary + chat)
+  src/App.jsx          React app shell and workflow state
+  src/components/      Upload, jobs, viewer, tables, chat, feedback, extraction
 infra/
   main.bicep           Azure infrastructure
 docs/

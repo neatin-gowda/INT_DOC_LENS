@@ -89,8 +89,26 @@ Less reliable when:
 - The tables don't have stable_keys — alignment then falls back to row-position
   matching, which is brittle.
 
-**Mitigation:** the UI should let users pick from a list of detected tables
-rather than free-typing the header — a one-line frontend change.
+**Mitigation:** the UI now lets users pick detected baseline and revised tables
+from page/topic labels, suggests a likely revised match, and automatically runs
+the deterministic comparison. Manual row-column/value-column tuning remains
+available only under Advanced controls.
+
+## Reusable table API
+
+The UI is intentionally simple, but the endpoint surface stays reusable for
+other products and automation:
+
+- `GET /runs/{run_id}/tables` lists detected structured tables for both sides.
+- `POST /runs/{run_id}/table-view` renders a selected table slice when a caller
+  needs preview rows.
+- `POST /runs/{run_id}/compare-tables` accepts table IDs or header queries and
+  performs automatic row/column alignment.
+- `POST /runs/{run_id}/compare-table-columns` accepts explicit row-label and
+  value-column selections for complex nested-header cases.
+
+The default product workflow should call the automatic path first and expose
+manual column selection only as an expert override.
 
 ## What needs investment for high-stakes new domains
 
