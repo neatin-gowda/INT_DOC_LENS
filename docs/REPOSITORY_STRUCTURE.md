@@ -45,6 +45,9 @@ backend/
   comparison/
     diff_engine.py       Anchor-aware block/field/token diffing.
 
+  services/
+    table_tools.py       Table discovery, viewing, row matching, and selected-column comparison helpers.
+
   persistence.py         Database writes for documents, blocks, diffs, feedback, tables.
   db.py                  Database connection helper.
   query.py               Natural-language question handling over comparison output.
@@ -70,6 +73,7 @@ The active comparison path is:
 - `backend/extraction/pdf_extractor.py` for PDF/page/block extraction.
 - `backend/extraction/table_extractor.py` and `backend/extraction/table_stitcher.py` for table handling.
 - `backend/comparison/diff_engine.py` for anchor-aware semantic diffing.
+- `backend/services/table_tools.py` for table discovery, previews, and selected-column comparison.
 - `backend/summarizer.py` for deterministic or Azure OpenAI-backed review summaries.
 - `backend/query.py` for natural-language questions over comparison results.
 
@@ -87,7 +91,7 @@ The active comparison path is:
 These files are still intentionally called out because they are too large for
 comfortable maintenance:
 
-- `backend/api.py`: currently owns API routes, job orchestration, native-page shaping, feedback, reports, and table comparison helpers. Split into routers/services next.
+- `backend/api.py`: currently owns API routes, job orchestration, native-page shaping, feedback, and reports. Split into routers next.
 - `frontend/src/App.jsx`: currently owns most UI components and helper functions. Split by workspace (`jobs`, `upload`, `extraction`, `comparison`, `tables`, `reports`) next.
 - `backend/ingestion/source_documents.py`: owns conversion plus native DOCX/spreadsheet/image extraction. Split provider implementations after route/service extraction.
 

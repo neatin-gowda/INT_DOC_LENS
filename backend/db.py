@@ -44,28 +44,50 @@ def database_url() -> Optional[str]:
     )
 
 
+from psycopg_pool import ConnectionPool
+
+_POOL: Optional[ConnectionPool] = None
+
+
+def get_pool() -> ConnectionPool:
+    global _POOL
+    if _POOL is None:
+        url = database_url()
+        if not url:
+            raise RuntimeError(
+                "Database is not configured. Set DATABASE_URL or PGHOST/PGDATABASE/PGUSER/PGPASSWORD."
+            )
+        _POOL = ConnectionPool(
+            conninfo=url,
+            min_size=int(os.getenv("PGPOOL_MIN_SIZE", "2")),
+            max_size=int(os.getenv("PGPOOL_MAX_SIZE", "20")),
+            kwargs={"row_factory": dict_row},
+            open=True,
+        )
+    return _POOL
+
+
+def close_pool() -> None:
+    global _POOL
+    if _POOL is not None:
+        _POOL.close()
+        _POOL = None
+
+
 def db_enabled() -> bool:
     return bool(database_url())
 
 
 @contextmanager
 def get_conn() -> Iterator[psycopg.Connection]:
-    url = database_url()
-
-    if not url:
+    if not db_enabled():
         raise RuntimeError(
             "Database is not configured. Set DATABASE_URL or PGHOST/PGDATABASE/PGUSER/PGPASSWORD."
         )
 
-    conn = psycopg.connect(url, row_factory=dict_row)
-    try:
+    pool = get_pool()
+    with pool.connection() as conn:
         yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
 
 
 def ping_db() -> dict:

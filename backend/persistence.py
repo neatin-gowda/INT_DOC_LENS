@@ -439,45 +439,48 @@ def _insert_blocks(conn, document_id, blocks: list[Block], *, enable_embeddings:
         sql_id = uuid.uuid4()
         block_id_map[block.id] = sql_id
 
-    for block in blocks:
-        sql_id = block_id_map[block.id]
-        parent_sql_id = block_id_map.get(block.parent_id)
-
-        conn.execute(
-            """
-            INSERT INTO doc_block (
-                id,
-                document_id,
-                parent_id,
-                block_type,
-                path,
-                stable_key,
-                page_number,
-                bbox,
-                text,
-                payload,
-                embedding,
-                content_hash,
-                sequence
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::vector, %s, %s)
-            """,
-            (
-                sql_id,
-                document_id,
-                parent_sql_id,
-                block.block_type.value,
-                block.path,
-                block.stable_key,
-                block.page_number,
-                block.bbox,
-                block.text,
-                _json(block.payload or {}),
-                embeddings.get(block.id),
-                block.content_hash,
-                block.sequence,
-            ),
+    block_data = [
+        (
+            block_id_map[block.id],
+            document_id,
+            block_id_map.get(block.parent_id),
+            block.block_type.value,
+            block.path,
+            block.stable_key,
+            block.page_number,
+            block.bbox,
+            block.text,
+            _json(block.payload or {}),
+            embeddings.get(block.id),
+            block.content_hash,
+            block.sequence,
         )
+        for block in blocks
+    ]
+
+    if block_data:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                INSERT INTO doc_block (
+                    id,
+                    document_id,
+                    parent_id,
+                    block_type,
+                    path,
+                    stable_key,
+                    page_number,
+                    bbox,
+                    text,
+                    payload,
+                    embedding,
+                    content_hash,
+                    sequence
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::vector, %s, %s)
+                """,
+                block_data,
+            )
 
     return block_id_map
 
@@ -578,6 +581,7 @@ def _insert_tables(conn, document_id, blocks: list[Block], block_id_map: dict[An
 
 def _insert_table_columns(conn, table_id, columns: list[str], rows: list[Block], payload: dict) -> dict[int, uuid.UUID]:
     column_id_map = {}
+    col_data = []
 
     for idx, column in enumerate(columns):
         column_id = uuid.uuid4()
@@ -603,77 +607,85 @@ def _insert_table_columns(conn, table_id, columns: list[str], rows: list[Block],
         header_sources = payload.get("header_sources", [])
         header_source = header_sources[0] if isinstance(header_sources, list) and header_sources else None
 
-        conn.execute(
-            """
-            INSERT INTO doc_table_column (
-                id,
-                table_id,
-                column_index,
-                header_text,
-                normalized_header,
-                header_source,
-                semantic_role,
-                value_type_hint,
-                sample_values,
-                confidence,
-                metadata
+        col_data.append((
+            column_id,
+            table_id,
+            idx,
+            column,
+            _norm(column),
+            header_source,
+            _semantic_role(column, idx),
+            value_type_hint,
+            _json(samples),
+            None,
+            _json({"is_generic": _is_generic_column(column)}),
+        ))
+
+    if col_data:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                INSERT INTO doc_table_column (
+                    id,
+                    table_id,
+                    column_index,
+                    header_text,
+                    normalized_header,
+                    header_source,
+                    semantic_role,
+                    value_type_hint,
+                    sample_values,
+                    confidence,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb)
+                """,
+                col_data,
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb)
-            """,
-            (
-                column_id,
-                table_id,
-                idx,
-                column,
-                _norm(column),
-                header_source,
-                _semantic_role(column, idx),
-                value_type_hint,
-                _json(samples),
-                None,
-                _json({"is_generic": _is_generic_column(column)}),
-            ),
-        )
 
     return column_id_map
 
 
 def _insert_table_rows(conn, table_id, rows: list[Block], block_id_map: dict[Any, uuid.UUID]) -> dict[int, uuid.UUID]:
     row_id_map = {}
+    row_data = []
 
     for idx, row in enumerate(rows):
         row_id = uuid.uuid4()
         row_id_map[idx] = row_id
+        row_data.append((
+            row_id,
+            table_id,
+            block_id_map.get(row.id),
+            idx,
+            row.page_number,
+            row.bbox,
+            row.stable_key,
+            _row_label(row),
+            row.text,
+            _json({"payload": row.payload or {}}),
+        ))
 
-        conn.execute(
-            """
-            INSERT INTO doc_table_row (
-                id,
-                table_id,
-                block_id,
-                row_index,
-                page_number,
-                bbox,
-                stable_key,
-                row_label,
-                row_text,
-                metadata
+    if row_data:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                INSERT INTO doc_table_row (
+                    id,
+                    table_id,
+                    block_id,
+                    row_index,
+                    page_number,
+                    bbox,
+                    stable_key,
+                    row_label,
+                    row_text,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                """,
+                row_data,
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-            """,
-            (
-                row_id,
-                table_id,
-                block_id_map.get(row.id),
-                idx,
-                row.page_number,
-                row.bbox,
-                row.stable_key,
-                _row_label(row),
-                row.text,
-                _json({"payload": row.payload or {}}),
-            ),
-        )
 
     return row_id_map
 
@@ -686,6 +698,8 @@ def _insert_table_cells(
     row_id_map: dict[int, uuid.UUID],
     column_id_map: dict[int, uuid.UUID],
 ) -> None:
+    cell_data = []
+
     for row_idx, row in enumerate(rows):
         values = _row_values(row)
         row_id = row_id_map[row_idx]
@@ -694,8 +708,22 @@ def _insert_table_cells(
             column_id = column_id_map[col_idx]
             raw_value = values.get(column, "")
             normalized_value = _norm(raw_value)
+            cell_data.append((
+                table_id,
+                row_id,
+                column_id,
+                row_idx,
+                col_idx,
+                _clean(raw_value),
+                normalized_value,
+                _value_type(raw_value),
+                None,
+                _json({}),
+            ))
 
-            conn.execute(
+    if cell_data:
+        with conn.cursor() as cur:
+            cur.executemany(
                 """
                 INSERT INTO doc_table_cell (
                     table_id,
@@ -711,18 +739,7 @@ def _insert_table_cells(
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 """,
-                (
-                    table_id,
-                    row_id,
-                    column_id,
-                    row_idx,
-                    col_idx,
-                    _clean(raw_value),
-                    normalized_value,
-                    _value_type(raw_value),
-                    None,
-                    _json({}),
-                ),
+                cell_data,
             )
 
 
@@ -832,32 +849,38 @@ def _insert_block_diffs(
     base_block_map: dict[Any, uuid.UUID],
     target_block_map: dict[Any, uuid.UUID],
 ) -> None:
-    for diff in diffs:
-        conn.execute(
-            """
-            INSERT INTO block_diff (
-                run_id,
-                base_block_id,
-                target_block_id,
-                change_type,
-                similarity,
-                field_diffs,
-                token_diff,
-                impact_score
-            )
-            VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)
-            """,
-            (
-                comparison_id,
-                base_block_map.get(diff.base_block_id),
-                target_block_map.get(diff.target_block_id),
-                diff.change_type.value,
-                diff.similarity,
-                _json([_to_plain(fd) for fd in diff.field_diffs]),
-                _json([_to_plain(td) for td in diff.token_diff]),
-                diff.impact_score,
-            ),
+    diff_data = [
+        (
+            comparison_id,
+            base_block_map.get(diff.base_block_id),
+            target_block_map.get(diff.target_block_id),
+            diff.change_type.value,
+            diff.similarity,
+            _json([_to_plain(fd) for fd in diff.field_diffs]),
+            _json([_to_plain(td) for td in diff.token_diff]),
+            diff.impact_score,
         )
+        for diff in diffs
+    ]
+
+    if diff_data:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                INSERT INTO block_diff (
+                    run_id,
+                    base_block_id,
+                    target_block_id,
+                    change_type,
+                    similarity,
+                    field_diffs,
+                    token_diff,
+                    impact_score
+                )
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)
+                """,
+                diff_data,
+            )
 
 
 def _to_plain(value: Any) -> Any:
@@ -868,3 +891,63 @@ def _to_plain(value: Any) -> Any:
     if hasattr(value, "__dict__"):
         return value.__dict__
     return value
+
+
+def load_blocks(conn, document_id: uuid.UUID) -> list[Block]:
+    rows = conn.execute(
+        """
+        SELECT id, parent_id, block_type, path, stable_key, page_number, bbox, text, payload, content_hash, sequence
+        FROM doc_block
+        WHERE document_id = %s
+        ORDER BY sequence ASC
+        """,
+        (document_id,),
+    ).fetchall()
+
+    blocks = []
+    for r in rows:
+        blocks.append(
+            Block(
+                id=uuid.UUID(r["id"]) if isinstance(r["id"], str) else r["id"],
+                parent_id=uuid.UUID(r["parent_id"]) if r["parent_id"] else None,
+                block_type=r["block_type"],
+                path=r["path"],
+                stable_key=r["stable_key"],
+                page_number=r["page_number"],
+                bbox=[float(x) for x in r["bbox"]] if r["bbox"] else None,
+                text=r["text"] or "",
+                payload=r["payload"] or {},
+                content_hash=r["content_hash"],
+                sequence=r["sequence"],
+            )
+        )
+    return blocks
+
+
+def load_block_diffs(conn, comparison_id: uuid.UUID) -> list[BlockDiff]:
+    from .models import ChangeType, FieldDiff, TokenOp
+
+    rows = conn.execute(
+        """
+        SELECT base_block_id, target_block_id, change_type, similarity, field_diffs, token_diff, impact_score
+        FROM block_diff
+        WHERE run_id = %s
+        """,
+        (comparison_id,),
+    ).fetchall()
+
+    diffs = []
+    for r in rows:
+        diffs.append(
+            BlockDiff(
+                base_block_id=uuid.UUID(r["base_block_id"]) if r["base_block_id"] else None,
+                target_block_id=uuid.UUID(r["target_block_id"]) if r["target_block_id"] else None,
+                change_type=ChangeType(r["change_type"]),
+                similarity=float(r["similarity"]) if r["similarity"] is not None else 1.0,
+                field_diffs=[FieldDiff(**fd) for fd in (r["field_diffs"] or [])],
+                token_diff=[TokenOp(**td) for td in (r["token_diff"] or [])],
+                impact_score=float(r["impact_score"]) if r["impact_score"] is not None else 0.0,
+            )
+        )
+    return diffs
+

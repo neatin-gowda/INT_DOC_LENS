@@ -39,6 +39,7 @@ backend/
   extraction/table_extractor.py   Robust table extraction
   extraction/table_stitcher.py    Cross-page table stitching
   comparison/diff_engine.py         Anchor-aware diff engine
+  services/table_tools.py           Table previews and selected-column comparison
   summarizer.py        LLM or deterministic summary table
   query.py             NL query interpreter
   models.py            Canonical Pydantic models
