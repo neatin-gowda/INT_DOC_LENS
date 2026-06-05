@@ -33,11 +33,12 @@ Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full reasoning. The 
 ```
 backend/
   api.py               FastAPI app and API orchestration
-  document_ingest.py   Multi-format source handling
-  extractor_v2.py      PDF/page/block extraction
-  table_extractor.py   Robust table extraction
-  table_stitcher.py    Cross-page table stitching
-  differ_v2.py         Anchor-aware diff engine
+  api_schemas.py       FastAPI request/response models
+  ingestion/source_documents.py   Multi-format source handling
+  extraction/pdf_extractor.py      PDF/page/block extraction
+  extraction/table_extractor.py   Robust table extraction
+  extraction/table_stitcher.py    Cross-page table stitching
+  comparison/diff_engine.py         Anchor-aware diff engine
   summarizer.py        LLM or deterministic summary table
   query.py             NL query interpreter
   models.py            Canonical Pydantic models

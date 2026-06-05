@@ -19,8 +19,8 @@ import os
 import re
 from collections import Counter, defaultdict
 
-from .extractor_v2 import _body_font_size, _collect_lines, _is_heading
-from .table_extractor import extract_tables_robust
+from .extraction.pdf_extractor import _body_font_size, _collect_lines, _is_heading
+from .extraction.table_extractor import extract_tables_robust
 from .models import TemplateProfile
 
 
