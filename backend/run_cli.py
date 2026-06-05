@@ -14,8 +14,8 @@ import argparse
 import json
 from pathlib import Path
 
-from .differ import diff_blocks, diff_stats
-from .extractor import coverage_pct, extract_blocks, render_pages
+from .differ_v2 import diff_blocks, diff_stats
+from .extractor_v2 import coverage_pct, extract_blocks_v2 as extract_blocks, render_pages
 from .summarizer import summarize
 
 

@@ -1,7 +1,10 @@
 # Azure deployment runbook
 
-This is a step-by-step deploy of the Spec-Diff stack to Azure. It assumes
-you have the Azure CLI installed and logged in.
+This is a manual deploy reference for the Spec-Diff stack. The preferred
+production path is the GitHub Actions workflow described in
+[`AZURE_GITHUB_DEPLOYMENT.md`](AZURE_GITHUB_DEPLOYMENT.md), which deploys the
+Bicep infrastructure, builds the backend container, applies `sql/schema.sql`,
+and deploys the Static Web App.
 
 ## Resources you'll provision
 
@@ -65,18 +68,8 @@ az keyvault secret set --vault-name kv-specdiff -n OPENAI-KEY \
 
 ## 1. Backend image
 
-A `Dockerfile` for the FastAPI service:
-
-```dockerfile
-FROM python:3.11-slim
-RUN apt-get update && apt-get install -y poppler-utils && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY backend/ ./backend/
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-ENV PORT=8000
-CMD ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]
-```
+The repository root `Dockerfile` is the backend image definition for
+`backend.api:app`.
 
 ```bash
 az acr build -r acrspecdiff -t specdiff-api:latest .
@@ -106,20 +99,16 @@ identity the `Key Vault Secrets User` role on `kv-specdiff`.
 
 ## 3. Frontend
 
-The simplest production deploy: serve `frontend/app.jsx` (compiled
-with Vite) from Azure Static Web Apps:
+The frontend is a Vite React app under `frontend/`. Build it with:
 
 ```bash
-# In repo root
-npm create vite@latest frontend-build -- --template react
-# Copy app.jsx into src/App.jsx, install deps, build
-cd frontend-build && npm install && npm run build
-# Deploy
-az staticwebapp create -n swa-specdiff -g $RG -l $LOC \
-  --source ./frontend-build/dist --location-tag <region>
+cd frontend
+VITE_API_BASE=https://<container-app-fqdn> npm install
+VITE_API_BASE=https://<container-app-fqdn> npm run build
 ```
 
-Set `API_BASE` at build time to point to the Container App's ingress URL.
+Deploy `frontend/dist` to Azure Static Web Apps. The GitHub Actions workflow
+sets `VITE_API_BASE` automatically from the Container App output.
 
 ## 4. Persisting state (replace in-memory store)
 

@@ -173,21 +173,26 @@ To meet "do not miss any content":
 
 ```
 backend/
-  extractor.py          # Layer A/B/C extraction
-  schema_discovery.py   # Auto-detect template structure
-  differ.py             # Three-granularity diff engine
-  summarizer.py         # LLM-driven summary table
+  api.py                # FastAPI app and API orchestration
+  document_ingest.py    # Multi-format source handling
+  extractor_v2.py       # PDF/page/block extraction
+  table_extractor.py    # Robust table extraction
+  table_stitcher.py     # Cross-page table stitching
+  differ_v2.py          # Anchor-aware semantic diff engine
+  summarizer.py         # LLM or deterministic summary table
   query.py              # NL → JSONB path / SQL
-  api.py                # FastAPI app
   models.py             # Pydantic models for blocks, diffs
+  extraction/           # Provider registry and extraction quality helpers
 sql/
   schema.sql            # Postgres + pgvector schema
 frontend/
-  app.jsx               # Single-page React app
+  src/App.jsx           # Single-page React app
+infra/
+  main.bicep            # Azure infrastructure
 docs/
   ARCHITECTURE.md       # this file
-  AZURE_DEPLOYMENT.md   # deployment runbook
-  PROMPTS.md            # all LLM prompts, versioned
+  AZURE_GITHUB_DEPLOYMENT.md  # GitHub Actions deployment path
+  REPOSITORY_STRUCTURE.md     # active repo map
 samples/
   ford_bronco_run.json  # output of running the pipeline on the two attached PDFs
 ```

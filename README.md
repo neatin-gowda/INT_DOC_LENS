@@ -32,23 +32,31 @@ Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full reasoning. The 
 
 ```
 backend/
-  api.py               FastAPI app
-  extractor.py         Layer A/B/C extraction
-  differ.py            Three-granularity diff engine
-  summarizer.py        LLM Feature/Change/Clarify table
+  api.py               FastAPI app and API orchestration
+  document_ingest.py   Multi-format source handling
+  extractor_v2.py      PDF/page/block extraction
+  table_extractor.py   Robust table extraction
+  table_stitcher.py    Cross-page table stitching
+  differ_v2.py         Anchor-aware diff engine
+  summarizer.py        LLM or deterministic summary table
   query.py             NL query interpreter
-  models.py            Pydantic models
-  run_cli.py           Offline CLI runner
+  models.py            Canonical Pydantic models
+  run_cli.py           Offline CLI smoke-test runner
+  extraction/          Provider registry and quality helpers
 sql/
   schema.sql           Postgres + pgvector schema
 frontend/
-  app.jsx              React SPA (side-by-side viewer + summary + chat)
+  src/App.jsx          React SPA (viewer + summary + chat)
+infra/
+  main.bicep           Azure infrastructure
 docs/
   ARCHITECTURE.md      Full design doc — read this
-  AZURE_DEPLOYMENT.md  Step-by-step Azure deploy
+  AZURE_GITHUB_DEPLOYMENT.md  GitHub Actions deploy
+  REPOSITORY_STRUCTURE.md     Active repo map
 samples/
   ford_bronco_run.json Sample output from running on the two attached PDFs
 requirements.txt
+Dockerfile
 ```
 
 ## Quickstart — local
@@ -65,6 +73,11 @@ python -m backend.run_cli \
 # API mode
 uvicorn backend.api:app --reload
 # then POST two PDFs to http://localhost:8000/compare
+
+# Frontend
+cd frontend
+npm install
+npm run dev
 ```
 
 For LLM-powered summaries set:

@@ -19,7 +19,8 @@ import os
 import re
 from collections import Counter, defaultdict
 
-from .extractor import _collect_lines, _extract_tables, _body_font_size, _is_heading
+from .extractor_v2 import _body_font_size, _collect_lines, _is_heading
+from .table_extractor import extract_tables_robust
 from .models import TemplateProfile
 
 
@@ -43,7 +44,7 @@ def discover(pdf_path: str, supplier: str, family_name: str, use_llm: bool = Fal
     section_patterns = list({_to_loose_regex(h) for h in common_headings[:25]})
 
     # Sample table headers — used to recognize this template later
-    tables_by_page = _extract_tables(pdf_path)
+    tables_by_page = extract_tables_robust(pdf_path)
     header_signatures: list[dict] = []
     seen = set()
     for tbls in tables_by_page.values():
