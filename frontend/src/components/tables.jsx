@@ -754,6 +754,36 @@ export function RenderedRowsTable({ columns, rows }) {
   );
 }
 
+export function TablePreview({ columns, rows }) {
+  columns = (columns || []).filter((col) => !isInternalColumn(col));
+  if (!columns.length || !rows?.length) return null;
+
+  const minWidth = tableMinWidth(columns.length, 420, 920);
+
+  return (
+    <div className="dl-scrollbar table-scroll-frame" style={{ marginTop: 12 }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth }}>
+        <thead>
+          <tr style={{ background: "#f2eee6" }}>
+            {columns.map((col) => <th key={col} title={col} style={smallTh} dir="auto">{col}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i}>
+              {columns.map((col) => (
+                <td key={col} style={smallTd} dir="auto">
+                  {displayCell(row?.values?.[col] ?? row?.[col])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function TableColumnCompareResult({ diff }) {
   const counts = diff.counts || {};
   const rows = diff.rows || diff.row_diffs || [];

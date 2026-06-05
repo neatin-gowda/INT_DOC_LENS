@@ -7,7 +7,7 @@ must work on Ford Bronco order guides, GM equipment catalogs, and any future sup
 
 ## What it does
 
-1. **Ingests** two PDFs or documents (any layout).
+1. **Ingests** two PDFs (any layout).
 2. **Renders** every page to PNG for the side-by-side viewer.
 3. **Extracts** every word with its bounding box (for visual highlights).
 4. **Builds a structured block tree** (sections, tables, list items, key-value pairs) — auto-discovers the document's structure rather than hard-coding it.
