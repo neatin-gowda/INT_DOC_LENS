@@ -52,6 +52,22 @@ export const FAST_QUERY_PRESETS = [
 ];
 
 // Utility Helpers
+export function sanitizeErrorMessage(msg) {
+  if (!msg) return "";
+  const str = String(msg);
+  if (
+    str.includes("Traceback (most recent call last)") ||
+    str.includes("Internal Server Error") ||
+    str.includes("psycopg") ||
+    str.includes("OperationalError") ||
+    str.includes("File \"") ||
+    str.length > 500
+  ) {
+    return "An unexpected internal server error occurred. Please try again or check server logs.";
+  }
+  return str.replace(/\/Users\/[a-zA-Z0-9_-]+\//g, ".../");
+}
+
 export async function readResponseError(resp) {
   try {
     const text = await resp.text();
@@ -59,9 +75,12 @@ export async function readResponseError(resp) {
 
     try {
       const parsed = JSON.parse(text);
-      return normalizeErrorMessage(parsed.detail || parsed.error || parsed.message || parsed);
+      return sanitizeErrorMessage(normalizeErrorMessage(parsed.detail || parsed.error || parsed.message || parsed));
     } catch {
-      return text;
+      if (text.trim().startsWith("<!DOCTYPE html>") || text.includes("<html") || text.length > 200) {
+        return `Server error (${resp.status}). Please check backend logs.`;
+      }
+      return sanitizeErrorMessage(text);
     }
   } catch {
     return `Request failed with status ${resp.status}`;
@@ -339,7 +358,7 @@ export function inferTextAttributes(text) {
 
 export function normalizeErrorMessage(value) {
   if (!value) return "";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return sanitizeErrorMessage(value);
   if (value instanceof Error) return normalizeErrorMessage(value.message);
   if (Array.isArray(value)) return value.map(normalizeErrorMessage).filter(Boolean).join("\n");
   if (typeof value === "object") {
@@ -347,12 +366,12 @@ export function normalizeErrorMessage(value) {
     if (value.error) return normalizeErrorMessage(value.error);
     if (value.message) return normalizeErrorMessage(value.message);
     try {
-      return JSON.stringify(value, null, 2);
+      return sanitizeErrorMessage(JSON.stringify(value, null, 2));
     } catch {
-      return String(value);
+      return sanitizeErrorMessage(String(value));
     }
   }
-  return String(value);
+  return sanitizeErrorMessage(String(value));
 }
 
 export function defaultRowColumns(table) {
@@ -683,38 +702,69 @@ export function smallNavButtonStyle(disabled) {
 }
 
 export function nativeHighlightStyle(kind, compact = false) {
-  if (kind === "added") {
+  const norm = String(kind || "").toLowerCase();
+  if (norm === "added") {
     return {
       background: compact ? COLORS.ADDED.bg : "rgba(31,160,70,.08)",
       border: compact ? undefined : `1px solid ${COLORS.ADDED.border}`,
-      borderLeft: `3px solid ${COLORS.ADDED.border}`,
+      borderInlineStart: `3px solid ${COLORS.ADDED.border}`,
     };
   }
-  if (kind === "deleted") {
+  if (norm === "deleted") {
     return {
       background: compact ? COLORS.DELETED.bg : "rgba(218,54,54,.08)",
       border: compact ? undefined : `1px solid ${COLORS.DELETED.border}`,
-      borderLeft: `3px solid ${COLORS.DELETED.border}`,
+      borderInlineStart: `3px solid ${COLORS.DELETED.border}`,
     };
   }
-  if (kind === "modified") {
+  if (norm === "modified") {
     return {
       background: compact ? "rgba(218,185,42,.10)" : "rgba(218,185,42,.08)",
       border: compact ? undefined : `1px solid ${COLORS.MODIFIED.border}`,
-      borderLeft: `3px solid ${COLORS.MODIFIED.border}`,
+      borderInlineStart: `3px solid ${COLORS.MODIFIED.border}`,
     };
   }
   return {
     background: compact ? "transparent" : "#fffdf8",
     border: compact ? undefined : "1px solid transparent",
-    borderLeft: "3px solid transparent",
+    borderInlineStart: "3px solid transparent",
   };
 }
 
 // React widgets/components
 export function Header({ runId, workspace, onStartOver, onJobs, onDownloadReport }) {
+  const showBreadcrumbs = workspace !== "home";
+
   return (
     <header style={{ marginBottom: 18 }}>
+      {showBreadcrumbs && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#667085", marginBottom: 8, fontWeight: 500 }}>
+          <button
+            onClick={onStartOver}
+            style={{ background: "none", border: "none", padding: 0, color: "#2f5f4f", cursor: "pointer", fontWeight: 600, fontSize: 13 }}
+          >
+            Home
+          </button>
+          <span>/</span>
+          {workspace === "jobs" ? (
+            <span style={{ color: "#344054", fontWeight: 600 }}>Job status</span>
+          ) : (
+            <>
+              <button
+                onClick={onJobs}
+                style={{ background: "none", border: "none", padding: 0, color: "#2f5f4f", cursor: "pointer", fontWeight: 600, fontSize: 13 }}
+              >
+                Job status
+              </button>
+              <span>/</span>
+              <span style={{ color: "#344054", fontWeight: 600 }}>
+                {workspace === "compare" ? "Comparison workspace" : "Extraction workspace"}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
@@ -733,11 +783,11 @@ export function Header({ runId, workspace, onStartOver, onJobs, onDownloadReport
             >
               AI
             </div>
-            <h1 style={{ margin: 0, fontSize: 26, letterSpacing: 0, lineHeight: 1.1, fontWeight: 600 }}>
+            <h1 style={{ margin: 0, fontSize: 26, letterSpacing: 0, lineHeight: 1.1, fontWeight: 600 }} dir="auto">
               {BRAND.name}
             </h1>
           </div>
-          <p style={{ margin: "6px 0 0", color: "#667085", fontSize: 14 }}>{BRAND.subtitle}</p>
+          <p style={{ margin: "6px 0 0", color: "#667085", fontSize: 14 }} dir="auto">{BRAND.subtitle}</p>
         </div>
 
         {(runId || workspace !== "home") && (

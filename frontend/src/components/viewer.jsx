@@ -182,7 +182,7 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
 
             {(overlay.regions || []).map((r, i) => {
               const [x0, y0, x1, y1] = r.bbox || [0, 0, 0, 0];
-              const c = COLORS[r.change_type] || COLORS.MODIFIED;
+              const c = COLORS[String(r.change_type || "").toUpperCase()] || COLORS.MODIFIED;
               const pageWidth = r.page_width || overlay.page_width || 612;
               const pageHeight = r.page_height || overlay.page_height || 792;
 
@@ -286,11 +286,11 @@ export function NativeTokenText({ item, side }) {
   const hasTokenDiff = item.highlight === "modified" && Array.isArray(tokens) && tokens.some((t) => t.op && t.op !== "equal");
 
   if (!hasTokenDiff) {
-    return item.text || item.payload?.text || item.payload?.layout_text || item.path || "-";
+    return <span dir="auto">{item.text || item.payload?.text || item.payload?.layout_text || item.path || "-"}</span>;
   }
 
   return (
-    <span>
+    <span dir="auto">
       {tokens.map((token, idx) => {
         const op = token.op;
         if (op === "delete" && side !== "base") return null;
@@ -312,7 +312,7 @@ export function NativeTokenText({ item, side }) {
         return (
           <React.Fragment key={idx}>
             {idx > 0 ? " " : ""}
-            <span className={`native-token ${cls}`}>{text}</span>
+            <span className={`native-token ${cls}`} dir="auto">{text}</span>
           </React.Fragment>
         );
       })}

@@ -159,13 +159,13 @@ export function JobsDashboard({ onOpenJob, error }) {
                   <tr key={job.run_id}>
                     <td style={td}>
                       <strong style={{ fontWeight: 650 }}>{job.kind === "extraction" ? "Extraction" : "Comparison"}</strong>
-                      <div style={{ color: "#667085", marginTop: 4 }}>{trim(job.run_id, 18)}</div>
+                      <div style={{ color: "#667085", marginTop: 4, fontFamily: "monospace", fontSize: 11 }}>#{String(job.run_id || "").slice(0, 6)}</div>
                     </td>
                     <td style={{ ...td, overflowWrap: "anywhere" }}>
                       {job.kind === "extraction" ? (
-                        <div>{job.label || "Uploaded document"}</div>
+                        <div dir="auto">{job.label || "Uploaded document"}</div>
                       ) : (
-                        <div>{job.base_label || "Baseline"} → {job.target_label || "Revised"}</div>
+                        <div dir="auto">{job.base_label || "Baseline"} → {job.target_label || "Revised"}</div>
                       )}
                       <div style={{ color: "#667085", marginTop: 4 }}>
                         {[job.source_format, job.base_format, job.target_format].filter(Boolean).join(" / ")}
@@ -173,8 +173,8 @@ export function JobsDashboard({ onOpenJob, error }) {
                     </td>
                     <td style={td}>
                       <JobStatusBadge status={job.status} />
-                      {job.status_message && <div style={{ color: "#667085", marginTop: 5 }}>{job.status_message}</div>}
-                      {statusInfo.isFailed && job.error && <div style={{ color: COLORS.DELETED.text, marginTop: 5 }}>{trim(job.error, 160)}</div>}
+                      {job.status_message && <div style={{ color: "#667085", marginTop: 5 }} dir="auto">{job.status_message}</div>}
+                      {statusInfo.isFailed && job.error && <div style={{ color: COLORS.DELETED.text, marginTop: 5 }} dir="auto">{trim(normalizeErrorMessage(job.error), 160)}</div>}
                     </td>
                     <td style={td}>
                       <ProgressMini value={job.progress || 0} status={job.status} />

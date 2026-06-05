@@ -27,20 +27,50 @@ import { QueryPanel } from "./components/chat.jsx";
 import { ReviewReport, AccuracyImprovementTab } from "./components/feedback.jsx";
 import { ExtractionWorkspace } from "./components/extraction.jsx";
 
+const getSession = (key, fallback) => {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const val = window.sessionStorage.getItem(`doculens_${key}`);
+    return val !== null ? JSON.parse(val) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const setSession = (key, value) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`doculens_${key}`, JSON.stringify(value));
+  } catch (e) {
+    console.error(e);
+  }
+};
+
 export default function App() {
-  const [workspace, setWorkspace] = useState("home");
-  const [runId, setRunId] = useState(null);
-  const [meta, setMeta] = useState(null);
-  const [tab, setTab] = useState("viewer");
-  const [pageNum, setPageNum] = useState(1);
-  const [busy, setBusy] = useState(false);
+  const [workspace, setWorkspace] = useState(() => getSession("workspace", "home"));
+  const [runId, setRunId] = useState(() => getSession("runId", null));
+  const [meta, setMeta] = useState(() => getSession("meta", null));
+  const [tab, setTab] = useState(() => getSession("tab", "viewer"));
+  const [pageNum, setPageNum] = useState(() => getSession("pageNum", 1));
+  const [busy, setBusy] = useState(() => getSession("busy", false));
   const [error, setError] = useState("");
-  const [extractRunId, setExtractRunId] = useState(null);
-  const [extractMeta, setExtractMeta] = useState(null);
-  const [extractBusy, setExtractBusy] = useState(false);
+  const [extractRunId, setExtractRunId] = useState(() => getSession("extractRunId", null));
+  const [extractMeta, setExtractMeta] = useState(() => getSession("extractMeta", null));
+  const [extractBusy, setExtractBusy] = useState(() => getSession("extractBusy", false));
   const [extractError, setExtractError] = useState("");
-  const [extractTab, setExtractTab] = useState("overview");
+  const [extractTab, setExtractTab] = useState(() => getSession("extractTab", "overview"));
   const [jobError, setJobError] = useState("");
+
+  useEffect(() => { setSession("workspace", workspace); }, [workspace]);
+  useEffect(() => { setSession("runId", runId); }, [runId]);
+  useEffect(() => { setSession("meta", meta); }, [meta]);
+  useEffect(() => { setSession("tab", tab); }, [tab]);
+  useEffect(() => { setSession("pageNum", pageNum); }, [pageNum]);
+  useEffect(() => { setSession("busy", busy); }, [busy]);
+  useEffect(() => { setSession("extractRunId", extractRunId); }, [extractRunId]);
+  useEffect(() => { setSession("extractMeta", extractMeta); }, [extractMeta]);
+  useEffect(() => { setSession("extractBusy", extractBusy); }, [extractBusy]);
+  useEffect(() => { setSession("extractTab", extractTab); }, [extractTab]);
 
   const resetAll = () => {
     setWorkspace("home");
@@ -55,6 +85,13 @@ export default function App() {
     setExtractBusy(false);
     setExtractError("");
     setExtractTab("overview");
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.clear();
+      } catch (e) {
+        console.error(e);
+      }
+    }
   };
 
   const goWorkspace = (nextWorkspace) => {

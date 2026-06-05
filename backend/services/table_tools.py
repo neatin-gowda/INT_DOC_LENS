@@ -351,7 +351,7 @@ def _table_exposure(table: Block, rows: list[Block], columns: list[str]) -> dict
         col for col in columns
         if any(term in _norm_text(col) for term in (*_ROW_LABEL_HINTS, *_VALUE_COLUMN_HINTS))
     ]
-    word_like = source_format in {"docx", "word"}
+    is_layout_candidate = source_format in {"docx", "word", "pdf", "image", "png", "jpg", "jpeg"}
     structured_ratio = len(structured_columns) / max(1, len(columns))
 
     reason = "real_table"
@@ -363,19 +363,19 @@ def _table_exposure(table: Block, rows: list[Block], columns: list[str]) -> dict
     elif len(columns) < 2 or not rows:
         is_real = False
         reason = "insufficient_table_shape"
-    elif word_like and len(columns) <= 3 and long_text_ratio >= 0.45 and not structured_columns:
+    elif is_layout_candidate and len(columns) <= 6 and long_text_ratio >= 0.45 and not structured_columns:
         is_real = False
         reason = "word_narrative_layout"
-    elif word_like and not structured_columns and mixed_script_ratio >= 0.2:
+    elif is_layout_candidate and not structured_columns and mixed_script_ratio >= 0.2:
         is_real = False
         reason = "word_bilingual_layout"
-    elif word_like and structured_ratio < 0.34 and mixed_script_ratio >= 0.2 and (long_cell_ratio >= 0.2 or long_text_ratio >= 0.2 or len(rows) <= 8):
+    elif is_layout_candidate and structured_ratio < 0.34 and mixed_script_ratio >= 0.2 and (long_cell_ratio >= 0.2 or long_text_ratio >= 0.2 or len(rows) <= 8):
         is_real = False
         reason = "word_bilingual_layout"
-    elif word_like and structured_ratio < 0.34 and long_cell_ratio >= 0.45 and len(rows) <= 6:
+    elif is_layout_candidate and structured_ratio < 0.34 and long_cell_ratio >= 0.45 and len(rows) <= 6:
         is_real = False
         reason = "word_side_by_side_layout"
-    elif word_like and structured_ratio < 0.25 and long_cell_ratio >= 0.35 and long_text_ratio >= 0.35:
+    elif is_layout_candidate and structured_ratio < 0.25 and long_cell_ratio >= 0.35 and long_text_ratio >= 0.35:
         is_real = False
         reason = "word_narrative_layout"
     elif confidence_float is not None and confidence_float < 0.42 and header_quality < 0.35:

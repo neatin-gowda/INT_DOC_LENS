@@ -48,6 +48,7 @@ export function TablesWorkspace({ runId }) {
   const [exportBusy, setExportBusy] = useState(false);
   const [useTableAi, setUseTableAi] = useState(false);
   const [tableQuestion, setTableQuestion] = useState("Summarize selected table changes, including value changes and header-only changes, with clarification questions.");
+  const [showConfig, setShowConfig] = useState(false);
 
   useEffect(() => {
     setData(null);
@@ -95,6 +96,7 @@ export function TablesWorkspace({ runId }) {
   }, [targetTableId]);
 
   useEffect(() => {
+    if (!showConfig) return undefined;
     let cancelled = false;
     const timer = setTimeout(async () => {
       if (!baseTable && !targetTable) return;
@@ -128,6 +130,7 @@ export function TablesWorkspace({ runId }) {
       clearTimeout(timer);
     };
   }, [
+    showConfig,
     runId,
     baseTableId,
     targetTableId,
@@ -173,6 +176,12 @@ export function TablesWorkspace({ runId }) {
       setCompareBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (baseTableId && targetTableId && baseRowColumns.length > 0 && targetRowColumns.length > 0) {
+      compare();
+    }
+  }, [baseTableId, targetTableId, baseRowColumns.length, targetRowColumns.length]);
 
   const exportTablePdf = async () => {
     if (!baseTableId || !targetTableId || exportBusy) return;
@@ -223,45 +232,76 @@ export function TablesWorkspace({ runId }) {
         <TablePicker title="Revised document table" value={targetTableId} onChange={setTargetTableId} tables={targetTables} />
       </div>
 
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <button
+          type="button"
+          onClick={() => setShowConfig(!showConfig)}
+          style={{
+            ...secondaryButtonStyle(),
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            padding: "8px 14px",
+            borderColor: showConfig ? "#1f2937" : "#c9c0b0",
+            background: showConfig ? "#f3f0e8" : "#fffdf8",
+            fontWeight: 600,
+          }}
+        >
+          {showConfig ? "Hide column configuration ✕" : "Adjust columns (Advanced) ⚙"}
+        </button>
+      </div>
+
       <div className="table-picker-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, marginBottom: 14 }}>
         <TableInfo table={baseTable} emptyLabel="Select a baseline table to inspect its title, page, columns, and rows." />
         <TableInfo table={targetTable} emptyLabel="Select a revised table to inspect its title, page, columns, and rows." />
       </div>
 
-      <RowFilterSuggestions baseTable={baseTable} targetTable={targetTable} onSelect={setRowFilter} />
+      {showConfig && (
+        <>
+          <RowFilterSuggestions baseTable={baseTable} targetTable={targetTable} onSelect={setRowFilter} />
 
-      <div className="table-config-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, marginBottom: 14 }}>
-        <ColumnConfig
-          title="Baseline columns"
-          table={baseTable}
-          rowColumns={baseRowColumns}
-          setRowColumns={(cols) => {
-            const clean = unique(cols);
-            setBaseRowColumns(clean);
-            setBaseValueColumns((prev) => prev.filter((c) => !clean.includes(c)));
-          }}
-          valueColumns={baseValueColumns}
-          setValueColumns={(cols) => {
-            const clean = unique(cols).filter((c) => !baseRowColumns.includes(c));
-            setBaseValueColumns(clean);
-          }}
-        />
-        <ColumnConfig
-          title="Revised columns"
-          table={targetTable}
-          rowColumns={targetRowColumns}
-          setRowColumns={(cols) => {
-            const clean = unique(cols);
-            setTargetRowColumns(clean);
-            setTargetValueColumns((prev) => prev.filter((c) => !clean.includes(c)));
-          }}
-          valueColumns={targetValueColumns}
-          setValueColumns={(cols) => {
-            const clean = unique(cols).filter((c) => !targetRowColumns.includes(c));
-            setTargetValueColumns(clean);
-          }}
-        />
-      </div>
+          <div className="table-config-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, marginBottom: 14 }}>
+            <ColumnConfig
+              title="Baseline columns"
+              table={baseTable}
+              rowColumns={baseRowColumns}
+              setRowColumns={(cols) => {
+                const clean = unique(cols);
+                setBaseRowColumns(clean);
+                setBaseValueColumns((prev) => prev.filter((c) => !clean.includes(c)));
+              }}
+              valueColumns={baseValueColumns}
+              setValueColumns={(cols) => {
+                const clean = unique(cols).filter((c) => !baseRowColumns.includes(c));
+                setBaseValueColumns(clean);
+              }}
+            />
+            <ColumnConfig
+              title="Revised columns"
+              table={targetTable}
+              rowColumns={targetRowColumns}
+              setRowColumns={(cols) => {
+                const clean = unique(cols);
+                setTargetRowColumns(clean);
+                setTargetValueColumns((prev) => prev.filter((c) => !clean.includes(c)));
+              }}
+              valueColumns={targetValueColumns}
+              setValueColumns={(cols) => {
+                const clean = unique(cols).filter((c) => !targetRowColumns.includes(c));
+                setTargetValueColumns(clean);
+              }}
+            />
+          </div>
+
+          {viewBusy && <SoftLoading label="Rendering selected table values" />}
+
+          <div className="table-selected-stack">
+            <SelectedTableView title="Baseline selected view" view={baseView} />
+            <SelectedTableView title="Revised selected view" view={targetView} />
+          </div>
+        </>
+      )}
 
       <div className="table-action-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
         <div>
@@ -271,6 +311,7 @@ export function TablesWorkspace({ runId }) {
             onChange={(e) => setRowFilter(e.target.value)}
             placeholder="Optional: type a feature, code, package, PCV, or phrase to narrow the rows"
             style={inputStyle}
+            dir="auto"
           />
           <div style={{ color: "#667085", fontSize: 12, marginTop: 5 }}>
             Leave blank to compare all rows in the selected table slice.
@@ -289,6 +330,7 @@ export function TablesWorkspace({ runId }) {
               onChange={(e) => setTableQuestion(e.target.value)}
               placeholder="Optional AI focus: changed values, renamed headers, missing rows, review questions"
               style={{ ...inputStyle, marginTop: 8 }}
+              dir="auto"
             />
           )}
         </div>
@@ -306,13 +348,6 @@ export function TablesWorkspace({ runId }) {
         >
           {exportBusy ? "Exporting" : "Export PDF"}
         </button>
-      </div>
-
-      {viewBusy && <SoftLoading label="Rendering selected table values" />}
-
-      <div className="table-selected-stack">
-        <SelectedTableView title="Baseline selected view" view={baseView} />
-        <SelectedTableView title="Revised selected view" view={targetView} />
       </div>
 
       {diff && <TableColumnCompareResult diff={diff} />}
@@ -344,7 +379,7 @@ export function TablePicker({ title, value, onChange, tables }) {
       <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
         <option value="">Select a detected table</option>
         {tables.map((t) => (
-          <option key={t.id} value={t.id}>
+          <option key={t.id} value={t.id} dir="auto">
             {t.display_name || `Page ${t.page_first || "-"} - ${t.title || t.header_preview || "Detected table"}`}
           </option>
         ))}
@@ -362,7 +397,7 @@ export function TableInfo({ table, emptyLabel }) {
     <div className="table-preview-shell" style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderRadius: 8, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
         <div style={{ minWidth: 0 }}>
-          <div className="cell-truncate" title={table.title || table.area || "Detected table"} style={{ fontWeight: 650 }}>
+          <div className="cell-truncate" title={table.title || table.area || "Detected table"} style={{ fontWeight: 650 }} dir="auto">
             {table.title || table.area || "Detected table"}
           </div>
           <div style={{ marginTop: 4, color: "#667085", fontSize: 13 }}>
@@ -376,7 +411,7 @@ export function TableInfo({ table, emptyLabel }) {
 
       <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
         {columns.slice(0, 10).map((col) => (
-          <span key={col} title={col} style={{ border: "1px solid #d8d0c3", borderRadius: 999, padding: "2px 7px", fontSize: 12, color: "#475467", background: "#fbfaf6", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span key={col} title={col} style={{ border: "1px solid #d8d0c3", borderRadius: 999, padding: "2px 7px", fontSize: 12, color: "#475467", background: "#fbfaf6", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} dir="auto">
             {col}
           </span>
         ))}
@@ -505,13 +540,13 @@ export function TablePreview({ columns, rows }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth }}>
         <thead>
           <tr style={{ background: "#f2eee6" }}>
-            {columns.map((col) => <th key={col} title={col} style={smallTh}>{col}</th>)}
+            {columns.map((col) => <th key={col} title={col} style={smallTh} dir="auto">{col}</th>)}
           </tr>
         </thead>
         <tbody>
           {rows.map((row, i) => (
             <tr key={i}>
-              {columns.map((col) => <td key={col} style={smallTd}>{displayCell(row.values?.[col])}</td>)}
+              {columns.map((col) => <td key={col} style={smallTd} dir="auto">{displayCell(row.values?.[col])}</td>)}
             </tr>
           ))}
         </tbody>
@@ -551,16 +586,16 @@ export function RenderedRowsTable({ columns, rows }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth }}>
         <thead>
           <tr style={{ background: "#f2eee6", color: "#344054" }}>
-            <th style={smallTh}>Row</th>
-            {columns.map((col) => <th key={col} title={col} style={smallTh}>{col}</th>)}
+            <th style={smallTh} dir="auto">Row</th>
+            {columns.map((col) => <th key={col} title={col} style={smallTh} dir="auto">{col}</th>)}
           </tr>
         </thead>
         <tbody>
           {rows.map((row, i) => (
             <tr key={i}>
-              <td style={{ ...smallTd, color: "#667085", minWidth: 160 }}>{row.row_key || row.definition || `Row ${i + 1}`}</td>
+              <td style={{ ...smallTd, color: "#667085", minWidth: 160 }} dir="auto">{row.row_key || row.definition || `Row ${i + 1}`}</td>
               {columns.map((col) => (
-                <td key={col} style={smallTd}>{displayCell(row.values?.[col])}</td>
+                <td key={col} style={smallTd} dir="auto">{displayCell(row.values?.[col])}</td>
               ))}
             </tr>
           ))}
@@ -605,7 +640,7 @@ export function TableColumnCompareResult({ diff }) {
               <AiUsageCard usage={diff.ai_review.usage} />
             </>
           ) : (
-            <div style={{ color: COLORS.DELETED.text }}>{diff.ai_review.error || "AI review was not generated."}</div>
+            <div style={{ color: COLORS.DELETED.text }} dir="auto">{normalizeErrorMessage(diff.ai_review.error) || "AI review was not generated."}</div>
           )}
         </div>
       )}
@@ -675,7 +710,7 @@ export function TableColumnRowDiff({ row }) {
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div>
           <ChangeBadge type={type} />
-          <span style={{ marginLeft: 8, fontWeight: 650 }}>
+          <span style={{ marginLeft: 8, fontWeight: 650 }} dir="auto">
             {row.row_key?.base || row.row_key?.target || row.key || row.definition || "row"}
           </span>
         </div>
@@ -739,17 +774,17 @@ export function FieldDiffTable({ rows }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 640 }}>
         <thead>
           <tr style={{ background: "#f2eee6", color: "#344054" }}>
-            <th style={smallTh}>Field</th>
-            <th style={smallTh}>Before</th>
-            <th style={smallTh}>After</th>
+            <th style={smallTh} dir="auto">Field</th>
+            <th style={smallTh} dir="auto">Before</th>
+            <th style={smallTh} dir="auto">After</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => (
             <tr key={i}>
-              <td style={smallTd}>{r.field || r.column || r.name || "-"}</td>
-              <td style={{ ...smallTd, color: COLORS.DELETED.text }}>{displayCell(r.before ?? r.base ?? r.old)}</td>
-              <td style={{ ...smallTd, color: COLORS.ADDED.text }}>{displayCell(r.after ?? r.target ?? r.new)}</td>
+              <td style={smallTd} dir="auto">{r.field || r.column || r.name || "-"}</td>
+              <td style={{ ...smallTd, color: COLORS.DELETED.text }} dir="auto">{displayCell(r.before ?? r.base ?? r.old)}</td>
+              <td style={{ ...smallTd, color: COLORS.ADDED.text }} dir="auto">{displayCell(r.after ?? r.target ?? r.new)}</td>
             </tr>
           ))}
         </tbody>
@@ -785,7 +820,7 @@ export function DefinitionBox({ title, value }) {
   return (
     <div style={{ background: "#fbfaf6", border: "1px solid #e0d8ca", borderRadius: 8, padding: 10 }}>
       <div style={{ fontSize: 12, color: "#667085", fontWeight: 650, marginBottom: 4 }}>{title}</div>
-      <div style={{ fontSize: 13, color: "#344054", lineHeight: 1.4 }}>{displayCell(value)}</div>
+      <div style={{ fontSize: 13, color: "#344054", lineHeight: 1.4 }} dir="auto">{displayCell(value)}</div>
     </div>
   );
 }

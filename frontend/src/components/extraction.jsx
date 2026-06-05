@@ -94,8 +94,8 @@ export function ExtractionOverview({ runId, meta }) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 650 }}>{meta.label || "Extracted document"}</h2>
-          <p style={{ margin: "6px 0 0", color: "#667085", fontSize: 13 }}>{summary.message || "Extraction complete."}</p>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 650 }} dir="auto">{meta.label || "Extracted document"}</h2>
+          <p style={{ margin: "6px 0 0", color: "#667085", fontSize: 13 }} dir="auto">{summary.message || "Extraction complete."}</p>
         </div>
         <button onClick={() => { window.location.href = `${API}/extract-runs/${runId}/json`; }} style={primaryButtonStyle(false)}>
           Download JSON
@@ -124,10 +124,10 @@ export function ExtractionOverview({ runId, meta }) {
           <div style={{ fontWeight: 650, marginBottom: 8 }}>
             AI-assisted analysis {ai.available ? "- available" : "- unavailable"}
           </div>
-          {!ai.available && <div style={{ color: COLORS.DELETED.text }}>{ai.error || "AI analysis was not generated."}</div>}
+          {!ai.available && <div style={{ color: COLORS.DELETED.text }} dir="auto">{normalizeErrorMessage(ai.error) || "AI analysis was not generated."}</div>}
           {aiResult && (
             <div style={{ color: "#344054", lineHeight: 1.5 }}>
-              <p style={{ marginTop: 0 }}>{aiResult.executive_summary || "AI analysis completed."}</p>
+              <p style={{ marginTop: 0 }} dir="auto">{aiResult.executive_summary || "AI analysis completed."}</p>
               {Array.isArray(aiResult.key_items) && aiResult.key_items.length > 0 && (
                 <GenericRowsTable
                   columns={["Item"]}
@@ -184,8 +184,8 @@ export function ExtractionTables({ runId }) {
         <div key={table.id} style={{ ...panelStyle, padding: 12, boxShadow: "none" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
             <div>
-              <div style={{ fontWeight: 650 }}>{table.display_name || table.title || "Detected table"}</div>
-              <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }}>
+              <div style={{ fontWeight: 650 }} dir="auto">{table.display_name || table.title || "Detected table"}</div>
+              <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }} dir="auto">
                 {table.page_label} · {table.n_columns} columns · {table.n_rows} rows · header quality {Math.round((table.header_quality || 0) * 100)}%
                 {table.extraction_confidence ? ` · extraction ${Math.round(table.extraction_confidence * 100)}%` : ""}
               </div>
@@ -193,11 +193,11 @@ export function ExtractionTables({ runId }) {
             <code>{String(table.id || "").slice(0, 8)}</code>
           </div>
           {Array.isArray(table.quality_warnings) && table.quality_warnings.length > 0 && (
-            <div style={{ color: "#8a5a00", fontSize: 13, marginBottom: 8 }}>
+            <div style={{ color: "#8a5a00", fontSize: 13, marginBottom: 8 }} dir="auto">
               Review note: {table.quality_warnings.slice(0, 2).join(" ")}
             </div>
           )}
-          <div style={{ color: "#475467", fontSize: 13, marginBottom: 8 }}>
+          <div style={{ color: "#475467", fontSize: 13, marginBottom: 8 }} dir="auto">
             Columns: {(table.columns || []).slice(0, 12).join(" | ") || "No columns detected"}
           </div>
           <TablePreview columns={table.columns || []} rows={table.rows || table.row_preview || []} />
@@ -281,7 +281,7 @@ export function ExtractionJsonPreview({ runId, meta }) {
       <div style={{ ...panelStyle, padding: 12, boxShadow: "none" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontWeight: 650, marginBottom: 8 }}>Business extraction summary</div>
+            <div style={{ fontWeight: 650, marginBottom: 8 }} dir="auto">Business extraction summary</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", color: "#344054", fontSize: 13 }}>
               <span style={softPillStyle}>Document: {documentSummary.label || meta.label || "uploaded file"}</span>
               <span style={softPillStyle}>Type: {documentSummary.source_type || meta.source_format || "document"}</span>
@@ -296,7 +296,7 @@ export function ExtractionJsonPreview({ runId, meta }) {
           </button>
         </div>
         {Array.isArray(quality.warnings) && quality.warnings.length > 0 && (
-          <div style={{ color: "#8a5a00", fontSize: 13, marginTop: 8, lineHeight: 1.4 }}>
+          <div style={{ color: "#8a5a00", fontSize: 13, marginTop: 8, lineHeight: 1.4 }} dir="auto">
             {quality.warnings.slice(0, 3).map((w) => w.message || w).join(" ")}
           </div>
         )}
@@ -404,7 +404,7 @@ export function BusinessStructurePreview({ documents }) {
     <div style={{ display: "grid", gap: 10 }}>
       {documents.slice(0, 4).map((doc) => (
         <div key={doc.document_index || doc.label} style={{ border: "1px solid #e0d8ca", borderRadius: 8, background: "#fffdf8", padding: 10 }}>
-          <div style={{ fontWeight: 650, marginBottom: 8 }}>
+          <div style={{ fontWeight: 650, marginBottom: 8 }} dir="auto">
             {doc.label || `Document ${doc.document_index || ""}`}
           </div>
           <div style={{ display: "grid", gap: 8 }}>
@@ -479,7 +479,7 @@ export function BusinessSectionCard({ section }) {
             <div style={{ fontSize: 12, color: "#667085", fontWeight: 650, marginBottom: 4 }}>Related content</div>
             <ul style={{ margin: 0, paddingLeft: 18, color: "#344054", fontSize: 13, lineHeight: 1.45 }}>
               {content.slice(0, 8).map((item, idx) => (
-                <li key={idx}>{trim(item.text, 220)}</li>
+                <li key={idx} dir="auto">{trim(item.text, 220)}</li>
               ))}
             </ul>
           </div>

@@ -22,7 +22,7 @@ def _clean(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 def _slug(value: Any, fallback: str = "section") -> str:
-    text = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "")).strip("_").lower()
+    text = re.sub(r"[^\w]+", "_", str(value or "")).strip("_").lower()
     return text[:70] or fallback
 
 def _header_name(value: Any, index: int) -> str:
@@ -223,7 +223,7 @@ def _text_scripts(value: Any) -> set[str]:
     return scripts
 
 def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
-    if n_cols < 2 or n_cols > 4:
+    if n_cols < 2 or n_cols > 6:
         return False
 
     filled_rows = [row for row in rows if _filled_count(row) >= 1]

@@ -221,7 +221,7 @@ export const labelStyle = {
 };
 
 export const th = {
-  textAlign: "left",
+  textAlign: "start",
   padding: "10px 12px",
   borderBottom: "1px solid #384250",
   whiteSpace: "nowrap",
@@ -235,7 +235,7 @@ export const td = {
 };
 
 export const smallTh = {
-  textAlign: "left",
+  textAlign: "start",
   padding: "8px 9px",
   borderBottom: "1px solid #ded6c8",
   fontWeight: 650,

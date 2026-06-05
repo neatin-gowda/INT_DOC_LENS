@@ -200,8 +200,8 @@ export function AccuracyImprovementPanel({ runId, quality }) {
     <form onSubmit={submit} style={{ background: "#fffdf8", border: "1px solid #ded6c8", borderRadius: 8, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
         <div>
-          <div style={{ fontWeight: 650, color: "#344054" }}>Accuracy improvement</div>
-          <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }}>
+          <div style={{ fontWeight: 650, color: "#344054" }} dir="auto">Accuracy improvement</div>
+          <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }} dir="auto">
             Classical review score is {systemScore === "" ? "-" : systemScore}%. Add feedback before using advanced AI on focused areas.
           </div>
         </div>
@@ -226,6 +226,7 @@ export function AccuracyImprovementPanel({ runId, quality }) {
                   type="button"
                   onClick={() => toggleFocus(item)}
                   title={label}
+                  dir="auto"
                   style={{
                     border: `1px solid ${active ? COLORS.MODIFIED.border : "#d8d0c3"}`,
                     background: active ? COLORS.MODIFIED.chip : "#fffdf8",
@@ -249,16 +250,16 @@ export function AccuracyImprovementPanel({ runId, quality }) {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginBottom: 10 }}>
-        <input required aria-label="Reviewer name" value={form.reviewer_name} onChange={(e) => update("reviewer_name", e.target.value)} placeholder="Reviewer name *" style={inputStyle} />
-        <input required aria-label="Document type" value={form.document_type} onChange={(e) => update("document_type", e.target.value)} placeholder="Document type *" style={inputStyle} />
-        <input readOnly value={form.user_score} placeholder="Classical score" style={{ ...inputStyle, background: "#f2eee6", color: "#667085" }} />
+        <input required aria-label="Reviewer name" value={form.reviewer_name} onChange={(e) => update("reviewer_name", e.target.value)} placeholder="Reviewer name *" style={inputStyle} dir="auto" />
+        <input required aria-label="Document type" value={form.document_type} onChange={(e) => update("document_type", e.target.value)} placeholder="Document type *" style={inputStyle} dir="auto" />
+        <input readOnly value={form.user_score} placeholder="Classical score" style={{ ...inputStyle, background: "#f2eee6", color: "#667085" }} dir="auto" />
       </div>
 
       <div style={{ marginBottom: 10 }}>
-        <textarea required value={form.missing_areas} onChange={(e) => update("missing_areas", e.target.value)} placeholder="Areas that looked incorrect or missing" rows={3} style={{ ...inputStyle, resize: "vertical" }} />
+        <textarea required value={form.missing_areas} onChange={(e) => update("missing_areas", e.target.value)} placeholder="Areas that looked incorrect or missing" rows={3} style={{ ...inputStyle, resize: "vertical" }} dir="auto" />
       </div>
 
-      <textarea required value={form.comments} onChange={(e) => update("comments", e.target.value)} placeholder="Reviewer comments for this session" rows={3} style={{ ...inputStyle, resize: "vertical", marginBottom: 10 }} />
+      <textarea required value={form.comments} onChange={(e) => update("comments", e.target.value)} placeholder="Reviewer comments for this session" rows={3} style={{ ...inputStyle, resize: "vertical", marginBottom: 10 }} dir="auto" />
 
       <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#475467", fontSize: 13, marginBottom: 10 }}>
         <input type="checkbox" checked={form.wants_ai_enhancement} onChange={(e) => update("wants_ai_enhancement", e.target.checked)} />
@@ -272,7 +273,7 @@ export function AccuracyImprovementPanel({ runId, quality }) {
       </button>
 
       {result?.answer && (
-        <div style={{ marginTop: 12, background: "#fbfaf6", border: "1px solid #d8d0c3", borderRadius: 8, padding: 12, color: "#344054", lineHeight: 1.45 }}>
+        <div style={{ marginTop: 12, background: "#fbfaf6", border: "1px solid #d8d0c3", borderRadius: 8, padding: 12, color: "#344054", lineHeight: 1.45 }} dir="auto">
           {result.answer}
         </div>
       )}
@@ -379,10 +380,10 @@ export function ReviewReport({ runId }) {
             {keyInsights.map((row, i) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8, alignItems: "start" }}>
                 <ChangeBadge type={rowChangeType(row)} />
-                <div>
-                  <span style={{ fontWeight: 650 }}>{trim(row.feature || row.item || row.area || "Document item", 120)}: </span>
-                  <span>{trim(row.change || row.description || row.before || row.after || "Change detected.", 260)}</span>
-                  {row.citation && <span style={{ color: "#667085" }}> ({friendlyCitation(row.citation)})</span>}
+                <div dir="auto">
+                  <span style={{ fontWeight: 650 }} dir="auto">{trim(row.feature || row.item || row.area || "Document item", 120)}: </span>
+                  <span dir="auto">{trim(row.change || row.description || row.before || row.after || "Change detected.", 260)}</span>
+                  {row.citation && <span style={{ color: "#667085" }} dir="auto"> ({friendlyCitation(row.citation)})</span>}
                 </div>
               </div>
             ))}
@@ -415,24 +416,24 @@ export function ReviewReport({ runId }) {
             <tbody>
               {filteredRows.map((row, i) => (
                 <tr key={i}>
-                  <td style={{ ...td, width: "24%" }}>
-                    <strong style={{ fontWeight: 650 }}>{row.feature || row.area || row.item || row.path || "Document change"}</strong>
-                    <div style={{ color: "#667085", marginTop: 6 }}>{trim(row.before || row.after || row.text || "", 180)}</div>
+                  <td style={{ ...td, width: "24%" }} dir="auto">
+                    <strong style={{ fontWeight: 650 }} dir="auto">{row.feature || row.area || row.item || row.path || "Document change"}</strong>
+                    <div style={{ color: "#667085", marginTop: 6 }} dir="auto">{trim(row.before || row.after || row.text || "", 180)}</div>
                   </td>
-                  <td style={{ ...td, width: "22%" }}>
+                  <td style={{ ...td, width: "22%" }} dir="auto">
                     <ChangeBadge type={rowChangeType(row)} />
-                    <div style={{ marginTop: 7 }}>{trim(row.change || row.description || "", 240)}</div>
+                    <div style={{ marginTop: 7 }} dir="auto">{trim(row.change || row.description || "", 240)}</div>
                   </td>
-                  <td style={{ ...td, width: "28%" }}>
-                    <div>{friendlyCitation(row.citation || row.evidence || "-")}</div>
-                    {row.before && <div style={{ color: COLORS.DELETED.text, marginTop: 7 }}>Before: {trim(row.before, 180)}</div>}
-                    {row.after && <div style={{ color: COLORS.ADDED.text, marginTop: 4 }}>After: {trim(row.after, 180)}</div>}
+                  <td style={{ ...td, width: "28%" }} dir="auto">
+                    <div dir="auto">{friendlyCitation(row.citation || row.evidence || "-")}</div>
+                    {row.before && <div style={{ color: COLORS.DELETED.text, marginTop: 7 }} dir="auto">Before: {trim(row.before, 180)}</div>}
+                    {row.after && <div style={{ color: COLORS.ADDED.text, marginTop: 4 }} dir="auto">After: {trim(row.after, 180)}</div>}
                   </td>
-                  <td style={{ ...td, width: "11%" }}>
+                  <td style={{ ...td, width: "11%" }} dir="auto">
                     <Confidence value={normalizeConfidence(row.confidence)} />
-                    {row.impact && <div style={{ color: "#667085", marginTop: 4 }}>{row.impact}</div>}
+                    {row.impact && <div style={{ color: "#667085", marginTop: 4 }} dir="auto">{row.impact}</div>}
                   </td>
-                  <td style={{ ...td, width: "15%", color: needsReview(row) ? COLORS.DELETED.text : "#475467", fontWeight: needsReview(row) ? 650 : 400 }}>
+                  <td style={{ ...td, width: "15%", color: needsReview(row) ? COLORS.DELETED.text : "#475467", fontWeight: needsReview(row) ? 650 : 400 }} dir="auto">
                     {row.seek_clarification || row.review || row.recommendation || (needsReview(row) ? "Review recommended." : "No action suggested.")}
                   </td>
                 </tr>
