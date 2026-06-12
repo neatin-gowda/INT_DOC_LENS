@@ -155,6 +155,9 @@ central collapsible left-navigation shell, command center, Ask Documents upload
 and chat placeholder, and placeholder modules for Agent Studio, Tool Studio,
 Workflow Runs, Knowledge & RAG, and Admin & RBAC.
 
+Ask Documents now uploads files through the existing extraction pipeline and can
+query completed extraction runs through `POST /extract-runs/{run_id}/query`.
+
 ### Phase 2: Unified Assistant Panel
 
 - Add a contextual assistant panel that knows the active job/workspace.
@@ -168,7 +171,10 @@ Workflow Runs, Knowledge & RAG, and Admin & RBAC.
 - Move tool authorization/cost metadata into this registry.
 
 Initial foundation: `backend/tool_registry.py` and `backend/routers/tools.py`
-now expose the first static capability catalog at `GET /tools`.
+now expose the first role-filtered capability catalog at `GET /tools`.
+
+Job cleanup foundation: `DELETE /jobs/{run_id}` removes accessible jobs from
+the durable job store and current in-memory run cache.
 
 ### Phase 4: Source And RAG Layer
 

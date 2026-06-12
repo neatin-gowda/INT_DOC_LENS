@@ -5,7 +5,7 @@ Restructured to use modular routers under backend/routers/.
 from __future__ import annotations
 
 import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api_helpers import (
@@ -16,7 +16,7 @@ from .api_helpers import (
 )
 from .ingestion import supported_input_extensions
 from .extraction.registry import list_providers
-from .job_store import init_job_store, list_jobs as list_stored_jobs, public_job_record
+from .job_store import delete_job, get_job, init_job_store, list_jobs as list_stored_jobs, public_job_record
 from .security import (
     can_access_job,
     current_principal,
@@ -84,9 +84,11 @@ def root():
             "GET /extract-runs/{id}/images",
             "GET /extract-runs/{id}/structured-json",
             "GET /extract-runs/{id}/json",
+            "POST /extract-runs/{id}/query",
             "POST /compare",
             "GET /jobs",
             "GET /jobs/{id}",
+            "DELETE /jobs/{id}",
             "GET /db-health",
             "GET /tools",
             "GET /ai-health",
@@ -145,6 +147,20 @@ def job_detail(run_id: str):
         return extract_run_meta(run_id)
     from .routers.comparison import run_meta
     return run_meta(run_id)
+
+@app.delete("/jobs/{run_id}")
+def delete_job_record(run_id: str):
+    principal = current_principal()
+    record = get_job(run_id) or _RUNS.get(run_id)
+
+    if not record:
+        raise HTTPException(404, "Job not found")
+    if not can_access_job(principal, record):
+        raise HTTPException(403, "You do not have access to this job")
+
+    _RUNS.pop(run_id, None)
+    deleted = delete_job(run_id)
+    return {"run_id": run_id, "deleted": deleted or True}
 
 @app.get("/db-health")
 def db_health():

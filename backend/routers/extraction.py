@@ -10,12 +10,13 @@ import uuid
 import threading
 import traceback
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
+from rapidfuzz import fuzz
 
-from ..api_schemas import ExtractResponse
+from ..api_schemas import ExtractResponse, QueryReq
 from ..api_helpers import (
     _RUNS,
     _ensure_run,
@@ -219,3 +220,108 @@ def download_extract_json(run_id: str):
 def get_extract_structured_json(run_id: str):
     r = _ensure_extraction_complete(run_id)
     return _business_extraction_json(r, run_id)
+
+
+@router.post("/extract-runs/{run_id}/query")
+def query_extract_run(run_id: str, req: QueryReq):
+    r = _ensure_extraction_complete(run_id)
+    blocks = r.get("blocks", [])
+    question = str(req.question or "").strip()
+
+    if not question:
+        raise HTTPException(400, "question is required")
+
+    rows = _search_extraction_blocks(blocks, question)
+    label = r.get("label") or "document"
+
+    if rows:
+        answer = f"Found {len(rows)} relevant passage(s) in {label}."
+    else:
+        answer = f"I could not find a matching passage in {label}. Try a more specific term, heading, table value, or page reference."
+
+    return {
+        "answer": answer,
+        "view": "extraction_evidence",
+        "mode": req.mode,
+        "columns": ["Page", "Type", "Path", "Text", "Score"],
+        "rows": rows[:80],
+        "count": len(rows),
+        "plan": {
+            "scope": "extraction_run",
+            "run_id": run_id,
+            "query": question,
+            "ai_used": False,
+        },
+    }
+
+
+def _search_extraction_blocks(blocks: list[Any], question: str) -> list[dict[str, Any]]:
+    query = _norm_query(question)
+    terms = [term for term in query.split() if len(term) > 2]
+    page_hint = _page_hint(question)
+    rows: list[dict[str, Any]] = []
+
+    for block in blocks:
+        if page_hint and getattr(block, "page_number", None) != page_hint:
+            continue
+
+        text = _block_search_text(block)
+        if not text:
+            continue
+
+        norm_text = _norm_query(text)
+        term_hits = sum(1 for term in terms if term in norm_text)
+        fuzzy = fuzz.partial_ratio(query, norm_text) / 100 if query else 0
+        score = min(1.0, (term_hits / max(1, len(terms))) * 0.68 + fuzzy * 0.32)
+
+        if term_hits == 0 and fuzzy < 0.72:
+            continue
+
+        record = _block_record(block, include_payload=False)
+        rows.append(
+            {
+                "Page": record.get("page_number") or record.get("page"),
+                "Type": record.get("type") or record.get("block_type"),
+                "Path": record.get("path"),
+                "Text": _preview(record.get("text") or text, 900),
+                "Score": round(score, 2),
+            }
+        )
+
+    rows.sort(key=lambda item: item.get("Score", 0), reverse=True)
+    return rows
+
+
+def _block_search_text(block: Any) -> str:
+    parts = [
+        getattr(block, "text", ""),
+        getattr(block, "path", ""),
+        getattr(block, "stable_key", ""),
+    ]
+    payload = getattr(block, "payload", None)
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            key_text = str(key)
+            if key_text.startswith("__"):
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                parts.append(f"{key_text}: {value}")
+            elif isinstance(value, list):
+                parts.extend(str(item) for item in value[:20] if isinstance(item, (str, int, float, bool)))
+    return " ".join(str(part) for part in parts if part)
+
+
+def _norm_query(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").lower()).strip()
+
+
+def _page_hint(value: str) -> Optional[int]:
+    match = re.search(r"\b(?:page|p\\.?|pg\\.?)\s*(\d{1,4})\b", value, re.I)
+    return int(match.group(1)) if match else None
+
+
+def _preview(value: Any, limit: int = 900) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "..."

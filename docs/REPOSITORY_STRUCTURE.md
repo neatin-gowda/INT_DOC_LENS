@@ -50,7 +50,7 @@ backend/
   services/
     table_tools.py       Table discovery, viewing, row matching, and selected-column comparison helpers.
 
-  tool_registry.py       Reusable tool metadata for UI, automation, and future MCP-style adapters.
+  tool_registry.py       Role-filtered tool metadata for UI, automation, and future MCP-style adapters.
 
   routers/
     comparison.py        Compare upload, run metadata, diff, pages, overlays, and native views.

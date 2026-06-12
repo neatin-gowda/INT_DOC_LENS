@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { BRAND } from "../config.js";
+import React, { useEffect, useRef, useState } from "react";
+import { API, BRAND, FILE_ACCEPT } from "../config.js";
 
 const navGroups = [
   {
@@ -55,9 +55,10 @@ export function WorkspaceShell({
   children,
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [theme, setTheme] = useState("dark");
 
   return (
-    <div className={`workspace-shell${collapsed ? " collapsed" : ""}`}>
+    <div className={`workspace-shell theme-${theme}${collapsed ? " collapsed" : ""}`}>
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
           <div className="workspace-logo">AC</div>
@@ -106,6 +107,18 @@ export function WorkspaceShell({
             <h1>{workspaceLabels[workspace] || "Workspace"}</h1>
           </div>
           <div className="workspace-actions">
+            <div className="theme-switch" aria-label="Theme selector">
+              {["dark", "light", "system"].map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={theme === mode ? "active" : ""}
+                  onClick={() => setTheme(mode)}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
             {runId && (
               <button type="button" className="workspace-primary-action" onClick={onDownloadReport}>
                 Export report
@@ -190,36 +203,201 @@ export function WorkspacePlaceholder({ title, detail, items = [] }) {
 }
 
 export function AskDocumentsWorkspace() {
+  const inputRef = useRef(null);
+  const [fileName, setFileName] = useState("");
+  const [runId, setRunId] = useState("");
+  const [meta, setMeta] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState(null);
+  const [asking, setAsking] = useState(false);
+
+  useEffect(() => {
+    if (!runId || !busy) return undefined;
+
+    let cancelled = false;
+    let timer = null;
+
+    const poll = async () => {
+      try {
+        const resp = await fetch(`${API}/extract-runs/${runId}`);
+        if (!resp.ok) throw new Error(await responseError(resp));
+        const data = await resp.json();
+        if (cancelled) return;
+        setMeta(data);
+
+        if (data.status === "complete" || data.status === "failed") {
+          setBusy(false);
+          return;
+        }
+
+        timer = setTimeout(poll, 1100);
+      } catch (err) {
+        if (!cancelled) {
+          setBusy(false);
+          setError(errorMessage(err));
+        }
+      }
+    };
+
+    poll();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [runId, busy]);
+
+  const upload = async (files) => {
+    const selected = Array.from(files || []).filter((file) => file && file.name);
+    if (!selected.length) return;
+
+    const form = new FormData();
+    selected.forEach((file) => form.append("document", file));
+
+    setFileName(selected.length > 1 ? `${selected.length} files selected` : selected[0].name);
+    setRunId("");
+    setMeta({ status: "uploading", progress: 3, status_message: "Uploading document" });
+    setAnswer(null);
+    setError("");
+    setBusy(true);
+
+    try {
+      const resp = await fetch(`${API}/extract`, { method: "POST", body: form });
+      if (!resp.ok) throw new Error(await responseError(resp));
+      const data = await resp.json();
+      setRunId(data.run_id);
+      setMeta(data);
+    } catch (err) {
+      setBusy(false);
+      setError(errorMessage(err));
+    }
+  };
+
+  const ask = async () => {
+    if (!runId || meta?.status !== "complete" || !question.trim()) return;
+    setAsking(true);
+    setError("");
+
+    try {
+      const resp = await fetch(`${API}/extract-runs/${runId}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, mode: "fast" }),
+      });
+      if (!resp.ok) throw new Error(await responseError(resp));
+      setAnswer(await resp.json());
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  const ready = meta?.status === "complete";
+
   return (
     <section className="ask-documents-grid">
       <div className="ask-documents-panel">
         <div className="workspace-eyebrow">Document chat</div>
         <h2>Upload, select a source, then chat with citations.</h2>
-        <div className="assistant-dropzone large">Drop PDF, Word, Excel, image, CSV, or TSV files</div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept={FILE_ACCEPT}
+          multiple
+          onChange={(event) => upload(event.target.files)}
+          style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+        />
+        <button
+          type="button"
+          className="assistant-dropzone large"
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            upload(event.dataTransfer.files);
+          }}
+        >
+          {fileName || "Drop PDF, Word, Excel, image, CSV, or TSV files"}
+        </button>
         <div className="processing-steps">
-          <span>Upload</span>
-          <span>Extract</span>
-          <span>Index</span>
-          <span>Stream answer</span>
+          <span className={meta ? "active" : ""}>Upload</span>
+          <span className={busy || ready ? "active" : ""}>Extract</span>
+          <span className={ready ? "active" : ""}>Index</span>
+          <span className={answer ? "active" : ""}>Answer</span>
         </div>
+        {meta && (
+          <div className="ask-status">
+            <strong>{meta.status_message || meta.status || "Working"}</strong>
+            <span>{Math.max(0, Math.min(100, Number(meta.progress || 0)))}%</span>
+          </div>
+        )}
+        {error && <div className="ask-error">{error}</div>}
       </div>
       <div className="ask-documents-panel chat">
         <div className="assistant-console-header">
-          <span>Streaming preview</span>
-          <strong>Reasoning hidden</strong>
+          <span>Document chat</span>
+          <strong>{ready ? "Ready" : busy ? "Processing" : "Waiting"}</strong>
         </div>
-        <div className="assistant-message user">What changed in this policy and where is the evidence?</div>
-        <div className="assistant-message system">Answers will stream here with page citations, tool trace, and source scope.</div>
+        <div className="assistant-message user">Ask about clauses, tables, fields, pages, dates, values, or extracted content.</div>
+        <div className="assistant-message system">
+          {answer?.answer || "Upload a document to enable natural-language search over extracted text and tables."}
+        </div>
+        {Array.isArray(answer?.rows) && answer.rows.length > 0 && (
+          <div className="ask-results">
+            {answer.rows.slice(0, 5).map((row, index) => (
+              <div key={index}>
+                <strong>Page {row.Page || "-"}</strong>
+                <span>{row.Text}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="model-strip">
           <span>Runtime</span>
-          <strong>Model configurable by admin</strong>
-          <small>Department policy controls model, tools, and retrieval scope.</small>
+          <strong>{ready ? "Deterministic document query" : "Extraction required"}</strong>
+          <small>Admin-configured LLM streaming can layer on top of this endpoint later.</small>
         </div>
         <div className="assistant-input-shell">
-          <span>Ask anything about the active document...</span>
-          <button type="button">Send</button>
+          <input
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") ask();
+            }}
+            placeholder="Ask anything about the active document..."
+            disabled={!ready || asking}
+          />
+          <button type="button" onClick={ask} disabled={!ready || asking || !question.trim()}>
+            {asking ? "Asking" : "Send"}
+          </button>
         </div>
       </div>
     </section>
   );
+}
+
+async function responseError(resp) {
+  try {
+    const text = await resp.text();
+    if (!text) return `Request failed with status ${resp.status}`;
+    try {
+      const parsed = JSON.parse(text);
+      return parsed.detail || parsed.error || parsed.message || `Request failed with status ${resp.status}`;
+    } catch {
+      return text.length > 240 ? `Server error (${resp.status}). Please check backend logs.` : text;
+    }
+  } catch {
+    return `Request failed with status ${resp.status}`;
+  }
+}
+
+function errorMessage(err) {
+  const text = String(err?.message || err || "");
+  if (text.toLowerCase().includes("failed to fetch")) {
+    return "The app could not reach the document service. Confirm the backend URL and service status.";
+  }
+  return text || "Something went wrong.";
 }

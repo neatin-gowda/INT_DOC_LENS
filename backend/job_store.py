@@ -92,6 +92,28 @@ def get_job(run_id: str) -> Optional[dict[str, Any]]:
     return _read_json().get(run_id)
 
 
+def delete_job(run_id: str) -> bool:
+    deleted = False
+
+    if db_enabled():
+        try:
+            with get_conn() as conn:
+                row = conn.execute("DELETE FROM doculens_job WHERE run_id = %s RETURNING run_id", (run_id,)).fetchone()
+                deleted = bool(row)
+        except Exception:
+            pass
+
+    data = _read_json()
+    if run_id in data:
+        with _LOCK:
+            data = _read_json()
+            deleted = run_id in data or deleted
+            data.pop(run_id, None)
+            DEFAULT_STORE_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+
+    return deleted
+
+
 def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit or 50), 200))
     if db_enabled():
