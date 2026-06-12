@@ -20,10 +20,11 @@ import { JobsDashboard } from "./components/dashboard.jsx";
 import { UploadPanel, ExtractUploadPanel } from "./components/upload.jsx";
 import { SideBySide } from "./components/viewer.jsx";
 import { TablesWorkspace } from "./components/tables.jsx";
-import { QueryPanel } from "./components/chat.jsx";
+import { QueryPanel } from "./features/ask/AskComparisonPanel.jsx";
+import { ChatPage } from "./features/chat/ChatPage.jsx";
 import { ReviewReport } from "./components/feedback.jsx";
 import { ExtractionWorkspace } from "./components/extraction.jsx";
-import { AskDocumentsWorkspace, CommandCenter, WorkspacePlaceholder, WorkspaceShell } from "./components/workspaceShell.jsx";
+import { AskDocumentsWorkspace, WorkspacePlaceholder, WorkspaceShell } from "./components/workspaceShell.jsx";
 import { useDocumentTitle } from "./theme/useDocumentTitle.js";
 
 const getSession = (key, fallback) => {
@@ -46,19 +47,27 @@ const setSession = (key, value) => {
 };
 
 const workspacePaths = {
-  home: "/",
+  home: "/chat",
   jobs: "/jobs",
   compare: "/compare",
   extract: "/extract",
-  assistant: "/chat",
+  assistant: "/ask",
+  tables: "/documents/tables",
+  reports: "/documents/reports",
   agents: "/agents",
   tools: "/admin/capabilities",
   automations: "/workflows",
   sources: "/knowledge",
+  models: "/admin/models",
+  knowledge: "/admin/knowledge-bases",
+  usage: "/admin/usage",
   admin: "/admin",
 };
 
-const pathWorkspaces = Object.fromEntries(Object.entries(workspacePaths).map(([key, value]) => [value, key]));
+const pathWorkspaces = {
+  "/": "home",
+  ...Object.fromEntries(Object.entries(workspacePaths).map(([key, value]) => [value, key])),
+};
 
 const workspaceFromPath = (pathname) => pathWorkspaces[pathname] || "home";
 
@@ -83,11 +92,16 @@ export default function App() {
     jobs: "Jobs",
     compare: "Compare",
     extract: "Extract",
-    assistant: "Chat",
-    agents: "Autonomous Agents",
+    assistant: "Ask",
+    tables: "Tables",
+    reports: "Reports",
+    agents: "Agents",
     tools: "Capabilities",
     automations: "Workflow Runs",
     sources: "Knowledge",
+    models: "Models",
+    knowledge: "Knowledge Bases",
+    usage: "Usage",
     admin: "Admin",
   }[workspace] || "Workspace";
 
@@ -108,6 +122,12 @@ export default function App() {
     const nextWorkspace = workspaceFromPath(location.pathname);
     if (nextWorkspace !== workspace) setWorkspace(nextWorkspace);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (workspace === "tables") setTab("tables");
+    if (workspace === "reports") setTab("report");
+    if (workspace === "compare" && tab !== "viewer") setTab("viewer");
+  }, [workspace]);
 
   const resetAll = () => {
     setWorkspace("home");
@@ -412,14 +432,7 @@ export default function App() {
         onDownloadReport={downloadReport}
       >
         {workspace === "home" && (
-          <CommandCenter
-            onExtract={() => goWorkspace("extract")}
-            onCompare={() => goWorkspace("compare")}
-            onJobs={() => goWorkspace("jobs")}
-            onAgents={() => goWorkspace("agents")}
-            onTools={() => goWorkspace("tools")}
-            onAutomations={() => goWorkspace("automations")}
-          />
+          <ChatPage />
         )}
 
         {workspace === "jobs" && (
@@ -454,11 +467,10 @@ export default function App() {
           </section>
         )}
 
-        {workspace === "compare" && isComplete && runId && meta && (
+        {["compare", "tables", "reports"].includes(workspace) && isComplete && runId && meta && (
           <section className="comparison-workspace">
             <div className="comparison-head">
               <div>
-                <div className="workflow-kicker">Active comparison</div>
                 <h2 dir="auto">{meta.base_label || "Baseline"} → {meta.target_label || "Revised"}</h2>
               </div>
               <div className="comparison-id">#{String(runId).slice(0, 6)}</div>
@@ -496,9 +508,9 @@ export default function App() {
 
         {workspace === "agents" && (
           <WorkspacePlaceholder
-            title="Autonomous Agents"
-            detail="Build supervised agent workspaces that call approved tools, ask for human approval, and keep every run auditable."
-            items={["Agent runs", "Approval gates", "Tool policy", "Run history"]}
+            title="Agents"
+            detail="Agent Library is available soon."
+            items={["Agent Library"]}
           />
         )}
 
@@ -507,6 +519,30 @@ export default function App() {
             title="Capabilities"
             detail="Register internal tools, skills, plugins, schemas, permissions, model use, and cost controls in one governed catalog."
             items={["Tools", "Skills", "Plugins", "RBAC", "Cost controls"]}
+          />
+        )}
+
+        {workspace === "models" && (
+          <WorkspacePlaceholder
+            title="Models"
+            detail="Model catalog, deployment routing, and allowed-role policy will be managed here."
+            items={["Catalog", "Routing", "Access", "Usage"]}
+          />
+        )}
+
+        {workspace === "knowledge" && (
+          <WorkspacePlaceholder
+            title="Knowledge Bases"
+            detail="Approved knowledge sources, retrieval scopes, and business-unit tagging will be managed here."
+            items={["Sources", "Tags", "Citations", "Retention"]}
+          />
+        )}
+
+        {workspace === "usage" && (
+          <WorkspacePlaceholder
+            title="Usage"
+            detail="Token, cost, model, and capability usage telemetry will be tracked here."
+            items={["Tokens", "Cost", "Models", "Capabilities"]}
           />
         )}
 
@@ -520,7 +556,7 @@ export default function App() {
 
         {workspace === "sources" && (
           <WorkspacePlaceholder
-            title="Knowledge & RAG"
+            title="Knowledge Bases"
             detail="Approved knowledge sources, document collections, vector stores, and connector-backed retrieval scopes will be managed here."
             items={["Department stores", "Connectors", "Citations", "Retention policies"]}
           />
@@ -528,7 +564,7 @@ export default function App() {
 
         {workspace === "admin" && (
           <WorkspacePlaceholder
-            title="Admin & RBAC"
+            title="Admin"
             detail="Admins will control users, groups, departments, tool access, source access, model policies, and audit settings from this control plane."
             items={["Users", "Groups", "Tool access", "Audit logs", "Model policy"]}
           />

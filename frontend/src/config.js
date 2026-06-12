@@ -8,9 +8,9 @@ export const BRAND = {
 export const FILE_ACCEPT = ".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv";
 
 export const COLORS = {
-  ADDED: { bg: "rgba(31,160,70,.16)", border: "#1e8a47", text: "#176c38", chip: "#eef8f1" },
-  DELETED: { bg: "rgba(218,54,54,.14)", border: "#bb3030", text: "#9f2525", chip: "#fff2f2" },
-  MODIFIED: { bg: "rgba(218,185,42,.20)", border: "#9a7a10", text: "#735c11", chip: "#fff8df" },
-  UNCHANGED: { bg: "rgba(96,108,128,.12)", border: "#98a2b3", text: "#475467", chip: "#f2f4f7" },
-  MATCH: { bg: "#eef4ff", border: "#6b7da8", text: "#344054", chip: "#eef4ff" },
+  ADDED: { bg: "var(--diff-added-bg)", border: "var(--diff-added-border)", text: "var(--diff-added-text)", chip: "var(--diff-added-chip)" },
+  DELETED: { bg: "var(--diff-deleted-bg)", border: "var(--diff-deleted-border)", text: "var(--diff-deleted-text)", chip: "var(--diff-deleted-chip)" },
+  MODIFIED: { bg: "var(--diff-modified-bg)", border: "var(--diff-modified-border)", text: "var(--diff-modified-text)", chip: "var(--diff-modified-chip)" },
+  UNCHANGED: { bg: "var(--diff-unchanged-bg)", border: "var(--diff-unchanged-border)", text: "var(--diff-unchanged-text)", chip: "var(--diff-unchanged-chip)" },
+  MATCH: { bg: "var(--diff-match-bg)", border: "var(--diff-match-border)", text: "var(--diff-match-text)", chip: "var(--diff-match-chip)" },
 };

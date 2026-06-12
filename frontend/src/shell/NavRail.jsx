@@ -1,44 +1,60 @@
 import React, { useEffect, useMemo, useState } from "react";
+import {
+  Activity,
+  Cpu,
+  Database,
+  FileOutput,
+  FileSearch,
+  FileText,
+  GitCompare,
+  MessageSquare,
+  Puzzle,
+  Shield,
+  Table,
+  UserRoundCog,
+} from "lucide-react";
 import { fetchTools } from "../lib/api.js";
 
 const staticSections = [
   {
-    label: "AI Studio",
+    label: "Workspace",
     items: [
-      { key: "home", label: "Chat", short: "C" },
-      { key: "assistant", label: "Ask Documents", short: "A" },
+      { key: "home", label: "Chat", icon: MessageSquare },
+      { key: "assistant", label: "Ask", icon: FileSearch },
     ],
   },
   {
-    label: "Autonomous Agents",
+    label: "Agents",
     disabled: true,
     items: [
-      { key: "agents", label: "Coming soon", short: "G", disabled: true },
+      { key: "agents", label: "Agent Library", icon: UserRoundCog, disabled: true, title: "Available soon" },
     ],
   },
   {
     label: "Admin",
     adminOnly: true,
     items: [
-      { key: "tools", label: "Capabilities", short: "T" },
-      { key: "admin", label: "Access", short: "R" },
+      { key: "tools", label: "Capabilities", icon: Puzzle },
+      { key: "models", label: "Models", icon: Cpu },
+      { key: "knowledge", label: "Knowledge Bases", icon: Database },
+      { key: "admin", label: "Access", icon: Shield },
+      { key: "usage", label: "Usage", icon: Activity },
     ],
   },
 ];
 
 const fallbackDocumentTools = [
-  { key: "compare", label: "Compare", short: "D" },
-  { key: "extract", label: "Extract", short: "E" },
-  { key: "compare", label: "Table Review", short: "T" },
-  { key: "compare", label: "Reports", short: "P" },
+  { key: "compare", label: "Compare", icon: GitCompare },
+  { key: "extract", label: "Extract", icon: FileOutput },
+  { key: "tables", label: "Tables", icon: Table },
+  { key: "reports", label: "Reports", icon: FileText },
 ];
 
 const toolRouteMap = {
-  "document.compare": { key: "compare", short: "D" },
-  "document.extract": { key: "extract", short: "E" },
-  "document.query": { key: "assistant", short: "A" },
-  "document.table.compare": { key: "compare", short: "T" },
-  "document.report.generate": { key: "compare", short: "P" },
+  "document.compare": { key: "compare", icon: GitCompare },
+  "document.extract": { key: "extract", icon: FileOutput },
+  "document.table.compare": { key: "tables", icon: Table },
+  "document.report.generate": { key: "reports", icon: FileText },
 };
 
 export function NavRail({ workspace, onNavigate, collapsed = false }) {
@@ -66,7 +82,7 @@ export function NavRail({ workspace, onNavigate, collapsed = false }) {
         return {
           key: route.key,
           label: readableToolLabel(tool.label),
-          short: route.short,
+          icon: route.icon,
         };
       })
       .filter(Boolean);
@@ -93,10 +109,10 @@ export function NavRail({ workspace, onNavigate, collapsed = false }) {
                 type="button"
                 className={`workspace-nav-item${active ? " active" : ""}`}
                 onClick={() => !item.disabled && onNavigate(item.key)}
-                disabled={item.disabled}
-                title={collapsed ? item.label : undefined}
+              disabled={item.disabled}
+                title={collapsed ? (item.title || item.label) : item.title}
               >
-                <span className="workspace-nav-mark">{item.short}</span>
+                <item.icon className="workspace-nav-icon" aria-hidden="true" />
                 {!collapsed && <span className="workspace-nav-text">{item.label}</span>}
               </button>
             );

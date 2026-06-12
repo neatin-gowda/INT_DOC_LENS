@@ -20,7 +20,6 @@ export function LandingPage({ onExtract, onCompare, onJobs }) {
     <section className="session-board">
       <div className="board-head">
         <div>
-          <div className="workflow-kicker">Workspace</div>
           <h2>Start a workflow</h2>
         </div>
       </div>
@@ -96,7 +95,6 @@ export function JobsDashboard({ onOpenJob, onAskJob, error }) {
     <section className="session-board">
       <div className="board-head">
         <div>
-          <div className="workflow-kicker">Sessions</div>
           <h2>Jobs</h2>
         </div>
         <div className="board-actions">

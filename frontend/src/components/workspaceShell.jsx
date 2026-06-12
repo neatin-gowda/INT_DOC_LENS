@@ -1,21 +1,25 @@
 import React, { useEffect, useRef, useState } from "react";
-import { API, BRAND, FILE_ACCEPT } from "../config.js";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { API, FILE_ACCEPT } from "../config.js";
 import { AltraiWordmark } from "../shell/AppShell.jsx";
 import { NavRail } from "../shell/NavRail.jsx";
 import { UserFooter } from "../shell/UserFooter.jsx";
 import { useTheme } from "../theme/ThemeProvider.jsx";
 
 const workspaceLabels = {
-  home: "Command Center",
+  home: "Chat",
   jobs: "Jobs",
   compare: "Compare",
   extract: "Extract",
-  assistant: "Ask Documents",
-  agents: "Autonomous Agents",
+  assistant: "Ask",
+  agents: "Agents",
   tools: "Capabilities",
-  automations: "Workflow Runs",
-  sources: "Knowledge & RAG",
-  admin: "Admin & RBAC",
+  automations: "Workflows",
+  sources: "Knowledge Bases",
+  models: "Models",
+  knowledge: "Knowledge Bases",
+  usage: "Usage",
+  admin: "Admin",
 };
 
 export function WorkspaceShell({
@@ -32,10 +36,8 @@ export function WorkspaceShell({
     <div className={`workspace-shell theme-${theme}${collapsed ? " collapsed" : ""}`}>
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
-          <div className="workspace-logo">A</div>
           <div className="workspace-brand-copy">
             <AltraiWordmark />
-            <div className="workspace-brand-subtitle">Enterprise AI hub</div>
           </div>
           <button
             type="button"
@@ -44,7 +46,7 @@ export function WorkspaceShell({
             aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
             title={collapsed ? "Expand navigation" : "Collapse navigation"}
           >
-            {collapsed ? "»" : "«"}
+            {collapsed ? <ChevronRight size={16} strokeWidth={1.5} /> : <ChevronLeft size={16} strokeWidth={1.5} />}
           </button>
         </div>
 
@@ -55,7 +57,6 @@ export function WorkspaceShell({
       <section className="workspace-main">
         <header className="workspace-topbar">
           <div>
-            <div className="workspace-eyebrow">Secure workspace</div>
             <h1>{workspaceLabels[workspace] || "Workspace"}</h1>
           </div>
           <div className="workspace-actions">
@@ -78,61 +79,9 @@ export function WorkspaceShell({
   );
 }
 
-export function CommandCenter({ onExtract, onCompare, onJobs, onAgents, onTools, onAutomations }) {
-  return (
-    <div className="command-grid">
-      <section className="command-hero">
-        <div className="workspace-eyebrow">Command center</div>
-        <h2>Start, resume, or ask from one workspace.</h2>
-        <div className="command-tiles">
-          <WorkspaceLaunch title="Compare" detail="Baseline and revised document review." onClick={onCompare} />
-          <WorkspaceLaunch title="Extract" detail="Single document extraction and query." onClick={onExtract} />
-          <WorkspaceLaunch title="Jobs" detail="Resume or clean up completed sessions." onClick={onJobs} />
-        </div>
-      </section>
-
-      <section className="assistant-console">
-        <div className="assistant-console-header">
-          <span>Ask Documents</span>
-          <strong>Available</strong>
-        </div>
-        <button type="button" className="assistant-dropzone" onClick={() => onExtract()}>
-          Upload a document
-        </button>
-        <div className="assistant-message system">Ask over an extracted document or a completed comparison session.</div>
-        <div className="model-strip">
-          <span>Runtime</span>
-          <strong>Backend evidence query</strong>
-          <small>Model routing can be added from Admin later.</small>
-        </div>
-        <div className="assistant-input-shell">
-          <span>Select a completed job or upload a file.</span>
-          <button type="button" onClick={onTools}>Tools</button>
-        </div>
-      </section>
-
-      <section className="workspace-lane">
-        <WorkspaceLaunch title="Agent Studio" detail="Future governed agent runs." onClick={onAgents} />
-        <WorkspaceLaunch title="Capabilities" detail="Future tools, skills, and plugins." onClick={onTools} />
-        <WorkspaceLaunch title="Workflow Runs" detail="Future automations and monitors." onClick={onAutomations} />
-      </section>
-    </div>
-  );
-}
-
-export function WorkspaceLaunch({ title, detail, onClick }) {
-  return (
-    <button type="button" className="workspace-launch" onClick={onClick}>
-      <span>{title}</span>
-      <small>{detail}</small>
-    </button>
-  );
-}
-
 export function WorkspacePlaceholder({ title, detail, items = [] }) {
   return (
     <section className="workspace-placeholder">
-      <div className="workspace-eyebrow">Platform module</div>
       <h2>{title}</h2>
       <p>{detail}</p>
       <div className="placeholder-list">
@@ -255,7 +204,6 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
   return (
     <section className="ask-documents-grid">
       <div className="ask-documents-panel">
-        <div className="workspace-eyebrow">Document chat</div>
         <h2>{runId ? "Ask the selected document" : "Upload and ask"}</h2>
         <input
           ref={inputRef}
