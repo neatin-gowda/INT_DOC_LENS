@@ -1,8 +1,8 @@
 export const API = import.meta.env.VITE_API_BASE || "/api";
 
 export const BRAND = {
-  name: "AstraCore AI",
-  subtitle: "A governed AI hub for documents, tools, knowledge, and department workflows.",
+  name: "Altrai",
+  subtitle: "Unified enterprise AI workspace.",
 };
 
 export const FILE_ACCEPT = ".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv";

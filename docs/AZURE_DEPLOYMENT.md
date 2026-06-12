@@ -1,6 +1,6 @@
 # Azure deployment runbook
 
-This is a manual deploy reference for the Spec-Diff stack. The preferred
+This is a manual deploy reference for the Altrai stack. The preferred
 production path is the GitHub Actions workflow described in
 [`AZURE_GITHUB_DEPLOYMENT.md`](AZURE_GITHUB_DEPLOYMENT.md), which deploys the
 Bicep infrastructure, builds the backend container, applies `sql/schema.sql`,

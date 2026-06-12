@@ -26,7 +26,7 @@ from .security import (
 )
 from .routers import comparison, extraction, queries, feedback, tables, reports, tools
 
-app = FastAPI(title="Spec-Diff", version="0.1.0")
+app = FastAPI(title="Altrai API", version="0.1.0")
 
 _cors_origins = [
     origin.strip()
@@ -75,7 +75,7 @@ app.include_router(tools.router)
 def root():
     return {
         "status": "ok",
-        "name": "doculens-ai-agent",
+        "name": "altrai-api",
         "endpoints": [
             "POST /extract",
             "GET /extract-runs/{id}",

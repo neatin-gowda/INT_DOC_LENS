@@ -1,47 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
 import { API, BRAND, FILE_ACCEPT } from "../config.js";
-
-const navGroups = [
-  {
-    label: "Workspace",
-    items: [
-      { key: "home", label: "Command Center", short: "C" },
-      { key: "jobs", label: "Jobs", short: "J" },
-    ],
-  },
-  {
-    label: "Document Intelligence",
-    items: [
-      { key: "compare", label: "DocuLens Compare", short: "D" },
-      { key: "extract", label: "DocuLens Extract", short: "E" },
-      { key: "assistant", label: "Ask Documents", short: "A" },
-    ],
-  },
-  {
-    label: "AI Hub",
-    items: [
-      { key: "agents", label: "Agent Studio", short: "S" },
-      { key: "tools", label: "Tool Studio", short: "T" },
-      { key: "automations", label: "Workflow Runs", short: "W" },
-      { key: "sources", label: "Knowledge & RAG", short: "K" },
-    ],
-  },
-  {
-    label: "Control Plane",
-    items: [
-      { key: "admin", label: "Admin & RBAC", short: "R" },
-    ],
-  },
-];
+import { AltraiWordmark } from "../shell/AppShell.jsx";
+import { NavRail } from "../shell/NavRail.jsx";
+import { UserFooter } from "../shell/UserFooter.jsx";
+import { useTheme } from "../theme/ThemeProvider.jsx";
 
 const workspaceLabels = {
   home: "Command Center",
   jobs: "Jobs",
-  compare: "DocuLens Compare",
-  extract: "DocuLens Extract",
+  compare: "Compare",
+  extract: "Extract",
   assistant: "Ask Documents",
-  agents: "Agent Studio",
-  tools: "Tool Studio",
+  agents: "Autonomous Agents",
+  tools: "Capabilities",
   automations: "Workflow Runs",
   sources: "Knowledge & RAG",
   admin: "Admin & RBAC",
@@ -55,23 +26,15 @@ export function WorkspaceShell({
   children,
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [theme, setTheme] = useState(() => {
-    if (typeof window === "undefined") return "system";
-    return window.localStorage.getItem("astracore_theme") || "system";
-  });
-
-  const setThemeMode = (mode) => {
-    setTheme(mode);
-    if (typeof window !== "undefined") window.localStorage.setItem("astracore_theme", mode);
-  };
+  const { theme } = useTheme();
 
   return (
     <div className={`workspace-shell theme-${theme}${collapsed ? " collapsed" : ""}`}>
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
-          <div className="workspace-logo">AC</div>
+          <div className="workspace-logo">A</div>
           <div className="workspace-brand-copy">
-            <div className="workspace-brand-name">{BRAND.name}</div>
+            <AltraiWordmark />
             <div className="workspace-brand-subtitle">Enterprise AI hub</div>
           </div>
           <button
@@ -85,27 +48,8 @@ export function WorkspaceShell({
           </button>
         </div>
 
-        <nav className="workspace-nav" aria-label="Workspace navigation">
-          {navGroups.map((group) => (
-            <div key={group.label} className="workspace-nav-group">
-              <div className="workspace-nav-label">{group.label}</div>
-              {group.items.map((item) => {
-                const active = workspace === item.key || (workspace === "home" && item.key === "home");
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    className={`workspace-nav-item${active ? " active" : ""}`}
-                    onClick={() => onNavigate(item.key)}
-                  >
-                    <span className="workspace-nav-mark">{item.short}</span>
-                    <span className="workspace-nav-text">{item.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
+        <NavRail workspace={workspace} onNavigate={onNavigate} collapsed={collapsed} />
+        <UserFooter collapsed={collapsed} />
       </aside>
 
       <section className="workspace-main">
@@ -115,22 +59,6 @@ export function WorkspaceShell({
             <h1>{workspaceLabels[workspace] || "Workspace"}</h1>
           </div>
           <div className="workspace-actions">
-            <div className="theme-switch" aria-label="Theme selector">
-              {[
-                ["system", "Auto"],
-                ["light", "Light"],
-                ["dark", "Dark"],
-              ].map(([mode, label]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={theme === mode ? "active" : ""}
-                  onClick={() => setThemeMode(mode)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
             {runId && (
               <button type="button" className="workspace-primary-action" onClick={onDownloadReport}>
                 Export report
@@ -185,7 +113,7 @@ export function CommandCenter({ onExtract, onCompare, onJobs, onAgents, onTools,
 
       <section className="workspace-lane">
         <WorkspaceLaunch title="Agent Studio" detail="Future governed agent runs." onClick={onAgents} />
-        <WorkspaceLaunch title="Tool Studio" detail="Future tools and MCP registry." onClick={onTools} />
+        <WorkspaceLaunch title="Capabilities" detail="Future tools, skills, and plugins." onClick={onTools} />
         <WorkspaceLaunch title="Workflow Runs" detail="Future automations and monitors." onClick={onAutomations} />
       </section>
     </div>

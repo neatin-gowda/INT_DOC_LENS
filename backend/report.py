@@ -1,5 +1,5 @@
 """
-PDF report generation for Spec-Diff.
+PDF report generation for Altrai.
 
 Produces a business-friendly comparison report:
   - Executive overview
@@ -69,8 +69,8 @@ def _register_unicode_fonts() -> tuple[str, str]:
     for path in regular_candidates:
         try:
             if Path(path).exists():
-                pdfmetrics.registerFont(TTFont("DocuLensUnicode", path))
-                regular = "DocuLensUnicode"
+                pdfmetrics.registerFont(TTFont("AltraiUnicode", path))
+                regular = "AltraiUnicode"
                 break
         except Exception:
             regular = "Helvetica"
@@ -78,8 +78,8 @@ def _register_unicode_fonts() -> tuple[str, str]:
     for path in bold_candidates:
         try:
             if Path(path).exists():
-                pdfmetrics.registerFont(TTFont("DocuLensUnicodeBold", path))
-                bold = "DocuLensUnicodeBold"
+                pdfmetrics.registerFont(TTFont("AltraiUnicodeBold", path))
+                bold = "AltraiUnicodeBold"
                 break
         except Exception:
             bold = regular
@@ -246,7 +246,7 @@ def _footer(canvas, doc):
     canvas.saveState()
     canvas.setFont(FONT_REGULAR, 7)
     canvas.setFillColor(colors.HexColor("#667085"))
-    footer = f"DocuLens AI Agent report  |  Page {doc.page}"
+    footer = f"Altrai report  |  Page {doc.page}"
     canvas.drawRightString(A4[0] - 0.45 * inch, 0.28 * inch, footer)
     canvas.restoreState()
 

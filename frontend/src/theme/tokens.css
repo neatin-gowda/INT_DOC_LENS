@@ -1,0 +1,107 @@
+@import "@fontsource/inter/variable.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/600.css";
+
+:root {
+  color-scheme: light;
+  --brand-navy: #0a1f4d;
+  --brand-navy-strong: #011b58;
+  --brand-orange: #c45510;
+  --brand-orange-strong: #de6211;
+  --surface: #f8fafc;
+  --surface-raised: #ffffff;
+  --surface-muted: #f1f5f9;
+  --text-primary: #111827;
+  --text-muted: #64748b;
+  --text-inverse: #f8fafc;
+  --border: rgba(15, 23, 42, .12);
+  --border-strong: rgba(10, 31, 77, .22);
+  --focus-ring: rgba(196, 85, 16, .28);
+  --accent-gradient: linear-gradient(90deg, var(--brand-navy), var(--brand-orange));
+  --liquid-gradient: linear-gradient(110deg, var(--brand-navy), #123a78, var(--brand-orange), var(--brand-navy));
+  --font-ui: Inter, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --shadow-soft: 0 10px 30px rgba(15, 23, 42, .08);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #171a21;
+  --surface-raised: #20242d;
+  --surface-muted: #111827;
+  --text-primary: #f8fafc;
+  --text-muted: #a8b3c2;
+  --text-inverse: #111827;
+  --border: rgba(248, 250, 252, .12);
+  --border-strong: rgba(248, 250, 252, .18);
+  --shadow-soft: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] {
+    color-scheme: dark;
+    --surface: #171a21;
+    --surface-raised: #20242d;
+    --surface-muted: #111827;
+    --text-primary: #f8fafc;
+    --text-muted: #a8b3c2;
+    --text-inverse: #111827;
+    --border: rgba(248, 250, 252, .12);
+    --border-strong: rgba(248, 250, 252, .18);
+    --shadow-soft: none;
+  }
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.01em;
+}
+
+code,
+pre,
+kbd {
+  font-family: var(--font-mono);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand-orange);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}

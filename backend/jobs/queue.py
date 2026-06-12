@@ -75,7 +75,7 @@ def worker_loop() -> None:
     """
     Daemon worker loop picking up tasks from doculens_job table.
     """
-    print("DocuLens Job Queue Worker loop started.")
+    print("Altrai Job Queue Worker loop started.")
     while True:
         if not db_enabled():
             time.sleep(5)

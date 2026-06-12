@@ -6,7 +6,7 @@ export function UploadPanel({ onUpload, busy, onBack }) {
     <form onSubmit={onUpload} className="doc-workflow-card">
       <div className="workflow-card-head">
         <div>
-          <div className="workflow-kicker">DocuLens Compare</div>
+          <div className="workflow-kicker">Document Intelligence</div>
           <h2>Compare two documents</h2>
         </div>
         <button type="button" onClick={onBack} disabled={busy} className="ghost-action">
@@ -35,7 +35,7 @@ export function ExtractUploadPanel({ onUpload, busy, onBack }) {
     <form onSubmit={onUpload} className="doc-workflow-card">
       <div className="workflow-card-head">
         <div>
-          <div className="workflow-kicker">DocuLens Extract</div>
+          <div className="workflow-kicker">Document Intelligence</div>
           <h2>Extract documents</h2>
         </div>
         <button type="button" onClick={onBack} disabled={busy} className="ghost-action">

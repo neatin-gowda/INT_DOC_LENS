@@ -16,7 +16,7 @@ param postgresAdminPassword string
 @description('Container image deployed initially. The GitHub workflow updates this after building.')
 param containerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
-@description('DocuLens auth mode. Use demo for MVP, header when fronted by an auth gateway.')
+@description('Altrai auth mode. Use demo for MVP, header when fronted by an auth gateway.')
 param authMode string = 'demo'
 
 @description('Comma-separated allowed CORS origins. Use your Static Web App URL for production.')

@@ -1,7 +1,7 @@
 # Azure GitHub Deployment
 
 This deployment path creates the Azure infrastructure and deploys both parts of
-DocuLens from GitHub Actions. The resource group is expected to already exist;
+Altrai from GitHub Actions. The resource group is expected to already exist;
 the workflow creates or updates resources inside that resource group.
 
 ## What Gets Created

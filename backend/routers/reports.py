@@ -69,8 +69,8 @@ def get_ai_summary_pdf(run_id: str, req: AiSummaryPdfReq):
     ):
         try:
             if Path(font_path).exists():
-                pdfmetrics.registerFont(TTFont("DocuLensUnicode", font_path))
-                font_name = "DocuLensUnicode"
+                pdfmetrics.registerFont(TTFont("AltraiUnicode", font_path))
+                font_name = "AltraiUnicode"
                 break
         except Exception:
             font_name = "Helvetica"
@@ -89,7 +89,7 @@ def get_ai_summary_pdf(run_id: str, req: AiSummaryPdfReq):
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        "DocuLensTitle",
+        "AltraiTitle",
         parent=styles["Title"],
         fontName=font_name,
         fontSize=16,
@@ -98,7 +98,7 @@ def get_ai_summary_pdf(run_id: str, req: AiSummaryPdfReq):
         spaceAfter=8,
     )
     meta_style = ParagraphStyle(
-        "DocuLensMeta",
+        "AltraiMeta",
         parent=styles["BodyText"],
         fontName=font_name,
         fontSize=8,
@@ -107,7 +107,7 @@ def get_ai_summary_pdf(run_id: str, req: AiSummaryPdfReq):
         spaceAfter=8,
     )
     body_style = ParagraphStyle(
-        "DocuLensBody",
+        "AltraiBody",
         parent=styles["BodyText"],
         fontName=font_name,
         fontSize=9,
@@ -116,7 +116,7 @@ def get_ai_summary_pdf(run_id: str, req: AiSummaryPdfReq):
         spaceAfter=8,
     )
     header_style = ParagraphStyle(
-        "DocuLensHeader",
+        "AltraiHeader",
         parent=body_style,
         fontName=font_name,
         fontSize=8.5,
@@ -124,7 +124,7 @@ def get_ai_summary_pdf(run_id: str, req: AiSummaryPdfReq):
         textColor=colors.white,
     )
     cell_style = ParagraphStyle(
-        "DocuLensCell",
+        "AltraiCell",
         parent=body_style,
         fontName=font_name,
         fontSize=8,
@@ -221,8 +221,8 @@ def table_report_pdf(run_id: str, req: CompareTableColumnsReq):
     ):
         try:
             if Path(font_path).exists():
-                pdfmetrics.registerFont(TTFont("DocuLensTableUnicode", font_path))
-                font_name = "DocuLensTableUnicode"
+                pdfmetrics.registerFont(TTFont("AltraiTableUnicode", font_path))
+                font_name = "AltraiTableUnicode"
                 break
         except Exception:
             font_name = "Helvetica"

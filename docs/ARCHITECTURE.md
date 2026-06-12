@@ -1,4 +1,4 @@
-# Spec-Diff: Reusable Supplier Document Comparison Platform
+# Altrai: Reusable Supplier Document Comparison Platform
 
 ## Problem statement
 

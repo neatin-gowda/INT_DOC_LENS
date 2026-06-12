@@ -1,5 +1,5 @@
 """
-Azure OpenAI embedding helper for Spec-Diff.
+Azure OpenAI embedding helper for Altrai.
 
 This module is intentionally optional:
 - If embedding env vars are missing, callers get no vectors and the app still works.

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { API } from "./config.js";
 import {
   css,
@@ -23,6 +24,7 @@ import { QueryPanel } from "./components/chat.jsx";
 import { ReviewReport } from "./components/feedback.jsx";
 import { ExtractionWorkspace } from "./components/extraction.jsx";
 import { AskDocumentsWorkspace, CommandCenter, WorkspacePlaceholder, WorkspaceShell } from "./components/workspaceShell.jsx";
+import { useDocumentTitle } from "./theme/useDocumentTitle.js";
 
 const getSession = (key, fallback) => {
   if (typeof window === "undefined") return fallback;
@@ -43,8 +45,27 @@ const setSession = (key, value) => {
   }
 };
 
+const workspacePaths = {
+  home: "/",
+  jobs: "/jobs",
+  compare: "/compare",
+  extract: "/extract",
+  assistant: "/chat",
+  agents: "/agents",
+  tools: "/admin/capabilities",
+  automations: "/workflows",
+  sources: "/knowledge",
+  admin: "/admin",
+};
+
+const pathWorkspaces = Object.fromEntries(Object.entries(workspacePaths).map(([key, value]) => [value, key]));
+
+const workspaceFromPath = (pathname) => pathWorkspaces[pathname] || "home";
+
 export default function App() {
-  const [workspace, setWorkspace] = useState(() => getSession("workspace", "home"));
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [workspace, setWorkspace] = useState(() => workspaceFromPath(window.location.pathname) || getSession("workspace", "home"));
   const [runId, setRunId] = useState(() => getSession("runId", null));
   const [meta, setMeta] = useState(() => getSession("meta", null));
   const [tab, setTab] = useState(() => getSession("tab", "viewer"));
@@ -57,6 +78,20 @@ export default function App() {
   const [extractError, setExtractError] = useState("");
   const [extractTab, setExtractTab] = useState(() => getSession("extractTab", "overview"));
   const [jobError, setJobError] = useState("");
+  const pageTitle = {
+    home: "",
+    jobs: "Jobs",
+    compare: "Compare",
+    extract: "Extract",
+    assistant: "Chat",
+    agents: "Autonomous Agents",
+    tools: "Capabilities",
+    automations: "Workflow Runs",
+    sources: "Knowledge",
+    admin: "Admin",
+  }[workspace] || "Workspace";
+
+  useDocumentTitle(pageTitle);
 
   useEffect(() => { setSession("workspace", workspace); }, [workspace]);
   useEffect(() => { setSession("runId", runId); }, [runId]);
@@ -68,6 +103,11 @@ export default function App() {
   useEffect(() => { setSession("extractMeta", extractMeta); }, [extractMeta]);
   useEffect(() => { setSession("extractBusy", extractBusy); }, [extractBusy]);
   useEffect(() => { setSession("extractTab", extractTab); }, [extractTab]);
+
+  useEffect(() => {
+    const nextWorkspace = workspaceFromPath(location.pathname);
+    if (nextWorkspace !== workspace) setWorkspace(nextWorkspace);
+  }, [location.pathname]);
 
   const resetAll = () => {
     setWorkspace("home");
@@ -100,21 +140,8 @@ export default function App() {
       setExtractError("");
       setJobError("");
     }
-
-    if (typeof window !== "undefined" && window.history?.pushState) {
-      window.history.pushState({ doculensWorkspace: nextWorkspace }, "", window.location.href);
-    }
+    navigate(workspacePaths[nextWorkspace] || "/", { replace: false });
   };
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.history?.replaceState) return undefined;
-
-    window.history.replaceState({ doculensWorkspace: "home" }, "", window.location.href);
-    const onPopState = () => resetAll();
-    window.addEventListener("popstate", onPopState);
-
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
 
   useEffect(() => {
     if (!runId || !busy) return;
@@ -469,7 +496,7 @@ export default function App() {
 
         {workspace === "agents" && (
           <WorkspacePlaceholder
-            title="Agent Studio"
+            title="Autonomous Agents"
             detail="Build supervised agent workspaces that call approved tools, ask for human approval, and keep every run auditable."
             items={["Agent runs", "Approval gates", "Tool policy", "Run history"]}
           />
@@ -477,9 +504,9 @@ export default function App() {
 
         {workspace === "tools" && (
           <WorkspacePlaceholder
-            title="Tool Studio"
-            detail="Register internal tools, MCP connectors, schemas, permissions, model use, and cost controls in one governed catalog."
-            items={["GET /tools", "MCP connectors", "Tool RBAC", "Cost controls"]}
+            title="Capabilities"
+            detail="Register internal tools, skills, plugins, schemas, permissions, model use, and cost controls in one governed catalog."
+            items={["Tools", "Skills", "Plugins", "RBAC", "Cost controls"]}
           />
         )}
 

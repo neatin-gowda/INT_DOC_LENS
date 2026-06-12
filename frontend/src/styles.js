@@ -17,6 +17,21 @@ export const css = `
       radial-gradient(circle at 82% 12%, rgba(255, 255, 255, .08), transparent 28%),
       linear-gradient(135deg, #071426 0%, #0b1f3a 48%, #132c4d 100%);
   }
+  .altrai-wordmark {
+    color: var(--text-inverse, #f8fafc);
+    font-family: var(--font-ui, Inter, "Segoe UI", system-ui, sans-serif);
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+  .altrai-wordmark .accent {
+    color: var(--brand-orange, #c45510);
+  }
+  .theme-light .altrai-wordmark,
+  [data-theme="light"] .altrai-wordmark {
+    color: var(--brand-navy, #0a1f4d);
+  }
   .workspace-shell.theme-light {
     color: #0f172a;
     background:
@@ -114,6 +129,7 @@ export const css = `
   .workspace-nav {
     overflow: auto;
     padding-inline: 2px;
+    flex: 1;
   }
   .workspace-nav-group {
     margin-bottom: 16px;
@@ -150,6 +166,10 @@ export const css = `
     color: white;
     box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
   }
+  .workspace-nav-item:disabled {
+    opacity: .48;
+    cursor: default;
+  }
   .workspace-nav-mark {
     width: 30px;
     height: 30px;
@@ -164,6 +184,72 @@ export const css = `
   .workspace-main {
     min-width: 0;
     padding: 18px;
+  }
+  .user-footer {
+    border-top: 1px solid rgba(255,255,255,.12);
+    padding: 12px 6px 0;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 9px;
+    align-items: center;
+    color: #e5edf7;
+  }
+  .user-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    background: rgba(196,85,16,.18);
+    border: 1px solid rgba(196,85,16,.32);
+    color: #ffffff;
+    font-weight: 600;
+  }
+  .user-meta {
+    min-width: 0;
+    display: grid;
+    line-height: 1.2;
+  }
+  .user-meta strong {
+    font-weight: 600;
+    color: #ffffff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .user-meta span {
+    color: #a8b3c2;
+    font-size: 12px;
+  }
+  .rail-theme-toggle {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    margin-top: 8px;
+    padding: 3px;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 999px;
+    background: rgba(255,255,255,.06);
+  }
+  .rail-theme-toggle button {
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: #cbd5e1;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 5px 6px;
+  }
+  .rail-theme-toggle button.active {
+    background: var(--brand-orange, #c45510);
+    color: #ffffff;
+  }
+  .workspace-shell.collapsed .user-footer {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding-inline: 0;
   }
   .workspace-topbar {
     min-height: 76px;

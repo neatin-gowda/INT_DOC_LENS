@@ -1,6 +1,8 @@
-# Spec-Diff
+# Altrai
 
-Reusable platform for comparing two versions of a supplier specification PDF and answering "what changed?"
+Altrai is a unified enterprise AI workspace for governed chat, document intelligence, reusable skills, tools, plugins, and role-scoped business workflows.
+
+The current implementation focuses on the Document Intelligence capability: comparing two versions of a supplier specification PDF and answering "what changed?"
 
 Built with the constraint that **the document template is unknown in advance** — the same pipeline
 must work on Ford Bronco order guides, GM equipment catalogs, and any future supplier without code changes.

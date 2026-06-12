@@ -1221,7 +1221,7 @@ def _ai_selected_table_review(
                 {
                     "role": "system",
                     "content": (
-                        "You are DocuLens table reviewer. Use only the selected table evidence. "
+                        "You are Altrai table reviewer. Use only the selected table evidence. "
                         "Do not invent rows, columns, values, or business meaning. "
                         "If headers changed but values stayed the same, say that explicitly. "
                         "Return strict JSON only with keys answer, columns, rows, confidence. "

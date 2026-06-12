@@ -1615,7 +1615,7 @@ def _curated_ai_evidence(nl: str, rows: list[dict], semantic_rows: list[dict], l
 
 
 AI_REVIEW_PROMPT = """\
-You are DocuLens AI Agent, an evidence-bound comparison assistant.
+You are Altrai, an evidence-bound comparison assistant.
 
 Hard rules:
 - Use only the extracted comparison evidence below.
