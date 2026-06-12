@@ -5,31 +5,31 @@ const navGroups = [
   {
     label: "Workspace",
     items: [
-      { key: "home", label: "Command Center", short: "CC" },
-      { key: "jobs", label: "Job Status", short: "JS" },
+      { key: "home", label: "Command Center", short: "C" },
+      { key: "jobs", label: "Jobs", short: "J" },
     ],
   },
   {
     label: "Document Intelligence",
     items: [
-      { key: "compare", label: "DocuLens Compare", short: "DC" },
-      { key: "extract", label: "DocuLens Extract", short: "DX" },
-      { key: "assistant", label: "Ask Documents", short: "AD" },
+      { key: "compare", label: "DocuLens Compare", short: "D" },
+      { key: "extract", label: "DocuLens Extract", short: "E" },
+      { key: "assistant", label: "Ask Documents", short: "A" },
     ],
   },
   {
     label: "AI Hub",
     items: [
-      { key: "agents", label: "Agent Studio", short: "AS" },
-      { key: "tools", label: "Tool Studio", short: "TS" },
-      { key: "automations", label: "Workflow Runs", short: "WR" },
-      { key: "sources", label: "Knowledge & RAG", short: "KR" },
+      { key: "agents", label: "Agent Studio", short: "S" },
+      { key: "tools", label: "Tool Studio", short: "T" },
+      { key: "automations", label: "Workflow Runs", short: "W" },
+      { key: "sources", label: "Knowledge & RAG", short: "K" },
     ],
   },
   {
     label: "Control Plane",
     items: [
-      { key: "admin", label: "Admin & RBAC", short: "RB" },
+      { key: "admin", label: "Admin & RBAC", short: "R" },
     ],
   },
 ];
@@ -81,7 +81,7 @@ export function WorkspaceShell({
             aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
             title={collapsed ? "Expand navigation" : "Collapse navigation"}
           >
-            {collapsed ? ">" : "<"}
+            {collapsed ? "»" : "«"}
           </button>
         </div>
 
@@ -155,11 +155,11 @@ export function CommandCenter({ onExtract, onCompare, onJobs, onAgents, onTools,
     <div className="command-grid">
       <section className="command-hero">
         <div className="workspace-eyebrow">Command center</div>
-        <h2>Choose a workspace and continue from the same shell.</h2>
-        <div className="command-actions">
-          <button type="button" className="workspace-primary-action" onClick={onCompare}>Start comparison</button>
-          <button type="button" className="workspace-secondary-action" onClick={onExtract}>Extract documents</button>
-          <button type="button" className="workspace-secondary-action" onClick={onJobs}>Open jobs</button>
+        <h2>Start, resume, or ask from one workspace.</h2>
+        <div className="command-tiles">
+          <WorkspaceLaunch title="Compare" detail="Baseline and revised document review." onClick={onCompare} />
+          <WorkspaceLaunch title="Extract" detail="Single document extraction and query." onClick={onExtract} />
+          <WorkspaceLaunch title="Jobs" detail="Resume or clean up completed sessions." onClick={onJobs} />
         </div>
       </section>
 
@@ -184,9 +184,9 @@ export function CommandCenter({ onExtract, onCompare, onJobs, onAgents, onTools,
       </section>
 
       <section className="workspace-lane">
-        <WorkspaceLaunch title="Agent Studio" detail="Supervised agent runs with approval gates and tool policies." onClick={onAgents} />
-        <WorkspaceLaunch title="Tool Studio" detail="Approved tools, MCP connectors, schemas, and cost controls." onClick={onTools} />
-        <WorkspaceLaunch title="Workflow Runs" detail="Document pipelines, schedules, monitors, and run history." onClick={onAutomations} />
+        <WorkspaceLaunch title="Agent Studio" detail="Future governed agent runs." onClick={onAgents} />
+        <WorkspaceLaunch title="Tool Studio" detail="Future tools and MCP registry." onClick={onTools} />
+        <WorkspaceLaunch title="Workflow Runs" detail="Future automations and monitors." onClick={onAutomations} />
       </section>
     </div>
   );
@@ -224,7 +224,7 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState(null);
+  const [messages, setMessages] = useState([]);
   const [asking, setAsking] = useState(false);
 
   useEffect(() => {
@@ -232,7 +232,7 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
     setRunId(initialRunId);
     setMeta(initialMeta || null);
     setBusy(initialMeta ? initialMeta.status !== "complete" && initialMeta.status !== "failed" : true);
-    setAnswer(null);
+    setMessages([]);
     setError("");
   }, [initialRunId, initialMeta]);
 
@@ -282,7 +282,7 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
     setFileName(selected.length > 1 ? `${selected.length} files selected` : selected[0].name);
     setRunId("");
     setMeta({ status: "uploading", progress: 3, status_message: "Uploading document" });
-    setAnswer(null);
+    setMessages([]);
     setError("");
     setBusy(true);
 
@@ -299,20 +299,24 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
   };
 
   const ask = async () => {
-    if (!runId || meta?.status !== "complete" || !question.trim()) return;
+    const asked = question.trim();
+    if (!runId || meta?.status !== "complete" || !asked) return;
     setAsking(true);
     setError("");
+    setQuestion("");
+    setMessages((prev) => [...prev, { role: "user", text: asked }]);
 
     try {
       const resp = await fetch(`${API}/extract-runs/${runId}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, mode: "fast" }),
+        body: JSON.stringify({ question: asked, mode: "fast" }),
       });
       if (!resp.ok) throw new Error(await responseError(resp));
-      setAnswer(await resp.json());
+      const data = await resp.json();
+      setMessages((prev) => [...prev, { role: "assistant", text: data.answer || "I found matching evidence.", rows: data.rows || [] }]);
     } catch (err) {
-      setError(errorMessage(err));
+      setMessages((prev) => [...prev, { role: "assistant", text: errorMessage(err), rows: [] }]);
     } finally {
       setAsking(false);
     }
@@ -349,7 +353,7 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
           <span className={meta ? "active" : ""}>Upload</span>
           <span className={busy || ready ? "active" : ""}>Extract</span>
           <span className={ready ? "active" : ""}>Index</span>
-          <span className={answer ? "active" : ""}>Answer</span>
+          <span className={messages.some((message) => message.role === "assistant") ? "active" : ""}>Answer</span>
         </div>
         {meta && (
           <div className="ask-status">
@@ -364,20 +368,35 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
           <span>Document chat</span>
           <strong>{ready ? "Ready" : busy ? "Processing" : "Waiting"}</strong>
         </div>
-        <div className="assistant-message user">Ask about clauses, tables, fields, pages, dates, values, or extracted content.</div>
-        <div className="assistant-message system">
-          {answer?.answer || "Upload a document to enable natural-language search over extracted text and tables."}
-        </div>
-        {Array.isArray(answer?.rows) && answer.rows.length > 0 && (
-          <div className="ask-results">
-            {answer.rows.slice(0, 5).map((row, index) => (
-              <div key={index}>
-                <strong>Page {row.Page || "-"}</strong>
-                <span>{row.Text}</span>
+        <div className="document-chat-thread">
+          {messages.length === 0 && (
+            <div className="chat-empty compact">
+              <p>{ready ? "Ask about clauses, tables, fields, pages, dates, values, or extracted content." : "Upload or select a completed extraction job to begin."}</p>
+            </div>
+          )}
+          {messages.map((message, index) => (
+            <div key={`${message.role}-${index}`} className={`chat-row ${message.role}`}>
+              <div className={`chat-bubble ${message.role}`} dir="auto">
+                <div>{message.text}</div>
+                {message.role === "assistant" && Array.isArray(message.rows) && message.rows.length > 0 && (
+                  <div className="ask-results compact">
+                    {message.rows.slice(0, 4).map((row, rowIndex) => (
+                      <div key={rowIndex}>
+                        <strong>Page {row.Page || "-"}</strong>
+                        <span dir="auto">{row.Text}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
-        )}
+            </div>
+          ))}
+          {asking && (
+            <div className="chat-row assistant">
+              <div className="chat-bubble assistant thinking">Searching document evidence...</div>
+            </div>
+          )}
+        </div>
         <div className="model-strip">
           <span>Runtime</span>
           <strong>{ready ? "Deterministic document query" : "Extraction required"}</strong>

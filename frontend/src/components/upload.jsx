@@ -15,17 +15,15 @@ export function UploadPanel({ onUpload, busy, onBack }) {
       </div>
 
       <div className="upload-grid compare">
-        <FileInput label="Baseline document" helper="Approved or reference file" name="base" disabled={busy} />
-        <FileInput label="Revised document" helper="Latest or proposed file" name="target" disabled={busy} />
+        <FileInput label="Baseline" helper="Approved or reference file" name="base" disabled={busy} />
+        <FileInput label="Revised" helper="Latest or proposed file" name="target" disabled={busy} />
 
         <div className="workflow-action-rail">
           <div className="process-status-card">Semantic review</div>
           <button disabled={busy} className="primary-action full">
             {busy ? "Processing" : "Compare documents"}
           </button>
-          <div className="workflow-note">
-            Side-by-side preview, evidence query, tables, and report output.
-          </div>
+          <div className="workflow-note">Preview, evidence query, tables, and report.</div>
         </div>
       </div>
     </form>
