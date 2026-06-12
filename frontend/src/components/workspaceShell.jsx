@@ -36,9 +36,9 @@ const navGroups = [
 
 const workspaceLabels = {
   home: "Command Center",
-  jobs: "Job Status",
-  compare: "Document Comparison",
-  extract: "Document Extraction",
+  jobs: "Jobs",
+  compare: "DocuLens Compare",
+  extract: "DocuLens Extract",
   assistant: "Ask Documents",
   agents: "Agent Studio",
   tools: "Tool Studio",
@@ -55,7 +55,15 @@ export function WorkspaceShell({
   children,
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === "undefined") return "system";
+    return window.localStorage.getItem("astracore_theme") || "system";
+  });
+
+  const setThemeMode = (mode) => {
+    setTheme(mode);
+    if (typeof window !== "undefined") window.localStorage.setItem("astracore_theme", mode);
+  };
 
   return (
     <div className={`workspace-shell theme-${theme}${collapsed ? " collapsed" : ""}`}>
@@ -103,19 +111,23 @@ export function WorkspaceShell({
       <section className="workspace-main">
         <header className="workspace-topbar">
           <div>
-            <div className="workspace-eyebrow">Secure AI operating surface</div>
+            <div className="workspace-eyebrow">Secure workspace</div>
             <h1>{workspaceLabels[workspace] || "Workspace"}</h1>
           </div>
           <div className="workspace-actions">
             <div className="theme-switch" aria-label="Theme selector">
-              {["dark", "light", "system"].map((mode) => (
+              {[
+                ["system", "Auto"],
+                ["light", "Light"],
+                ["dark", "Dark"],
+              ].map(([mode, label]) => (
                 <button
                   key={mode}
                   type="button"
                   className={theme === mode ? "active" : ""}
-                  onClick={() => setTheme(mode)}
+                  onClick={() => setThemeMode(mode)}
                 >
-                  {mode}
+                  {label}
                 </button>
               ))}
             </div>
@@ -143,7 +155,7 @@ export function CommandCenter({ onExtract, onCompare, onJobs, onAgents, onTools,
     <div className="command-grid">
       <section className="command-hero">
         <div className="workspace-eyebrow">Command center</div>
-        <h2>One governed workspace for document intelligence, approved tools, and knowledge workflows.</h2>
+        <h2>Choose a workspace and continue from the same shell.</h2>
         <div className="command-actions">
           <button type="button" className="workspace-primary-action" onClick={onCompare}>Start comparison</button>
           <button type="button" className="workspace-secondary-action" onClick={onExtract}>Extract documents</button>
@@ -154,17 +166,19 @@ export function CommandCenter({ onExtract, onCompare, onJobs, onAgents, onTools,
       <section className="assistant-console">
         <div className="assistant-console-header">
           <span>Ask Documents</span>
-          <strong>Model ready</strong>
+          <strong>Available</strong>
         </div>
-        <div className="assistant-dropzone">Drop documents here for instant chat</div>
-        <div className="assistant-message system">Chat will stream answers with citations from the selected job, upload, or approved knowledge source.</div>
+        <button type="button" className="assistant-dropzone" onClick={() => onExtract()}>
+          Upload a document
+        </button>
+        <div className="assistant-message system">Ask over an extracted document or a completed comparison session.</div>
         <div className="model-strip">
-          <span>Model</span>
-          <strong>Bring your own LLM</strong>
-          <small>Azure OpenAI / OpenAI / local gateway</small>
+          <span>Runtime</span>
+          <strong>Backend evidence query</strong>
+          <small>Model routing can be added from Admin later.</small>
         </div>
         <div className="assistant-input-shell">
-          <span>Ask a question after upload or source selection...</span>
+          <span>Select a completed job or upload a file.</span>
           <button type="button" onClick={onTools}>Tools</button>
         </div>
       </section>
@@ -202,16 +216,25 @@ export function WorkspacePlaceholder({ title, detail, items = [] }) {
   );
 }
 
-export function AskDocumentsWorkspace() {
+export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null }) {
   const inputRef = useRef(null);
   const [fileName, setFileName] = useState("");
-  const [runId, setRunId] = useState("");
-  const [meta, setMeta] = useState(null);
+  const [runId, setRunId] = useState(initialRunId || "");
+  const [meta, setMeta] = useState(initialMeta || null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState(null);
   const [asking, setAsking] = useState(false);
+
+  useEffect(() => {
+    if (!initialRunId) return;
+    setRunId(initialRunId);
+    setMeta(initialMeta || null);
+    setBusy(initialMeta ? initialMeta.status !== "complete" && initialMeta.status !== "failed" : true);
+    setAnswer(null);
+    setError("");
+  }, [initialRunId, initialMeta]);
 
   useEffect(() => {
     if (!runId || !busy) return undefined;
@@ -301,7 +324,7 @@ export function AskDocumentsWorkspace() {
     <section className="ask-documents-grid">
       <div className="ask-documents-panel">
         <div className="workspace-eyebrow">Document chat</div>
-        <h2>Upload, select a source, then chat with citations.</h2>
+        <h2>{runId ? "Ask the selected document" : "Upload and ask"}</h2>
         <input
           ref={inputRef}
           type="file"
@@ -320,7 +343,7 @@ export function AskDocumentsWorkspace() {
             upload(event.dataTransfer.files);
           }}
         >
-          {fileName || "Drop PDF, Word, Excel, image, CSV, or TSV files"}
+          {fileName || (runId ? `Selected job #${String(runId).slice(0, 6)}` : "Drop PDF, Word, Excel, image, CSV, or TSV files")}
         </button>
         <div className="processing-steps">
           <span className={meta ? "active" : ""}>Upload</span>

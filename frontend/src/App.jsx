@@ -2,8 +2,6 @@ import React, { useEffect, useState } from "react";
 import { API } from "./config.js";
 import {
   css,
-  panelStyle,
-  shellStyle,
 } from "./styles.js";
 
 // Import modular components
@@ -22,7 +20,7 @@ import { UploadPanel, ExtractUploadPanel } from "./components/upload.jsx";
 import { SideBySide } from "./components/viewer.jsx";
 import { TablesWorkspace } from "./components/tables.jsx";
 import { QueryPanel } from "./components/chat.jsx";
-import { ReviewReport, AccuracyImprovementTab } from "./components/feedback.jsx";
+import { ReviewReport } from "./components/feedback.jsx";
 import { ExtractionWorkspace } from "./components/extraction.jsx";
 import { AskDocumentsWorkspace, CommandCenter, WorkspacePlaceholder, WorkspaceShell } from "./components/workspaceShell.jsx";
 
@@ -241,7 +239,7 @@ export default function App() {
       const data = await resp.json();
 
       setRunId(data.run_id);
-      setBusy(false);
+      setBusy(data.status !== "complete" && data.status !== "failed");
       setMeta({
         run_id: data.run_id,
         status: data.status,
@@ -252,7 +250,7 @@ export default function App() {
         n_pages_base: 0,
         n_pages_target: 0,
       });
-      setWorkspace("jobs");
+      setWorkspace("compare");
     } catch (err) {
       setBusy(false);
       setError(friendlyFetchError(err));
@@ -288,7 +286,7 @@ export default function App() {
 
       const data = await resp.json();
       setExtractRunId(data.run_id);
-      setExtractBusy(false);
+      setExtractBusy(data.status !== "complete" && data.status !== "failed");
       setExtractMeta({
         run_id: data.run_id,
         status: data.status,
@@ -296,7 +294,7 @@ export default function App() {
         progress: data.progress || 5,
         summary: {},
       });
-      setWorkspace("jobs");
+      setWorkspace("extract");
     } catch (err) {
       setExtractBusy(false);
       setExtractError(friendlyFetchError(err));
@@ -310,6 +308,9 @@ export default function App() {
         const resp = await fetch(`${API}/extract-runs/${job.run_id}`);
         if (!resp.ok) throw new Error(await readResponseError(resp));
         const data = await resp.json();
+        setRunId(null);
+        setMeta(null);
+        setBusy(false);
         setExtractRunId(job.run_id);
         setExtractMeta(data);
         setExtractBusy(data.status !== "complete" && data.status !== "failed");
@@ -321,12 +322,47 @@ export default function App() {
       const resp = await fetch(`${API}/runs/${job.run_id}`);
       if (!resp.ok) throw new Error(await readResponseError(resp));
       const data = await resp.json();
+      setExtractRunId(null);
+      setExtractMeta(null);
+      setExtractBusy(false);
       setRunId(job.run_id);
       setMeta(data);
       setBusy(data.status !== "complete" && data.status !== "failed");
       setTab("viewer");
       setPageNum(1);
       setWorkspace("compare");
+    } catch (err) {
+      setJobError(friendlyFetchError(err));
+    }
+  };
+
+  const askJob = async (job) => {
+    setJobError("");
+    try {
+      if (job.kind === "extraction") {
+        const resp = await fetch(`${API}/extract-runs/${job.run_id}`);
+        if (!resp.ok) throw new Error(await readResponseError(resp));
+        const data = await resp.json();
+        setRunId(null);
+        setMeta(null);
+        setBusy(false);
+        setExtractRunId(job.run_id);
+        setExtractMeta(data);
+        setExtractBusy(data.status !== "complete" && data.status !== "failed");
+        setWorkspace("assistant");
+        return;
+      }
+
+      const resp = await fetch(`${API}/runs/${job.run_id}`);
+      if (!resp.ok) throw new Error(await readResponseError(resp));
+      const data = await resp.json();
+      setExtractRunId(null);
+      setExtractMeta(null);
+      setExtractBusy(false);
+      setRunId(job.run_id);
+      setMeta(data);
+      setBusy(data.status !== "complete" && data.status !== "failed");
+      setWorkspace("assistant");
     } catch (err) {
       setJobError(friendlyFetchError(err));
     }
@@ -340,7 +376,7 @@ export default function App() {
   const isExtractComplete = extractMeta?.status === "complete";
 
   return (
-    <div style={shellStyle}>
+    <div>
       <style>{css}</style>
       <WorkspaceShell
         workspace={workspace}
@@ -360,11 +396,11 @@ export default function App() {
         )}
 
         {workspace === "jobs" && (
-          <JobsDashboard onOpenJob={openJob} error={jobError} />
+          <JobsDashboard onOpenJob={openJob} onAskJob={askJob} error={jobError} />
         )}
 
         {workspace === "compare" && !isComplete && (
-          <section style={{ ...panelStyle, padding: 22, marginBottom: 16 }}>
+          <section className="workflow-panel">
             <UploadPanel onUpload={onUpload} busy={busy} onBack={() => goWorkspace("home")} />
             {busy && meta && (
               <ProcessingState
@@ -378,7 +414,7 @@ export default function App() {
         )}
 
         {workspace === "extract" && !isExtractComplete && (
-          <section style={{ ...panelStyle, padding: 22, marginBottom: 16 }}>
+          <section className="workflow-panel">
             <ExtractUploadPanel onUpload={onExtractUpload} busy={extractBusy} onBack={() => goWorkspace("home")} />
             {extractBusy && extractMeta && (
               <ProcessingState
@@ -392,18 +428,24 @@ export default function App() {
         )}
 
         {workspace === "compare" && isComplete && runId && meta && (
-          <>
+          <section className="comparison-workspace">
+            <div className="comparison-head">
+              <div>
+                <div className="workflow-kicker">Active comparison</div>
+                <h2 dir="auto">{meta.base_label || "Baseline"} → {meta.target_label || "Revised"}</h2>
+              </div>
+              <div className="comparison-id">#{String(runId).slice(0, 6)}</div>
+            </div>
             <StatsBar meta={meta} />
             <Tabs tab={tab} setTab={setTab} />
 
-            <main style={{ ...panelStyle, padding: 12 }}>
+            <main className="workspace-surface">
               {tab === "viewer" && <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />}
-              {tab === "report" && <ReviewReport runId={runId} />}
               {tab === "query" && <QueryPanel runId={runId} />}
-              {tab === "accuracy" && <AccuracyImprovementTab runId={runId} meta={meta} />}
               {tab === "tables" && <TablesWorkspace runId={runId} />}
+              {tab === "report" && <ReviewReport runId={runId} />}
             </main>
-          </>
+          </section>
         )}
 
         {workspace === "extract" && isExtractComplete && extractRunId && extractMeta && (
@@ -417,11 +459,11 @@ export default function App() {
 
         {workspace === "assistant" && (
           runId && isComplete ? (
-            <main style={{ ...panelStyle, padding: 12 }}>
+            <main className="workspace-surface">
               <QueryPanel runId={runId} />
             </main>
           ) : (
-            <AskDocumentsWorkspace />
+            <AskDocumentsWorkspace initialRunId={extractRunId || ""} initialMeta={extractMeta} />
           )
         )}
 

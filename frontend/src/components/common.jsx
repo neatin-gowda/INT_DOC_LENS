@@ -816,7 +816,7 @@ export function StatsBar({ meta }) {
   const s = meta.stats || {};
 
   return (
-    <section style={{ ...panelStyle, padding: 12, display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+    <section className="stats-strip">
       <StatChip label="Added" value={s.ADDED || 0} tone="added" />
       <StatChip label="Deleted" value={s.DELETED || 0} tone="deleted" />
       <StatChip label="Modified" value={s.MODIFIED || 0} tone="modified" />
@@ -835,19 +835,10 @@ function safePercent(value) {
 }
 
 export function StatChip({ label, value, tone }) {
-  const toneStyle =
-    tone === "added"
-      ? { borderColor: "#c8e6d2", background: "#f1faf4", color: COLORS.ADDED.text }
-      : tone === "deleted"
-        ? { borderColor: "#f2caca", background: "#fff6f6", color: COLORS.DELETED.text }
-        : tone === "modified"
-          ? { borderColor: "#eadb8d", background: "#fffaf0", color: COLORS.MODIFIED.text }
-          : { borderColor: "#d8d0c3", background: "#fbfaf6", color: "#475467" };
-
   return (
-    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, border: "1px solid", borderRadius: 999, padding: "5px 10px", fontSize: 13, ...toneStyle }}>
+    <span className={`stat-chip ${tone || "neutral"}`}>
       <span>{label}</span>
-      <strong style={{ fontWeight: 650 }}>{value}</strong>
+      <strong>{value}</strong>
     </span>
   );
 }
@@ -893,31 +884,22 @@ export function AiUsageCard({ usage }) {
 
 export function Tabs({ tab, setTab }) {
   const items = [
-    ["viewer", "Visual review"],
-    ["report", "Review report"],
-    ["query", "Ask agent"],
-    ["accuracy", "Improve accuracy"],
-    ["tables", "Table workspace"],
+    ["viewer", "Review"],
+    ["query", "Ask"],
+    ["tables", "Tables"],
+    ["report", "Report"],
   ];
 
   return (
-    <nav style={{ display: "flex", gap: 4, borderBottom: "1px solid #d8d0c3", marginBottom: 12, overflowX: "auto" }}>
+    <nav className="workspace-tabs" aria-label="Comparison workspace tabs">
       {items.map(([key, label]) => {
         const active = tab === key;
         return (
           <button
             key={key}
             onClick={() => setTab(key)}
-            style={{
-              padding: "10px 14px",
-              background: active ? "#1f2937" : "transparent",
-              color: active ? "white" : "#344054",
-              border: active ? "1px solid #1f2937" : "1px solid transparent",
-              borderRadius: "8px 8px 0 0",
-              cursor: "pointer",
-              fontWeight: 600,
-              whiteSpace: "nowrap",
-            }}
+            className={active ? "active" : ""}
+            type="button"
           >
             {label}
           </button>
