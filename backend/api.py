@@ -24,7 +24,7 @@ from .security import (
     reset_current_principal,
     set_current_principal,
 )
-from .routers import comparison, extraction, queries, feedback, tables, reports
+from .routers import comparison, extraction, queries, feedback, tables, reports, tools
 
 app = FastAPI(title="Spec-Diff", version="0.1.0")
 
@@ -69,6 +69,7 @@ app.include_router(queries.router)
 app.include_router(feedback.router)
 app.include_router(tables.router)
 app.include_router(reports.router)
+app.include_router(tools.router)
 
 @app.get("/")
 def root():
@@ -87,6 +88,7 @@ def root():
             "GET /jobs",
             "GET /jobs/{id}",
             "GET /db-health",
+            "GET /tools",
             "GET /ai-health",
             "GET /runs/{id}",
             "GET /runs/{id}/diff",

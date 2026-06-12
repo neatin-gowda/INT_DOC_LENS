@@ -2,14 +2,12 @@ import React, { useEffect, useState } from "react";
 import { API } from "./config.js";
 import {
   css,
-  pageStyle,
   panelStyle,
   shellStyle,
 } from "./styles.js";
 
 // Import modular components
 import {
-  Header,
   StatsBar,
   Tabs,
   ProcessingState,
@@ -19,13 +17,14 @@ import {
   normalizeErrorMessage,
 } from "./components/common.jsx";
 
-import { LandingPage, JobsDashboard } from "./components/dashboard.jsx";
+import { JobsDashboard } from "./components/dashboard.jsx";
 import { UploadPanel, ExtractUploadPanel } from "./components/upload.jsx";
 import { SideBySide } from "./components/viewer.jsx";
 import { TablesWorkspace } from "./components/tables.jsx";
 import { QueryPanel } from "./components/chat.jsx";
 import { ReviewReport, AccuracyImprovementTab } from "./components/feedback.jsx";
 import { ExtractionWorkspace } from "./components/extraction.jsx";
+import { CommandCenter, WorkspacePlaceholder, WorkspaceShell } from "./components/workspaceShell.jsx";
 
 const getSession = (key, fallback) => {
   if (typeof window === "undefined") return fallback;
@@ -343,20 +342,20 @@ export default function App() {
   return (
     <div style={shellStyle}>
       <style>{css}</style>
-      <div style={pageStyle}>
-        <Header
-          runId={workspace === "compare" && isComplete ? runId : null}
-          workspace={workspace}
-          onStartOver={() => goWorkspace("home")}
-          onJobs={() => goWorkspace("jobs")}
-          onDownloadReport={downloadReport}
-        />
-
+      <WorkspaceShell
+        workspace={workspace}
+        runId={workspace === "compare" && isComplete ? runId : null}
+        onNavigate={goWorkspace}
+        onDownloadReport={downloadReport}
+      >
         {workspace === "home" && (
-          <LandingPage
+          <CommandCenter
             onExtract={() => goWorkspace("extract")}
             onCompare={() => goWorkspace("compare")}
             onJobs={() => goWorkspace("jobs")}
+            onAgents={() => goWorkspace("agents")}
+            onTools={() => goWorkspace("tools")}
+            onAutomations={() => goWorkspace("automations")}
           />
         )}
 
@@ -415,7 +414,61 @@ export default function App() {
             setTab={setExtractTab}
           />
         )}
-      </div>
+
+        {workspace === "assistant" && (
+          runId && isComplete ? (
+            <main style={{ ...panelStyle, padding: 12 }}>
+              <QueryPanel runId={runId} />
+            </main>
+          ) : (
+            <WorkspacePlaceholder
+              title="Ask Documents"
+              detail="The assistant will route questions to the active job, approved document stores, department collections, and future connector-backed RAG sources."
+              items={["Current job scope", "Citations", "Source permissions", "AI usage tracking"]}
+            />
+          )
+        )}
+
+        {workspace === "agents" && (
+          <WorkspacePlaceholder
+            title="Autonomous Agents"
+            detail="Agent workflows will run supervised task chains with approval gates, audit history, and tool-level permissions."
+            items={["Review agents", "Approval gates", "Run history", "Department policies"]}
+          />
+        )}
+
+        {workspace === "tools" && (
+          <WorkspacePlaceholder
+            title="Tools & MCPs"
+            detail="Reusable document, search, reporting, and generation tools will be assigned by admins to users, departments, and security groups."
+            items={["GET /tools", "Tool RBAC", "MCP adapters", "Cost controls"]}
+          />
+        )}
+
+        {workspace === "automations" && (
+          <WorkspacePlaceholder
+            title="Automations"
+            detail="Scheduled processing, monitors, recurring comparisons, and department workflows will live here as governed automations."
+            items={["Schedules", "Watch folders", "Notifications", "Human approvals"]}
+          />
+        )}
+
+        {workspace === "sources" && (
+          <WorkspacePlaceholder
+            title="Sources & RAG"
+            detail="Approved knowledge sources, document collections, vector stores, and connector-backed retrieval scopes will be managed here."
+            items={["Department stores", "Connectors", "Citations", "Retention policies"]}
+          />
+        )}
+
+        {workspace === "admin" && (
+          <WorkspacePlaceholder
+            title="Admin & RBAC"
+            detail="Admins will control users, groups, departments, tool access, source access, model policies, and audit settings from this control plane."
+            items={["Users", "Groups", "Tool access", "Audit logs", "Model policy"]}
+          />
+        )}
+      </WorkspaceShell>
     </div>
   );
 }

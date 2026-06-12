@@ -16,7 +16,7 @@ backend/                 Python API and document-processing pipeline
 frontend/                Vite + React Static Web App
 infra/                   Azure Bicep for Container Apps, Static Web Apps, Postgres, Blob, ACR
 sql/                     Postgres schema for jobs, documents, blocks, tables, diffs, feedback
-docs/                    Architecture, deployment, reusability, and repo-structure notes
+docs/                    Architecture, AI workspace roadmap, deployment, reusability, and repo-structure notes
 samples/                 Example pipeline outputs for regression/reference
 .github/workflows/       CI/CD workflow definitions
 ```
@@ -50,6 +50,8 @@ backend/
   services/
     table_tools.py       Table discovery, viewing, row matching, and selected-column comparison helpers.
 
+  tool_registry.py       Reusable tool metadata for UI, automation, and future MCP-style adapters.
+
   routers/
     comparison.py        Compare upload, run metadata, diff, pages, overlays, and native views.
     extraction.py        Single-document extraction runs, blocks, tables, images, and JSON output.
@@ -57,6 +59,7 @@ backend/
     queries.py           Natural-language question endpoint.
     reports.py           PDF report and AI summary PDF endpoints.
     tables.py            Table list, table view, selected-table comparison, and table report.
+    tools.py             Tool discovery endpoint.
 
   jobs/
     queue.py             Database-backed worker queue for ACA scale-out safety.

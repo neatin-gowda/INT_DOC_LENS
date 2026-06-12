@@ -1,8 +1,8 @@
 export const API = import.meta.env.VITE_API_BASE || "/api";
 
 export const BRAND = {
-  name: "DocuLens AI Agent",
-  subtitle: "Document comparison with semantic review, visual evidence, citations, and reports.",
+  name: "DocuLens AI Workspace",
+  subtitle: "Governed document intelligence, tools, agents, automations, and retrieval in one workspace.",
 };
 
 export const FILE_ACCEPT = ".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv";

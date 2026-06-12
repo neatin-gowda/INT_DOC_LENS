@@ -42,6 +42,7 @@ backend/
   extraction/table_stitcher.py    Cross-page table stitching
   comparison/diff_engine.py         Anchor-aware diff engine
   services/table_tools.py           Table previews and selected-column comparison
+  tool_registry.py      Reusable tool metadata
   jobs/queue.py        Database-backed worker queue for scale-out containers
   summarizer.py        LLM or deterministic summary table
   query.py             NL query interpreter
@@ -57,6 +58,7 @@ infra/
   main.bicep           Azure infrastructure
 docs/
   ARCHITECTURE.md      Full design doc — read this
+  AI_WORKSPACE_ROADMAP.md Unified AI workspace direction
   AZURE_GITHUB_DEPLOYMENT.md  GitHub Actions deploy
   REPOSITORY_STRUCTURE.md     Active repo map
 samples/

@@ -7,6 +7,318 @@ export const css = `
   button:not(:disabled):hover { transform: translateY(-1px); }
   button:disabled { transform: none; }
   code { background: #f6f1e8; border: 1px solid #e2d8c8; border-radius: 5px; padding: 1px 5px; }
+  .workspace-shell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 292px minmax(0, 1fr);
+    color: #e5edf7;
+    background:
+      radial-gradient(circle at 18% 8%, rgba(88, 166, 255, .18), transparent 26%),
+      radial-gradient(circle at 80% 16%, rgba(48, 211, 139, .14), transparent 24%),
+      linear-gradient(135deg, #0b1220 0%, #111827 43%, #1d2735 100%);
+  }
+  .workspace-sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    padding: 18px 14px;
+    border-inline-end: 1px solid rgba(255,255,255,.12);
+    background: rgba(7, 13, 24, .72);
+    backdrop-filter: blur(22px);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .workspace-brand {
+    display: flex;
+    gap: 11px;
+    align-items: center;
+    padding: 8px 8px 14px;
+  }
+  .workspace-logo {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(145deg, #f8fafc, #9cc7ff 48%, #56d89c);
+    color: #0f172a;
+    font-weight: 800;
+    box-shadow: 0 18px 48px rgba(58, 130, 255, .24);
+  }
+  .workspace-brand-name {
+    font-weight: 750;
+    color: white;
+    line-height: 1.1;
+  }
+  .workspace-brand-subtitle {
+    color: #93a4b8;
+    font-size: 12px;
+    margin-top: 3px;
+  }
+  .workspace-nav {
+    overflow: auto;
+    padding-inline: 2px;
+  }
+  .workspace-nav-group {
+    margin-bottom: 16px;
+  }
+  .workspace-nav-label {
+    color: #7d8da3;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 0 10px 7px;
+  }
+  .workspace-nav-item {
+    width: 100%;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #c7d2df;
+    border-radius: 10px;
+    padding: 9px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    text-align: start;
+    font-weight: 650;
+  }
+  .workspace-nav-item.active {
+    border-color: rgba(255,255,255,.20);
+    background: rgba(255,255,255,.10);
+    color: white;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+  }
+  .workspace-nav-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    color: #0f172a;
+    background: #dbeafe;
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .workspace-tenant-card {
+    margin-top: auto;
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 14px;
+    padding: 12px;
+    background: rgba(255,255,255,.08);
+    color: #c7d2df;
+  }
+  .workspace-tenant-label {
+    color: #93a4b8;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-weight: 750;
+  }
+  .workspace-tenant-name {
+    color: white;
+    font-weight: 750;
+    margin-top: 6px;
+  }
+  .workspace-tenant-copy {
+    color: #aebacc;
+    font-size: 12px;
+    line-height: 1.4;
+    margin-top: 5px;
+  }
+  .workspace-main {
+    min-width: 0;
+    padding: 18px;
+  }
+  .workspace-topbar {
+    min-height: 76px;
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.10);
+    backdrop-filter: blur(20px);
+    border-radius: 18px;
+    padding: 14px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+    box-shadow: 0 24px 80px rgba(0,0,0,.18);
+  }
+  .workspace-eyebrow {
+    color: #91e6bb;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .workspace-topbar h1,
+  .command-hero h2,
+  .workspace-placeholder h2 {
+    margin: 4px 0 0;
+    color: white;
+    font-size: 24px;
+    letter-spacing: 0;
+    line-height: 1.15;
+  }
+  .workspace-actions,
+  .command-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .workspace-primary-action,
+  .workspace-secondary-action {
+    border-radius: 10px;
+    padding: 9px 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .workspace-primary-action {
+    border: 1px solid rgba(255,255,255,.18);
+    background: linear-gradient(135deg, #f8fafc, #9cc7ff 52%, #68e2aa);
+    color: #0f172a;
+  }
+  .workspace-secondary-action {
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.10);
+    color: #e5edf7;
+  }
+  .workspace-content {
+    min-width: 0;
+    color: #202936;
+  }
+  .command-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(360px, .85fr);
+    gap: 16px;
+  }
+  .command-hero,
+  .assistant-console,
+  .workspace-placeholder,
+  .workspace-lane {
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.12);
+    backdrop-filter: blur(22px);
+    border-radius: 18px;
+    box-shadow: 0 24px 80px rgba(0,0,0,.18);
+  }
+  .command-hero {
+    min-height: 280px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  .command-hero h2 {
+    max-width: 760px;
+    font-size: 34px;
+    margin-bottom: 22px;
+  }
+  .assistant-console {
+    padding: 16px;
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .assistant-console-header {
+    display: flex;
+    justify-content: space-between;
+    color: #e5edf7;
+    font-weight: 750;
+  }
+  .assistant-console-header strong {
+    color: #91e6bb;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .assistant-message {
+    border-radius: 14px;
+    padding: 11px 12px;
+    line-height: 1.45;
+    font-size: 13px;
+  }
+  .assistant-message.user {
+    background: rgba(255,255,255,.14);
+    color: white;
+  }
+  .assistant-message.system {
+    background: rgba(145,230,187,.14);
+    color: #d9fbe8;
+  }
+  .assistant-input-shell {
+    margin-top: auto;
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.12);
+    border-radius: 13px;
+    padding: 10px;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: #aebacc;
+    font-size: 13px;
+  }
+  .assistant-input-shell button {
+    border: none;
+    background: #e5edf7;
+    color: #0f172a;
+    border-radius: 9px;
+    padding: 6px 10px;
+    font-weight: 750;
+    cursor: pointer;
+  }
+  .workspace-lane {
+    grid-column: 1 / -1;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .workspace-launch {
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.10);
+    border-radius: 14px;
+    padding: 15px;
+    color: white;
+    cursor: pointer;
+    text-align: start;
+  }
+  .workspace-launch span {
+    display: block;
+    font-weight: 750;
+    margin-bottom: 6px;
+  }
+  .workspace-launch small {
+    color: #b7c4d4;
+    line-height: 1.4;
+  }
+  .workspace-placeholder {
+    padding: 24px;
+    color: #c7d2df;
+  }
+  .workspace-placeholder p {
+    max-width: 780px;
+    line-height: 1.55;
+    color: #c7d2df;
+  }
+  .placeholder-list {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+  }
+  .placeholder-list span {
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.10);
+    color: white;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-weight: 650;
+    font-size: 13px;
+  }
   .dl-scrollbar::-webkit-scrollbar { height: 10px; width: 10px; }
   .dl-scrollbar::-webkit-scrollbar-thumb { background: #c9c0b0; border-radius: 999px; }
   .dl-scrollbar::-webkit-scrollbar-track { background: #f2ece2; }
@@ -176,6 +488,31 @@ export const css = `
     }
   }
   @media (max-width: 980px) {
+    .workspace-shell {
+      grid-template-columns: 1fr;
+    }
+    .workspace-sidebar {
+      position: relative;
+      height: auto;
+      border-inline-end: none;
+      border-bottom: 1px solid rgba(255,255,255,.12);
+    }
+    .workspace-nav {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .workspace-nav-group {
+      margin-bottom: 0;
+    }
+    .workspace-main {
+      padding: 12px;
+    }
+    .workspace-topbar,
+    .command-grid,
+    .workspace-lane {
+      grid-template-columns: 1fr;
+    }
     .upload-grid, .viewer-grid, .two-grid, .report-metrics, .table-picker-grid, .table-config-grid {
       grid-template-columns: 1fr !important;
     }
