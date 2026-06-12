@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { BRAND } from "../config.js";
 
 const navGroups = [
@@ -12,18 +12,18 @@ const navGroups = [
   {
     label: "Document Intelligence",
     items: [
-      { key: "compare", label: "Compare", short: "CP" },
-      { key: "extract", label: "Extract", short: "EX" },
+      { key: "compare", label: "DocuLens Compare", short: "DC" },
+      { key: "extract", label: "DocuLens Extract", short: "DX" },
       { key: "assistant", label: "Ask Documents", short: "AD" },
     ],
   },
   {
-    label: "AI Platform",
+    label: "AI Hub",
     items: [
-      { key: "agents", label: "Autonomous Agents", short: "AA" },
-      { key: "tools", label: "Tools & MCPs", short: "TM" },
-      { key: "automations", label: "Automations", short: "AU" },
-      { key: "sources", label: "Sources & RAG", short: "SR" },
+      { key: "agents", label: "Agent Studio", short: "AS" },
+      { key: "tools", label: "Tool Studio", short: "TS" },
+      { key: "automations", label: "Workflow Runs", short: "WR" },
+      { key: "sources", label: "Knowledge & RAG", short: "KR" },
     ],
   },
   {
@@ -40,10 +40,10 @@ const workspaceLabels = {
   compare: "Document Comparison",
   extract: "Document Extraction",
   assistant: "Ask Documents",
-  agents: "Autonomous Agents",
-  tools: "Tools & MCPs",
-  automations: "Automations",
-  sources: "Sources & RAG",
+  agents: "Agent Studio",
+  tools: "Tool Studio",
+  automations: "Workflow Runs",
+  sources: "Knowledge & RAG",
   admin: "Admin & RBAC",
 };
 
@@ -54,15 +54,26 @@ export function WorkspaceShell({
   onDownloadReport,
   children,
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+
   return (
-    <div className="workspace-shell">
+    <div className={`workspace-shell${collapsed ? " collapsed" : ""}`}>
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
-          <div className="workspace-logo">DL</div>
-          <div>
+          <div className="workspace-logo">AC</div>
+          <div className="workspace-brand-copy">
             <div className="workspace-brand-name">{BRAND.name}</div>
-            <div className="workspace-brand-subtitle">AI operating layer</div>
+            <div className="workspace-brand-subtitle">Enterprise AI hub</div>
           </div>
+          <button
+            type="button"
+            className="workspace-collapse-button"
+            onClick={() => setCollapsed((value) => !value)}
+            aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+            title={collapsed ? "Expand navigation" : "Collapse navigation"}
+          >
+            {collapsed ? ">" : "<"}
+          </button>
         </div>
 
         <nav className="workspace-nav" aria-label="Workspace navigation">
@@ -79,25 +90,19 @@ export function WorkspaceShell({
                     onClick={() => onNavigate(item.key)}
                   >
                     <span className="workspace-nav-mark">{item.short}</span>
-                    <span>{item.label}</span>
+                    <span className="workspace-nav-text">{item.label}</span>
                   </button>
                 );
               })}
             </div>
           ))}
         </nav>
-
-        <div className="workspace-tenant-card">
-          <div className="workspace-tenant-label">Tenant</div>
-          <div className="workspace-tenant-name">Organization AI</div>
-          <div className="workspace-tenant-copy">RBAC-ready tools, sources, and automations.</div>
-        </div>
       </aside>
 
       <section className="workspace-main">
         <header className="workspace-topbar">
           <div>
-            <div className="workspace-eyebrow">Unified AI Workspace</div>
+            <div className="workspace-eyebrow">Secure AI operating surface</div>
             <h1>{workspaceLabels[workspace] || "Workspace"}</h1>
           </div>
           <div className="workspace-actions">
@@ -124,32 +129,37 @@ export function CommandCenter({ onExtract, onCompare, onJobs, onAgents, onTools,
   return (
     <div className="command-grid">
       <section className="command-hero">
-        <div className="workspace-eyebrow">AI workbench</div>
-        <h2>One place to process, compare, ask, automate, and govern document work.</h2>
+        <div className="workspace-eyebrow">Command center</div>
+        <h2>One governed workspace for document intelligence, approved tools, and knowledge workflows.</h2>
         <div className="command-actions">
-          <button type="button" className="workspace-primary-action" onClick={onCompare}>Compare documents</button>
-          <button type="button" className="workspace-secondary-action" onClick={onExtract}>Extract content</button>
+          <button type="button" className="workspace-primary-action" onClick={onCompare}>Start comparison</button>
+          <button type="button" className="workspace-secondary-action" onClick={onExtract}>Extract documents</button>
           <button type="button" className="workspace-secondary-action" onClick={onJobs}>Open jobs</button>
         </div>
       </section>
 
       <section className="assistant-console">
         <div className="assistant-console-header">
-          <span>Assistant</span>
-          <strong>Context aware</strong>
+          <span>Ask Documents</span>
+          <strong>Model ready</strong>
         </div>
-        <div className="assistant-message user">Drop files, pick a tool, or ask across approved sources.</div>
-        <div className="assistant-message system">Document tools run deterministically first. AI actions stay explicit and auditable.</div>
+        <div className="assistant-dropzone">Drop documents here for instant chat</div>
+        <div className="assistant-message system">Chat will stream answers with citations from the selected job, upload, or approved knowledge source.</div>
+        <div className="model-strip">
+          <span>Model</span>
+          <strong>Bring your own LLM</strong>
+          <small>Azure OpenAI / OpenAI / local gateway</small>
+        </div>
         <div className="assistant-input-shell">
-          <span>Ask about a job, source, policy, or document...</span>
+          <span>Ask a question after upload or source selection...</span>
           <button type="button" onClick={onTools}>Tools</button>
         </div>
       </section>
 
       <section className="workspace-lane">
-        <WorkspaceLaunch title="Autonomous Agents" detail="Agent runs, approval gates, and supervised task chains." onClick={onAgents} />
-        <WorkspaceLaunch title="Tools & MCPs" detail="Reusable capabilities exposed by policy and department." onClick={onTools} />
-        <WorkspaceLaunch title="Automations" detail="Scheduled jobs, monitors, and repeatable document workflows." onClick={onAutomations} />
+        <WorkspaceLaunch title="Agent Studio" detail="Supervised agent runs with approval gates and tool policies." onClick={onAgents} />
+        <WorkspaceLaunch title="Tool Studio" detail="Approved tools, MCP connectors, schemas, and cost controls." onClick={onTools} />
+        <WorkspaceLaunch title="Workflow Runs" detail="Document pipelines, schedules, monitors, and run history." onClick={onAutomations} />
       </section>
     </div>
   );
@@ -174,6 +184,41 @@ export function WorkspacePlaceholder({ title, detail, items = [] }) {
         {items.map((item) => (
           <span key={item}>{item}</span>
         ))}
+      </div>
+    </section>
+  );
+}
+
+export function AskDocumentsWorkspace() {
+  return (
+    <section className="ask-documents-grid">
+      <div className="ask-documents-panel">
+        <div className="workspace-eyebrow">Document chat</div>
+        <h2>Upload, select a source, then chat with citations.</h2>
+        <div className="assistant-dropzone large">Drop PDF, Word, Excel, image, CSV, or TSV files</div>
+        <div className="processing-steps">
+          <span>Upload</span>
+          <span>Extract</span>
+          <span>Index</span>
+          <span>Stream answer</span>
+        </div>
+      </div>
+      <div className="ask-documents-panel chat">
+        <div className="assistant-console-header">
+          <span>Streaming preview</span>
+          <strong>Reasoning hidden</strong>
+        </div>
+        <div className="assistant-message user">What changed in this policy and where is the evidence?</div>
+        <div className="assistant-message system">Answers will stream here with page citations, tool trace, and source scope.</div>
+        <div className="model-strip">
+          <span>Runtime</span>
+          <strong>Model configurable by admin</strong>
+          <small>Department policy controls model, tools, and retrieval scope.</small>
+        </div>
+        <div className="assistant-input-shell">
+          <span>Ask anything about the active document...</span>
+          <button type="button">Send</button>
+        </div>
       </div>
     </section>
   );

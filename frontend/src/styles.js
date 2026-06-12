@@ -17,6 +17,9 @@ export const css = `
       radial-gradient(circle at 80% 16%, rgba(48, 211, 139, .14), transparent 24%),
       linear-gradient(135deg, #0b1220 0%, #111827 43%, #1d2735 100%);
   }
+  .workspace-shell.collapsed {
+    grid-template-columns: 82px minmax(0, 1fr);
+  }
   .workspace-sidebar {
     position: sticky;
     top: 0;
@@ -29,11 +32,18 @@ export const css = `
     flex-direction: column;
     gap: 18px;
   }
+  .workspace-shell.collapsed .workspace-sidebar {
+    padding-inline: 10px;
+  }
   .workspace-brand {
     display: flex;
     gap: 11px;
     align-items: center;
     padding: 8px 8px 14px;
+  }
+  .workspace-shell.collapsed .workspace-brand {
+    justify-content: center;
+    padding-inline: 0;
   }
   .workspace-logo {
     width: 38px;
@@ -55,6 +65,27 @@ export const css = `
     color: #93a4b8;
     font-size: 12px;
     margin-top: 3px;
+  }
+  .workspace-collapse-button {
+    margin-inline-start: auto;
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 9px;
+    background: rgba(255,255,255,.08);
+    color: #e5edf7;
+    cursor: pointer;
+    font-weight: 800;
+  }
+  .workspace-shell.collapsed .workspace-brand-copy,
+  .workspace-shell.collapsed .workspace-nav-label,
+  .workspace-shell.collapsed .workspace-nav-text {
+    display: none;
+  }
+  .workspace-shell.collapsed .workspace-collapse-button {
+    position: absolute;
+    top: 64px;
+    right: 10px;
   }
   .workspace-nav {
     overflow: auto;
@@ -85,6 +116,10 @@ export const css = `
     text-align: start;
     font-weight: 650;
   }
+  .workspace-shell.collapsed .workspace-nav-item {
+    justify-content: center;
+    padding: 9px 0;
+  }
   .workspace-nav-item.active {
     border-color: rgba(255,255,255,.20);
     background: rgba(255,255,255,.10);
@@ -101,32 +136,6 @@ export const css = `
     background: #dbeafe;
     font-size: 11px;
     font-weight: 800;
-  }
-  .workspace-tenant-card {
-    margin-top: auto;
-    border: 1px solid rgba(255,255,255,.14);
-    border-radius: 14px;
-    padding: 12px;
-    background: rgba(255,255,255,.08);
-    color: #c7d2df;
-  }
-  .workspace-tenant-label {
-    color: #93a4b8;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    font-weight: 750;
-  }
-  .workspace-tenant-name {
-    color: white;
-    font-weight: 750;
-    margin-top: 6px;
-  }
-  .workspace-tenant-copy {
-    color: #aebacc;
-    font-size: 12px;
-    line-height: 1.4;
-    margin-top: 5px;
   }
   .workspace-main {
     min-width: 0;
@@ -188,6 +197,7 @@ export const css = `
   .workspace-content {
     min-width: 0;
     color: #202936;
+    overflow: hidden;
   }
   .command-grid {
     display: grid;
@@ -269,6 +279,90 @@ export const css = `
     padding: 6px 10px;
     font-weight: 750;
     cursor: pointer;
+  }
+  .assistant-dropzone {
+    min-height: 112px;
+    border: 1px dashed rgba(255,255,255,.24);
+    border-radius: 16px;
+    display: grid;
+    place-items: center;
+    color: #e5edf7;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.12), rgba(255,255,255,.06)),
+      radial-gradient(circle at 50% 0%, rgba(145,230,187,.14), transparent 58%);
+    font-weight: 750;
+    text-align: center;
+    padding: 16px;
+  }
+  .assistant-dropzone.large {
+    min-height: 188px;
+    margin-top: 18px;
+  }
+  .model-strip {
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(5,10,20,.24);
+    border-radius: 13px;
+    padding: 10px 11px;
+    color: #aebacc;
+    display: grid;
+    gap: 3px;
+  }
+  .model-strip span {
+    color: #91e6bb;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .model-strip strong {
+    color: white;
+  }
+  .model-strip small {
+    color: #aebacc;
+    line-height: 1.35;
+  }
+  .ask-documents-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, .85fr);
+    gap: 16px;
+  }
+  .ask-documents-panel {
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.12);
+    backdrop-filter: blur(22px);
+    border-radius: 18px;
+    padding: 18px;
+    color: #c7d2df;
+    min-width: 0;
+    box-shadow: 0 24px 80px rgba(0,0,0,.18);
+  }
+  .ask-documents-panel h2 {
+    color: white;
+    margin: 6px 0 0;
+    font-size: 26px;
+    letter-spacing: 0;
+  }
+  .ask-documents-panel.chat {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .processing-steps {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .processing-steps span,
+  .process-status-card {
+    border: 1px solid #d5e2ff;
+    background: #eef4ff;
+    color: #344054;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 750;
+    text-align: center;
   }
   .workspace-lane {
     grid-column: 1 / -1;
@@ -475,6 +569,10 @@ export const css = `
     white-space: nowrap;
   }
   @media (max-width: 1200px) {
+    .command-grid,
+    .ask-documents-grid {
+      grid-template-columns: 1fr;
+    }
     .table-picker-grid, .table-config-grid {
       grid-template-columns: 1fr !important;
     }
@@ -491,6 +589,9 @@ export const css = `
     .workspace-shell {
       grid-template-columns: 1fr;
     }
+    .workspace-shell.collapsed {
+      grid-template-columns: 1fr;
+    }
     .workspace-sidebar {
       position: relative;
       height: auto;
@@ -502,6 +603,18 @@ export const css = `
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
     }
+    .workspace-shell.collapsed .workspace-brand-copy,
+    .workspace-shell.collapsed .workspace-nav-label,
+    .workspace-shell.collapsed .workspace-nav-text {
+      display: block;
+    }
+    .workspace-shell.collapsed .workspace-nav-item {
+      justify-content: flex-start;
+      padding: 9px 10px;
+    }
+    .workspace-shell.collapsed .workspace-collapse-button {
+      position: static;
+    }
     .workspace-nav-group {
       margin-bottom: 0;
     }
@@ -509,9 +622,11 @@ export const css = `
       padding: 12px;
     }
     .workspace-topbar,
-    .command-grid,
     .workspace-lane {
       grid-template-columns: 1fr;
+    }
+    .processing-steps {
+      grid-template-columns: 1fr 1fr;
     }
     .upload-grid, .viewer-grid, .two-grid, .report-metrics, .table-picker-grid, .table-config-grid {
       grid-template-columns: 1fr !important;

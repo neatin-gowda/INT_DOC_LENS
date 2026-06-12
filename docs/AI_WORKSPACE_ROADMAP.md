@@ -151,8 +151,9 @@ Production readiness requires:
 - Preserve current upload and result flows.
 
 Initial foundation: `frontend/src/components/workspaceShell.jsx` now provides a
-central left-navigation shell, command center, and placeholder modules for
-Agents, Tools & MCPs, Automations, Sources & RAG, and Admin & RBAC.
+central collapsible left-navigation shell, command center, Ask Documents upload
+and chat placeholder, and placeholder modules for Agent Studio, Tool Studio,
+Workflow Runs, Knowledge & RAG, and Admin & RBAC.
 
 ### Phase 2: Unified Assistant Panel
 

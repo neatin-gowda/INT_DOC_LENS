@@ -24,7 +24,7 @@ import { TablesWorkspace } from "./components/tables.jsx";
 import { QueryPanel } from "./components/chat.jsx";
 import { ReviewReport, AccuracyImprovementTab } from "./components/feedback.jsx";
 import { ExtractionWorkspace } from "./components/extraction.jsx";
-import { CommandCenter, WorkspacePlaceholder, WorkspaceShell } from "./components/workspaceShell.jsx";
+import { AskDocumentsWorkspace, CommandCenter, WorkspacePlaceholder, WorkspaceShell } from "./components/workspaceShell.jsx";
 
 const getSession = (key, fallback) => {
   if (typeof window === "undefined") return fallback;
@@ -421,41 +421,37 @@ export default function App() {
               <QueryPanel runId={runId} />
             </main>
           ) : (
-            <WorkspacePlaceholder
-              title="Ask Documents"
-              detail="The assistant will route questions to the active job, approved document stores, department collections, and future connector-backed RAG sources."
-              items={["Current job scope", "Citations", "Source permissions", "AI usage tracking"]}
-            />
+            <AskDocumentsWorkspace />
           )
         )}
 
         {workspace === "agents" && (
           <WorkspacePlaceholder
-            title="Autonomous Agents"
-            detail="Agent workflows will run supervised task chains with approval gates, audit history, and tool-level permissions."
-            items={["Review agents", "Approval gates", "Run history", "Department policies"]}
+            title="Agent Studio"
+            detail="Build supervised agent workspaces that call approved tools, ask for human approval, and keep every run auditable."
+            items={["Agent runs", "Approval gates", "Tool policy", "Run history"]}
           />
         )}
 
         {workspace === "tools" && (
           <WorkspacePlaceholder
-            title="Tools & MCPs"
-            detail="Reusable document, search, reporting, and generation tools will be assigned by admins to users, departments, and security groups."
-            items={["GET /tools", "Tool RBAC", "MCP adapters", "Cost controls"]}
+            title="Tool Studio"
+            detail="Register internal tools, MCP connectors, schemas, permissions, model use, and cost controls in one governed catalog."
+            items={["GET /tools", "MCP connectors", "Tool RBAC", "Cost controls"]}
           />
         )}
 
         {workspace === "automations" && (
           <WorkspacePlaceholder
-            title="Automations"
-            detail="Scheduled processing, monitors, recurring comparisons, and department workflows will live here as governed automations."
+            title="Workflow Runs"
+            detail="Run document pipelines, recurring comparisons, monitors, and department workflows with status and approvals."
             items={["Schedules", "Watch folders", "Notifications", "Human approvals"]}
           />
         )}
 
         {workspace === "sources" && (
           <WorkspacePlaceholder
-            title="Sources & RAG"
+            title="Knowledge & RAG"
             detail="Approved knowledge sources, document collections, vector stores, and connector-backed retrieval scopes will be managed here."
             items={["Department stores", "Connectors", "Citations", "Retention policies"]}
           />

@@ -8,7 +8,7 @@ export function UploadPanel({ onUpload, busy, onBack }) {
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14 }}>
         <div>
           <div style={{ fontWeight: 650 }}>Compare two documents</div>
-          <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }}>Keep the existing side-by-side visual review, table workspace, Ask Agent, and reports.</div>
+          <div style={{ color: "#667085", fontSize: 13, marginTop: 3 }}>Upload baseline and revised files for semantic review, visual evidence, table review, and natural-language query.</div>
         </div>
         <button type="button" onClick={onBack} disabled={busy} style={secondaryButtonStyle(busy ? { opacity: 0.65, cursor: "default" } : {})}>
           Back to workspaces
@@ -28,29 +28,14 @@ export function UploadPanel({ onUpload, busy, onBack }) {
         <FileInput label="Revised document" helper="Latest, proposed, or updated file" name="target" disabled={busy} />
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-              color: "#475467",
-              fontSize: 14,
-              background: "#fbfaf6",
-              border: "1px solid #ded6c8",
-              borderRadius: 8,
-              padding: "10px 12px",
-              fontWeight: 600,
-            }}
-          >
-            Classical first pass
-          </div>
+          <div className="process-status-card">Semantic comparison pipeline</div>
 
           <button disabled={busy} style={primaryButtonStyle(busy, { height: 44 })}>
             {busy ? "Processing" : "Compare documents"}
           </button>
 
           <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.35 }}>
-            First pass runs without AI by default. Use advanced AI only after review feedback.
+            Runs extraction, semantic alignment, visual preview, table detection, and report-ready review output.
           </div>
         </div>
       </div>
@@ -95,29 +80,14 @@ export function ExtractUploadPanel({ onUpload, busy, onBack }) {
         />
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-              color: "#475467",
-              fontSize: 14,
-              background: "#fbfaf6",
-              border: "1px solid #ded6c8",
-              borderRadius: 8,
-              padding: "10px 12px",
-              fontWeight: 600,
-            }}
-          >
-            Classical extraction
-          </div>
+          <div className="process-status-card">Document extraction pipeline</div>
 
           <button disabled={busy} style={primaryButtonStyle(busy, { height: 44 })}>
             {busy ? "Extracting" : "Extract content"}
           </button>
 
           <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.35 }}>
-            Extraction runs deterministically first. Advanced AI can be added after review feedback.
+            Extracts text, tables, OCR content, semantic fields, and structured JSON for downstream tools.
           </div>
         </div>
       </div>
@@ -149,12 +119,13 @@ export function FileInput({ label, helper, name, disabled, multiple = false }) {
       tabIndex={disabled ? -1 : 0}
       style={{
         border: "1px dashed #b9ae9e",
-        borderRadius: 10,
-        background: "#fbfaf6",
+        borderRadius: 14,
+        background: "linear-gradient(180deg, #fffdf8, #f6f1e7)",
         padding: 16,
         minHeight: 126,
         cursor: disabled ? "default" : "pointer",
         outline: "none",
+        boxShadow: "0 10px 30px rgba(31,41,55,.06)",
       }}
     >
       <input
@@ -180,9 +151,9 @@ export function FileInput({ label, helper, name, disabled, multiple = false }) {
         </div>
         <span
           style={{
-            background: "#eee8dd",
+            background: "#eef4ff",
             color: "#344054",
-            border: "1px solid #d8d0c3",
+            border: "1px solid #d5e2ff",
             borderRadius: 999,
             padding: "4px 9px",
             fontSize: 12,
@@ -200,7 +171,7 @@ export function FileInput({ label, helper, name, disabled, multiple = false }) {
           border: "1px solid #d0c7b8",
           borderRadius: 8,
           padding: "10px 11px",
-          background: "white",
+          background: "rgba(255,255,255,.82)",
           color: fileName ? "#2f5f4f" : "#667085",
           fontSize: 14,
           fontWeight: 600,
