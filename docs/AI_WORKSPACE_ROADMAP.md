@@ -140,6 +140,35 @@ Production readiness requires:
 - Tables and previews must be readable for PDF, Word, spreadsheet, image/OCR,
   and mixed LTR/RTL documents.
 
+## Document AI Accuracy Workflow
+
+The near-term product should stay document-workspace-first. Knowledge bases,
+models, MCP connectors, and autonomous agents remain platform capabilities, but
+they should not distract from the core document experience until the comparison,
+extraction, preview, citation, and grounded chat loop is excellent.
+
+The default document workflow should be deterministic before it is generative:
+
+1. Extract text, layout blocks, tables, key-values, images, warnings, and page
+   coordinates with the classical pipeline.
+2. Store every extracted element with page, bounding region, parser confidence,
+   source format, and semantic path.
+3. Let users query and compare the deterministic evidence store without an LLM.
+4. When accuracy needs improvement, run an optional AI pass only over selected
+   pages, citations, tables, or low-confidence spans.
+5. For scanned or layout-heavy pages, render the page or crop to an image and
+   send the focused image/span to a configured vision-language model.
+6. Stitch the refined output back into the extracted element model, preserving
+   the original evidence, AI-refined value, confidence score, model id, prompt
+   profile, and reviewer status.
+7. Capture token usage for each AI call: input tokens, output tokens, model,
+   tool name, run id, element id, user id, department, latency, and cost bucket.
+
+Every answer in document chat should cite the exact page, table, row, cell, or
+span that supported it. When a user clicks a citation, the preview should open
+that document page and highlight the referenced region. This keeps chat useful
+without turning it into an ungrounded assistant.
+
 ## Implementation Phases
 
 ### Phase 1: Shell And Navigation

@@ -24,7 +24,7 @@ import { QueryPanel } from "./features/ask/AskComparisonPanel.jsx";
 import { ChatPage } from "./features/chat/ChatPage.jsx";
 import { ReviewReport } from "./components/feedback.jsx";
 import { ExtractionWorkspace } from "./components/extraction.jsx";
-import { AskDocumentsWorkspace, WorkspacePlaceholder, WorkspaceShell } from "./components/workspaceShell.jsx";
+import { AskDocumentsWorkspace, WorkspaceShell } from "./components/workspaceShell.jsx";
 import { useDocumentTitle } from "./theme/useDocumentTitle.js";
 
 const getSession = (key, fallback) => {
@@ -54,14 +54,6 @@ const workspacePaths = {
   assistant: "/ask",
   tables: "/documents/tables",
   reports: "/documents/reports",
-  agents: "/agents",
-  tools: "/admin/capabilities",
-  automations: "/workflows",
-  sources: "/knowledge",
-  models: "/admin/models",
-  knowledge: "/admin/knowledge-bases",
-  usage: "/admin/usage",
-  admin: "/admin",
 };
 
 const pathWorkspaces = {
@@ -89,20 +81,12 @@ export default function App() {
   const [jobError, setJobError] = useState("");
   const pageTitle = {
     home: "",
-    jobs: "Jobs",
+    jobs: "Sessions",
     compare: "Compare",
     extract: "Extract",
-    assistant: "Ask",
+    assistant: "Ask Document",
     tables: "Tables",
     reports: "Reports",
-    agents: "Agents",
-    tools: "Capabilities",
-    automations: "Workflow Runs",
-    sources: "Knowledge",
-    models: "Models",
-    knowledge: "Knowledge Bases",
-    usage: "Usage",
-    admin: "Admin",
   }[workspace] || "Workspace";
 
   useDocumentTitle(pageTitle);
@@ -506,69 +490,6 @@ export default function App() {
           )
         )}
 
-        {workspace === "agents" && (
-          <WorkspacePlaceholder
-            title="Agents"
-            detail="Agent Library is available soon."
-            items={["Agent Library"]}
-          />
-        )}
-
-        {workspace === "tools" && (
-          <WorkspacePlaceholder
-            title="Capabilities"
-            detail="Register internal tools, skills, plugins, schemas, permissions, model use, and cost controls in one governed catalog."
-            items={["Tools", "Skills", "Plugins", "RBAC", "Cost controls"]}
-          />
-        )}
-
-        {workspace === "models" && (
-          <WorkspacePlaceholder
-            title="Models"
-            detail="Model catalog, deployment routing, and allowed-role policy will be managed here."
-            items={["Catalog", "Routing", "Access", "Usage"]}
-          />
-        )}
-
-        {workspace === "knowledge" && (
-          <WorkspacePlaceholder
-            title="Knowledge Bases"
-            detail="Approved knowledge sources, retrieval scopes, and business-unit tagging will be managed here."
-            items={["Sources", "Tags", "Citations", "Retention"]}
-          />
-        )}
-
-        {workspace === "usage" && (
-          <WorkspacePlaceholder
-            title="Usage"
-            detail="Token, cost, model, and capability usage telemetry will be tracked here."
-            items={["Tokens", "Cost", "Models", "Capabilities"]}
-          />
-        )}
-
-        {workspace === "automations" && (
-          <WorkspacePlaceholder
-            title="Workflow Runs"
-            detail="Run document pipelines, recurring comparisons, monitors, and department workflows with status and approvals."
-            items={["Schedules", "Watch folders", "Notifications", "Human approvals"]}
-          />
-        )}
-
-        {workspace === "sources" && (
-          <WorkspacePlaceholder
-            title="Knowledge Bases"
-            detail="Approved knowledge sources, document collections, vector stores, and connector-backed retrieval scopes will be managed here."
-            items={["Department stores", "Connectors", "Citations", "Retention policies"]}
-          />
-        )}
-
-        {workspace === "admin" && (
-          <WorkspacePlaceholder
-            title="Admin"
-            detail="Admins will control users, groups, departments, tool access, source access, model policies, and audit settings from this control plane."
-            items={["Users", "Groups", "Tool access", "Audit logs", "Model policy"]}
-          />
-        )}
       </WorkspaceShell>
     </div>
   );

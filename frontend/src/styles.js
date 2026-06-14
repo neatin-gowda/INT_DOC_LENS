@@ -20,7 +20,7 @@ export const css = `
     font-size: 18px;
     font-weight: 600;
     line-height: 1;
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
   }
   .altrai-wordmark .accent {
     color: var(--brand-orange, #c45510);
@@ -1907,6 +1907,284 @@ export const css = `
     .theme-system .evidence-after,
     .theme-system .evidence-meta {
       color: var(--text-700);
+    }
+  }
+
+  /* Phase 2.5 document workspace baseline. */
+  .workspace-shell,
+  .workspace-shell.theme-light,
+  .workspace-shell.theme-system {
+    color: var(--text-primary);
+    background: var(--surface);
+  }
+  .workspace-sidebar {
+    background: var(--surface-raised);
+    border-inline-end: 1px solid var(--border);
+    color: var(--text-primary);
+    box-shadow: none;
+  }
+  .workspace-collapse-button {
+    border-color: var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-secondary);
+  }
+  .workspace-collapse-button:hover {
+    border-color: var(--brand-orange);
+    color: var(--brand-orange);
+  }
+  .workspace-nav-label {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .workspace-nav-item {
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .workspace-nav-item:hover:not(:disabled) {
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+  }
+  .workspace-nav-icon {
+    color: currentColor;
+  }
+  .workspace-nav-item.active {
+    border-color: transparent;
+    border-inline-start: 2px solid var(--brand-orange);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    box-shadow: none;
+  }
+  .workspace-shell.collapsed .workspace-nav-item {
+    width: 44px;
+    height: 42px;
+  }
+  .user-footer {
+    border-top-color: var(--border);
+    color: var(--text-primary);
+  }
+  .user-avatar {
+    background: var(--surface-sunken);
+    color: var(--brand-navy);
+  }
+  .user-meta strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+  .user-meta span,
+  .rail-theme-toggle button {
+    color: var(--text-secondary);
+  }
+  .rail-theme-toggle {
+    border-color: var(--border);
+    background: var(--surface-sunken);
+  }
+  .rail-theme-toggle button.active {
+    background: var(--surface-raised);
+    color: var(--brand-orange);
+  }
+  .workspace-main {
+    background: var(--surface);
+  }
+  .workspace-topbar,
+  .session-board,
+  .ask-documents-panel,
+  .workspace-surface,
+  .comparison-workspace,
+  .doc-workflow-card,
+  .workflow-panel,
+  .chat-workbench,
+  .chat-thread,
+  .chat-composer {
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+  }
+  .workspace-topbar {
+    min-height: 64px;
+    padding: 12px 14px;
+  }
+  .workspace-topbar::after {
+    background: transparent;
+  }
+  .workspace-topbar h1,
+  .board-head h2,
+  .ask-documents-panel h2,
+  .job-card h3,
+  .assistant-console-header,
+  .comparison-head h2,
+  .workflow-card-head h2,
+  .chat-empty h2 {
+    color: var(--text-primary);
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  .workspace-content {
+    color: var(--text-primary);
+    overflow: visible;
+  }
+  .workspace-primary-action,
+  .primary-action {
+    background: var(--brand-navy);
+    border-color: var(--brand-navy);
+    color: #ffffff;
+  }
+  .workspace-secondary-action,
+  .ghost-action,
+  .secondary-action,
+  .preset-chip,
+  .workspace-tabs button {
+    border-color: var(--border);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+  }
+  .assistant-dropzone {
+    min-height: 132px;
+    border-color: var(--border-strong);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .assistant-dropzone.large {
+    min-height: 150px;
+  }
+  .assistant-dropzone span {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-weight: 600;
+  }
+  .assistant-dropzone small {
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+  .processing-steps {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .processing-steps span,
+  .process-status-card {
+    border-color: var(--border);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    border-radius: var(--radius-md);
+    font-weight: 500;
+  }
+  .processing-steps span.active {
+    border-color: var(--brand-orange);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+  }
+  .ask-status,
+  .model-strip,
+  .assistant-input-shell,
+  .document-chat-thread {
+    border-color: var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+  }
+  .model-strip span,
+  .job-kind,
+  .assistant-console-header strong,
+  .ask-results strong {
+    color: var(--brand-orange);
+  }
+  .model-strip strong {
+    color: var(--text-primary);
+  }
+  .model-strip small,
+  .chat-empty,
+  .job-meta,
+  .job-date,
+  .job-card p {
+    color: var(--text-secondary);
+  }
+  .assistant-input-shell input {
+    color: var(--text-primary);
+  }
+  .assistant-input-shell input::placeholder {
+    color: var(--text-secondary);
+  }
+  .assistant-input-shell button {
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+  }
+  .assistant-input-shell button:not(:disabled) {
+    border-color: var(--brand-navy);
+    background: var(--brand-navy);
+    color: #ffffff;
+  }
+  .chat-bubble.user {
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+  .chat-bubble.assistant {
+    background: var(--surface-raised);
+    border-color: var(--border);
+    color: var(--text-primary);
+  }
+  .ask-results.compact div,
+  .evidence-card {
+    border-color: var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+  }
+  .ask-evidence-row strong {
+    display: inline-flex;
+    width: fit-content;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px 6px;
+    background: var(--surface-raised);
+  }
+  .job-card {
+    grid-template-columns: minmax(0, 1fr) 250px;
+    border-color: var(--border);
+    background: var(--surface-raised);
+    border-radius: var(--radius-lg);
+    box-shadow: none;
+  }
+  .job-side {
+    justify-items: end;
+  }
+  .danger-action {
+    border-color: #f1c6c6;
+    background: #fff7f7;
+    color: #9f2525;
+  }
+  [data-theme="dark"] .danger-action,
+  .theme-dark .danger-action {
+    border-color: #4d2528;
+    background: #1d1112;
+    color: #ffb2b2;
+  }
+  @media (prefers-color-scheme: dark) {
+    .theme-system .danger-action {
+      border-color: #4d2528;
+      background: #1d1112;
+      color: #ffb2b2;
+    }
+  }
+  @media (max-width: 980px) {
+    .workspace-shell,
+    .workspace-shell.collapsed {
+      grid-template-columns: 1fr;
+    }
+    .workspace-sidebar {
+      position: static;
+      height: auto;
+    }
+    .ask-documents-grid,
+    .job-card {
+      grid-template-columns: 1fr;
+    }
+    .job-side {
+      justify-items: start;
     }
   }
 `;

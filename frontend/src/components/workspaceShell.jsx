@@ -8,18 +8,10 @@ import { useTheme } from "../theme/ThemeProvider.jsx";
 
 const workspaceLabels = {
   home: "Chat",
-  jobs: "Jobs",
+  jobs: "Sessions",
   compare: "Compare",
   extract: "Extract",
-  assistant: "Ask",
-  agents: "Agents",
-  tools: "Capabilities",
-  automations: "Workflows",
-  sources: "Knowledge Bases",
-  models: "Models",
-  knowledge: "Knowledge Bases",
-  usage: "Usage",
-  admin: "Admin",
+  assistant: "Ask Document",
 };
 
 export function WorkspaceShell({
@@ -66,7 +58,7 @@ export function WorkspaceShell({
               </button>
             )}
             <button type="button" className="workspace-secondary-action" onClick={() => onNavigate("jobs")}>
-              Jobs
+              Sessions
             </button>
           </div>
         </header>
@@ -76,20 +68,6 @@ export function WorkspaceShell({
         </div>
       </section>
     </div>
-  );
-}
-
-export function WorkspacePlaceholder({ title, detail, items = [] }) {
-  return (
-    <section className="workspace-placeholder">
-      <h2>{title}</h2>
-      <p>{detail}</p>
-      <div className="placeholder-list">
-        {items.map((item) => (
-          <span key={item}>{item}</span>
-        ))}
-      </div>
-    </section>
   );
 }
 
@@ -191,7 +169,11 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
       });
       if (!resp.ok) throw new Error(await responseError(resp));
       const data = await resp.json();
-      setMessages((prev) => [...prev, { role: "assistant", text: data.answer || "I found matching evidence.", rows: data.rows || [] }]);
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        text: normalizeAnswer(data.answer, data.rows),
+        rows: data.rows || [],
+      }]);
     } catch (err) {
       setMessages((prev) => [...prev, { role: "assistant", text: errorMessage(err), rows: [] }]);
     } finally {
@@ -204,7 +186,7 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
   return (
     <section className="ask-documents-grid">
       <div className="ask-documents-panel">
-        <h2>{runId ? "Ask the selected document" : "Upload and ask"}</h2>
+        <h2>{runId ? "Ask the selected document" : "Upload a document"}</h2>
         <input
           ref={inputRef}
           type="file"
@@ -223,13 +205,14 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
             upload(event.dataTransfer.files);
           }}
         >
-          {fileName || (runId ? `Selected job #${String(runId).slice(0, 6)}` : "Drop PDF, Word, Excel, image, CSV, or TSV files")}
+          <span>{fileName || (runId ? `Selected session #${String(runId).slice(0, 6)}` : "Drop a PDF, Word, Excel, image, CSV, or TSV file")}</span>
+          <small>Extraction runs first; answers are grounded in stored document evidence.</small>
         </button>
         <div className="processing-steps">
           <span className={meta ? "active" : ""}>Upload</span>
           <span className={busy || ready ? "active" : ""}>Extract</span>
-          <span className={ready ? "active" : ""}>Index</span>
-          <span className={messages.some((message) => message.role === "assistant") ? "active" : ""}>Answer</span>
+          <span className={ready ? "active" : ""}>Store</span>
+          <span className={messages.some((message) => message.role === "assistant") ? "active" : ""}>Query</span>
         </div>
         {meta && (
           <div className="ask-status">
@@ -241,7 +224,7 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
       </div>
       <div className="ask-documents-panel chat">
         <div className="assistant-console-header">
-          <span>Document chat</span>
+          <span>Evidence chat</span>
           <strong>{ready ? "Ready" : busy ? "Processing" : "Waiting"}</strong>
         </div>
         <div className="document-chat-thread">
@@ -257,8 +240,8 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
                 {message.role === "assistant" && Array.isArray(message.rows) && message.rows.length > 0 && (
                   <div className="ask-results compact">
                     {message.rows.slice(0, 4).map((row, rowIndex) => (
-                      <div key={rowIndex}>
-                        <strong>Page {row.Page || "-"}</strong>
+                      <div key={rowIndex} className="ask-evidence-row">
+                        <strong>{pageLabel(row)}</strong>
                         <span dir="auto">{row.Text}</span>
                       </div>
                     ))}
@@ -274,9 +257,9 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
           )}
         </div>
         <div className="model-strip">
-          <span>Runtime</span>
-          <strong>{ready ? "Deterministic document query" : "Extraction required"}</strong>
-          <small>Admin-configured LLM streaming can layer on top of this endpoint later.</small>
+          <span>Mode</span>
+          <strong>{ready ? "Grounded document query" : "Waiting for extraction"}</strong>
+          <small>AI enhancement will run as an optional accuracy pass over selected pages and citations.</small>
         </div>
         <div className="assistant-input-shell">
           <input
@@ -295,6 +278,24 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
       </div>
     </section>
   );
+}
+
+function normalizeAnswer(answer, rows = []) {
+  const text = String(answer || "").trim();
+  if (!text || /^not found$/i.test(text)) {
+    return rows?.length
+      ? "I found supporting evidence in the extracted document."
+      : "No supporting evidence was found in the selected document.";
+  }
+  return text;
+}
+
+function pageLabel(row = {}) {
+  const page = row.Page || row.page || row.page_number;
+  const section = row.Section || row.section || row.heading;
+  if (page && section) return `Page ${page} - ${section}`;
+  if (page) return `Page ${page}`;
+  return "Evidence";
 }
 
 async function responseError(resp) {

@@ -26,7 +26,7 @@ export function LandingPage({ onExtract, onCompare, onJobs }) {
       <div className="quick-start-grid">
         <QuickStart title="Compare" detail="Baseline versus revised document review." onClick={onCompare} />
         <QuickStart title="Extract" detail="Single document extraction and query." onClick={onExtract} />
-        <QuickStart title="Jobs" detail="Resume completed sessions." onClick={onJobs} />
+        <QuickStart title="Sessions" detail="Resume completed document work." onClick={onJobs} />
       </div>
     </section>
   );
@@ -95,7 +95,7 @@ export function JobsDashboard({ onOpenJob, onAskJob, error }) {
     <section className="session-board">
       <div className="board-head">
         <div>
-          <h2>Jobs</h2>
+          <h2>Sessions</h2>
         </div>
         <div className="board-actions">
           <span>{running} running</span>

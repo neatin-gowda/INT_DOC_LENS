@@ -1,17 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Activity,
-  Cpu,
-  Database,
   FileOutput,
   FileSearch,
   FileText,
   GitCompare,
+  History,
   MessageSquare,
-  Puzzle,
-  Shield,
   Table,
-  UserRoundCog,
 } from "lucide-react";
 import { fetchTools } from "../lib/api.js";
 
@@ -20,25 +15,8 @@ const staticSections = [
     label: "Workspace",
     items: [
       { key: "home", label: "Chat", icon: MessageSquare },
-      { key: "assistant", label: "Ask", icon: FileSearch },
-    ],
-  },
-  {
-    label: "Agents",
-    disabled: true,
-    items: [
-      { key: "agents", label: "Agent Library", icon: UserRoundCog, disabled: true, title: "Available soon" },
-    ],
-  },
-  {
-    label: "Admin",
-    adminOnly: true,
-    items: [
-      { key: "tools", label: "Capabilities", icon: Puzzle },
-      { key: "models", label: "Models", icon: Cpu },
-      { key: "knowledge", label: "Knowledge Bases", icon: Database },
-      { key: "admin", label: "Access", icon: Shield },
-      { key: "usage", label: "Usage", icon: Activity },
+      { key: "assistant", label: "Ask Document", icon: FileSearch },
+      { key: "jobs", label: "Sessions", icon: History },
     ],
   },
 ];
@@ -91,9 +69,7 @@ export function NavRail({ workspace, onNavigate, collapsed = false }) {
 
   const sections = [
     staticSections[0],
-    { label: "Document Intelligence", items: documentItems },
-    staticSections[1],
-    staticSections[2],
+    { label: "Documents", items: documentItems },
   ];
 
   return (
@@ -109,7 +85,7 @@ export function NavRail({ workspace, onNavigate, collapsed = false }) {
                 type="button"
                 className={`workspace-nav-item${active ? " active" : ""}`}
                 onClick={() => !item.disabled && onNavigate(item.key)}
-              disabled={item.disabled}
+                disabled={item.disabled}
                 title={collapsed ? (item.title || item.label) : item.title}
               >
                 <item.icon className="workspace-nav-icon" aria-hidden="true" />
