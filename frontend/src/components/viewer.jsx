@@ -79,7 +79,7 @@ export function Legend() {
 
 export function LegendChip({ label, color, border }) {
   return (
-    <span style={{ background: color, border: `1px solid ${border}`, color: "#344054", padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
+    <span style={{ background: color, border: `1px solid ${border}`, color: "var(--text-primary)", padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
       {label}
     </span>
   );
@@ -121,10 +121,10 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
     <div className="doc-viewer-shell">
       <div style={{ marginBottom: 7, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 13, color: "#667085", fontWeight: 600 }}>{label}</div>
-          <div style={{ fontSize: 14, color: "#344054", fontWeight: 650 }}>
+          <div style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 600 }}>{label}</div>
+          <div style={{ fontSize: 14, color: "var(--text-primary)", fontWeight: 600 }}>
             {docName} - {pageExists ? `page ${pageNum}` : "no page"}
-            {format && <span style={{ color: "#667085", fontSize: 11, marginLeft: 6, textTransform: "uppercase" }}>{format}</span>}
+            {format && <span style={{ color: "var(--text-secondary)", fontSize: 11, marginLeft: 6 }}>{String(format).toUpperCase()}</span>}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -137,7 +137,7 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
           >
             Prev
           </button>
-          <span style={{ color: "#667085", fontSize: 12, minWidth: 46, textAlign: "center" }}>
+          <span style={{ color: "var(--text-secondary)", fontSize: 12, minWidth: 46, textAlign: "center" }}>
             {pageNum}/{totalPages || 1}
           </span>
           <button
@@ -160,7 +160,7 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
         ) : (
           <>
             {imageState === "loading" && (
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#667085", background: "#f9f6ef", zIndex: 1, fontWeight: 600 }}>
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", background: "var(--surface-raised)", zIndex: 1, fontWeight: 600 }}>
                 Loading page {pageNum}
               </div>
             )}
@@ -185,6 +185,8 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
               const c = COLORS[String(r.change_type || "").toUpperCase()] || COLORS.MODIFIED;
               const pageWidth = r.page_width || overlay.page_width || 612;
               const pageHeight = r.page_height || overlay.page_height || 792;
+              const borderColor = r.border_color || c.border;
+              const fillColor = r.color || c.bg;
 
               return (
                 <div
@@ -196,10 +198,10 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
                     top: `${(y0 / pageHeight) * 100}%`,
                     width: `${Math.max(0.15, ((x1 - x0) / pageWidth) * 100)}%`,
                     height: `${Math.max(0.15, ((y1 - y0) / pageHeight) * 100)}%`,
-                    background: c.bg,
-                    outline: `1px solid ${c.border}`,
+                    background: fillColor,
+                    border: `1px solid ${borderColor}`,
+                    boxShadow: `inset 0 0 0 1px ${fillColor}`,
                     pointerEvents: "auto",
-                    mixBlendMode: "multiply",
                   }}
                 />
               );
@@ -213,7 +215,7 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
 
 export function EmptyPage({ pageNum }) {
   return (
-    <div style={{ minHeight: 520, display: "grid", placeItems: "center", color: "#667085", fontWeight: 600 }}>
+    <div style={{ minHeight: 520, display: "grid", placeItems: "center", color: "var(--text-secondary)", fontWeight: 600 }}>
       No page {pageNum} in this document.
     </div>
   );
@@ -222,7 +224,7 @@ export function EmptyPage({ pageNum }) {
 export function NativePageView({ page, side }) {
   if (!page) {
     return (
-      <div style={{ minHeight: 520, display: "grid", placeItems: "center", color: "#667085", fontWeight: 600 }}>
+      <div style={{ minHeight: 520, display: "grid", placeItems: "center", color: "var(--text-secondary)", fontWeight: 600 }}>
         Loading structured page
       </div>
     );
@@ -233,7 +235,7 @@ export function NativePageView({ page, side }) {
 
   if (!items.length) {
     return (
-      <div style={{ minHeight: 520, display: "grid", placeItems: "center", color: "#667085", fontWeight: 600 }}>
+      <div style={{ minHeight: 520, display: "grid", placeItems: "center", color: "var(--text-secondary)", fontWeight: 600 }}>
         No structured content on this page.
       </div>
     );
@@ -329,13 +331,13 @@ export function NativeTable({ item, viewerType }) {
   return (
     <div className="native-block" dir="auto" style={{ ...nativeHighlightStyle(item.highlight), marginBottom: 14, padding: 10, borderRadius: 7 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 7 }}>
-        <div style={{ fontSize: 14, fontWeight: 650, color: "#344054" }}>{title}</div>
-        <div style={{ fontSize: 11, color: "#667085" }}>{rows.length} row{rows.length === 1 ? "" : "s"}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>{title}</div>
+        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{rows.length} row{rows.length === 1 ? "" : "s"}</div>
       </div>
       <div className="native-table-wrap dl-scrollbar">
         <table className={`native-table ${isSpreadsheet ? "spreadsheet" : ""}`} style={{ fontSize: isSpreadsheet ? 12 : 12 }}>
           <thead>
-            <tr style={{ background: "#f2eee6", color: "#344054" }}>
+            <tr style={{ background: "var(--surface-sunken)", color: "var(--text-primary)" }}>
               {header.map((col) => (
                 <th key={col} dir="auto" style={smallTh}>{col}</th>
               ))}

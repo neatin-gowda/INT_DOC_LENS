@@ -719,7 +719,7 @@ export function nativeHighlightStyle(kind, compact = false) {
   }
   if (norm === "modified") {
     return {
-      background: compact ? "rgba(218,185,42,.10)" : "rgba(218,185,42,.08)",
+      background: compact ? "rgba(196,85,16,.10)" : "rgba(196,85,16,.08)",
       border: compact ? undefined : `1px solid ${COLORS.MODIFIED.border}`,
       borderInlineStart: `3px solid ${COLORS.MODIFIED.border}`,
     };

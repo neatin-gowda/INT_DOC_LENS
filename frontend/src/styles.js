@@ -2142,6 +2142,44 @@ export const css = `
     padding: 2px 6px;
     background: var(--surface-raised);
   }
+  .doc-viewer-shell {
+    color: var(--text-primary);
+  }
+  .doc-frame,
+  .doc-frame.native {
+    border-color: var(--border-strong);
+    background: #ffffff;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-soft);
+  }
+  .native-page,
+  .native-page.document,
+  .native-page.spreadsheet {
+    background: #ffffff;
+    color: #16181d;
+  }
+  .native-token-delete,
+  .native-token-replace-base {
+    color: #9f2525;
+    background: rgba(176, 46, 46, .13);
+  }
+  .native-token-insert,
+  .native-token-replace-target {
+    color: #176c38;
+    background: rgba(31, 126, 65, .13);
+    font-weight: 500;
+  }
+  .native-block {
+    color: inherit;
+  }
+  .native-table-wrap {
+    border-color: var(--border);
+    background: #ffffff;
+  }
+  .native-table th,
+  .native-table td {
+    border-color: var(--border);
+  }
   .job-card {
     grid-template-columns: minmax(0, 1fr) 250px;
     border-color: var(--border);

@@ -442,10 +442,19 @@ def get_overlay(run_id: str, side: str, n: int):
 
     page_width, page_height = _page_dimensions_for(side_blocks, n)
 
-    color_map = {
-        "ADDED": "rgba(40,180,40,0.30)",
-        "DELETED": "rgba(220,40,40,0.30)",
-        "MODIFIED": "rgba(220,200,40,0.30)",
+    overlay_style_map = {
+        "ADDED": {
+            "fill": "rgba(31, 126, 65, 0.14)",
+            "border": "rgba(31, 126, 65, 0.82)",
+        },
+        "DELETED": {
+            "fill": "rgba(176, 46, 46, 0.13)",
+            "border": "rgba(176, 46, 46, 0.82)",
+        },
+        "MODIFIED": {
+            "fill": "rgba(196, 85, 16, 0.12)",
+            "border": "rgba(196, 85, 16, 0.86)",
+        },
     }
 
     regions = []
@@ -487,7 +496,8 @@ def get_overlay(run_id: str, side: str, n: int):
             {
                 "bbox": blk.bbox,
                 "change_type": d.change_type.value,
-                "color": color_map[d.change_type.value],
+                "color": overlay_style_map[d.change_type.value]["fill"],
+                "border_color": overlay_style_map[d.change_type.value]["border"],
                 "stable_key": blk.stable_key,
                 "block_type": blk.block_type.value,
                 "page_width": region_page_width or page_width,

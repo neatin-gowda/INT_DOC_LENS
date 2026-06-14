@@ -571,7 +571,7 @@ def _token_diff(a: str, b: str) -> list[TokenOp]:
 
     aw = (a or "").split()
     bw = (b or "").split()
-    sm = difflib.SequenceMatcher(a=aw, b=bw)
+    sm = difflib.SequenceMatcher(a=aw, b=bw, autojunk=False)
     out: list[TokenOp] = []
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
@@ -581,13 +581,7 @@ def _token_diff(a: str, b: str) -> list[TokenOp]:
         elif tag == "insert":
             out.append(TokenOp(op="insert", text_b=" ".join(bw[j1:j2])))
         elif tag == "replace":
-            out.append(
-                TokenOp(
-                    op="replace",
-                    text_a=" ".join(aw[i1:i2]),
-                    text_b=" ".join(bw[j1:j2]),
-                )
-            )
+            out.extend(_refined_replace_ops(aw[i1:i2], bw[j1:j2]))
 
     changed_words = 0
     for op in out:
@@ -601,6 +595,77 @@ def _token_diff(a: str, b: str) -> list[TokenOp]:
         b_sem = _semantic_text(b)
         if _same_critical_values(a, b) and fuzz.token_set_ratio(a_sem, b_sem) >= 92:
             return []
+    return out
+
+
+def _token_equivalent(a: str, b: str) -> bool:
+    return _canonical_text(a) == _canonical_text(b) or _semantic_text(a) == _semantic_text(b)
+
+
+def _append_token_op(out: list[TokenOp], op: str, text_a: str | None = None, text_b: str | None = None) -> None:
+    if not text_a and not text_b:
+        return
+    if out and out[-1].op == op:
+        if text_a:
+            out[-1].text_a = " ".join(part for part in (out[-1].text_a, text_a) if part)
+        if text_b:
+            out[-1].text_b = " ".join(part for part in (out[-1].text_b, text_b) if part)
+        return
+    out.append(TokenOp(op=op, text_a=text_a, text_b=text_b))
+
+
+def _refined_replace_ops(before: list[str], after: list[str]) -> list[TokenOp]:
+    """
+    SequenceMatcher can emit a broad replace chunk when a sentence has repeated
+    words. Trim equal edges and pair same-position tokens so a one-word edit is
+    not rendered as a whole-phrase replacement.
+    """
+    if not before and not after:
+        return []
+
+    prefix = 0
+    while prefix < len(before) and prefix < len(after) and _token_equivalent(before[prefix], after[prefix]):
+        prefix += 1
+
+    suffix = 0
+    while (
+        suffix < len(before) - prefix
+        and suffix < len(after) - prefix
+        and _token_equivalent(before[len(before) - 1 - suffix], after[len(after) - 1 - suffix])
+    ):
+        suffix += 1
+
+    out: list[TokenOp] = []
+    if prefix:
+        _append_token_op(out, "equal", text_a=" ".join(before[:prefix]))
+
+    b_mid = before[prefix: len(before) - suffix if suffix else len(before)]
+    a_mid = after[prefix: len(after) - suffix if suffix else len(after)]
+
+    if len(b_mid) == len(a_mid):
+        for b_tok, a_tok in zip(b_mid, a_mid):
+            if _token_equivalent(b_tok, a_tok):
+                _append_token_op(out, "equal", text_a=b_tok)
+            else:
+                _append_token_op(out, "replace", text_a=b_tok, text_b=a_tok)
+    elif b_mid and a_mid:
+        nested = difflib.SequenceMatcher(a=b_mid, b=a_mid, autojunk=False)
+        for tag, i1, i2, j1, j2 in nested.get_opcodes():
+            if tag == "equal":
+                _append_token_op(out, "equal", text_a=" ".join(b_mid[i1:i2]))
+            elif tag == "delete":
+                _append_token_op(out, "delete", text_a=" ".join(b_mid[i1:i2]))
+            elif tag == "insert":
+                _append_token_op(out, "insert", text_b=" ".join(a_mid[j1:j2]))
+            else:
+                _append_token_op(out, "replace", text_a=" ".join(b_mid[i1:i2]), text_b=" ".join(a_mid[j1:j2]))
+    elif b_mid:
+        _append_token_op(out, "delete", text_a=" ".join(b_mid))
+    elif a_mid:
+        _append_token_op(out, "insert", text_b=" ".join(a_mid))
+
+    if suffix:
+        _append_token_op(out, "equal", text_a=" ".join(before[len(before) - suffix:]))
     return out
 
 
