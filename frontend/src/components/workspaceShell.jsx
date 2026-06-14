@@ -7,11 +7,11 @@ import { UserFooter } from "../shell/UserFooter.jsx";
 import { useTheme } from "../theme/ThemeProvider.jsx";
 
 const workspaceLabels = {
-  home: "Chat",
-  jobs: "Sessions",
+  jobs: "Work History",
   compare: "Compare",
   extract: "Extract",
   assistant: "Ask Document",
+  agents: "AI Agents",
 };
 
 export function WorkspaceShell({
@@ -58,7 +58,7 @@ export function WorkspaceShell({
               </button>
             )}
             <button type="button" className="workspace-secondary-action" onClick={() => onNavigate("jobs")}>
-              Sessions
+              Work History
             </button>
           </div>
         </header>
@@ -205,7 +205,7 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
             upload(event.dataTransfer.files);
           }}
         >
-          <span>{fileName || (runId ? `Selected session #${String(runId).slice(0, 6)}` : "Drop a PDF, Word, Excel, image, CSV, or TSV file")}</span>
+          <span>{fileName || (runId ? `Selected document #${String(runId).slice(0, 6)}` : "Drop a PDF, Word, Excel, image, CSV, or TSV file")}</span>
           <small>Extraction runs first; answers are grounded in stored document evidence.</small>
         </button>
         <div className="processing-steps">
@@ -224,7 +224,7 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
       </div>
       <div className="ask-documents-panel chat">
         <div className="assistant-console-header">
-          <span>Evidence chat</span>
+          <span>Document Q&A</span>
           <strong>{ready ? "Ready" : busy ? "Processing" : "Waiting"}</strong>
         </div>
         <div className="document-chat-thread">
@@ -259,7 +259,7 @@ export function AskDocumentsWorkspace({ initialRunId = "", initialMeta = null })
         <div className="model-strip">
           <span>Mode</span>
           <strong>{ready ? "Grounded document query" : "Waiting for extraction"}</strong>
-          <small>AI enhancement will run as an optional accuracy pass over selected pages and citations.</small>
+          <small>Deterministic evidence first; optional vision fallback is configured by admins.</small>
         </div>
         <div className="assistant-input-shell">
           <input

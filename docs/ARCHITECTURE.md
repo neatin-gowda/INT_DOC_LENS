@@ -69,7 +69,7 @@ We use the LLM at exactly four points:
 - **Schema discovery** (once per template family).
 - **Fuzzy block alignment** when deterministic key-matching gives multiple candidates (rare).
 - **Summary generation** (`Feature / Change / Seek Clarification`).
-- **NL query → JSON path/SQL** (the chat interface).
+- **NL query → JSON path/SQL** (the grounded Ask Document endpoint).
 
 Everything else is deterministic Python. This keeps the system auditable, cheap, and reproducible.
 
@@ -128,12 +128,54 @@ The prompt is in `backend/prompts/clarification_prompt.txt` and is tunable.
                 ▼
    ┌──────────────────────────────────────┐
    │  Web UI (React)                       │
-   │  - Side-by-side PDF viewer            │
-   │  - Word-level highlight overlay       │
-   │  - Summary table                      │
-   │  - Chat box for NL queries            │
+   │  - AI document-intelligence shell      │
+   │  - Compare, Extract, Ask Document      │
+   │  - Work History                       │
+   │  - Side-by-side visual diff viewer     │
    └──────────────────────────────────────┘
 ```
+
+## Current document-intelligence pipeline
+
+The current product is intentionally document-first. Generic chat, standalone
+table review, and report-builder screens are not primary navigation items. The
+active UI exposes:
+
+- **Compare** for baseline/revised document review.
+- **Extract** for single-document structure extraction.
+- **Ask Document** for grounded questions over completed extraction runs.
+- **Work History** for reopening and deleting completed jobs.
+- **AI Agents** as a placeholder for future governed skills and MCP-style tools.
+
+The backend keeps reusable endpoints for tables, reports, queries, and tool
+metadata so future work can expose them through agents or advanced flows without
+duplicating business logic.
+
+## Extraction accuracy improvements
+
+Recent backend changes focus on hard document scenarios from the reference
+DocuLens package:
+
+- **Bilingual DOCX layout tables**: DOCX tables that contain side-by-side Latin
+  and Arabic/scripted columns are treated as layout containers. Each populated
+  cell becomes an independent paragraph block with row, column, and column-count
+  metadata instead of joining cells together with separators.
+- **Nested and complex tables**: table extraction keeps confidence and source
+  metadata through cross-page stitching so downstream review can explain which
+  detector or AI fallback produced a table.
+- **Low-confidence vision fallback**: PDF table extraction can optionally send
+  low-confidence page crops to a configured Azure OpenAI vision-capable chat
+  deployment. The refined result is stitched back into the deterministic table
+  model with confidence, operation, and token-usage metadata.
+- **Order-preserving alignment**: the diff engine now uses dynamic-programming
+  alignment inside matching document sections. This reduces false matches when
+  similar paragraphs or table rows repeat across a page.
+- **Word-level precision**: token diffs keep `SequenceMatcher` `autojunk`
+  disabled and refine replace operations so one changed word does not paint an
+  entire sentence as modified.
+
+AI remains optional. If Azure OpenAI is not configured, the deterministic path
+still runs and reports the available parser confidence.
 
 ## Azure deployment topology
 
@@ -143,7 +185,7 @@ The prompt is in `backend/prompts/clarification_prompt.txt` and is tunable.
 | Page rendering jobs | Azure Container Apps Job, queue-triggered |
 | Document storage (raw PDFs + page images) | Azure Blob Storage |
 | Structured store (blocks, diffs, templates) | Azure Database for PostgreSQL — Flexible Server (uses JSONB heavily) |
-| LLM | Azure OpenAI (GPT-4o or equivalent) |
+| LLM / vision fallback | Azure OpenAI vision-capable chat deployment |
 | Vector embeddings (for fuzzy matching, NL query routing) | pgvector extension on the same Postgres |
 | Job queue | Azure Service Bus (or Postgres-based queue for simplicity) |
 | Auth | Azure AD / Entra ID |
@@ -178,10 +220,10 @@ backend/
   api_schemas.py        # FastAPI request/response models
   ingestion/source_documents.py    # Multi-format source orchestration
   ingestion/parsers/    # DOCX, Excel/XLSB, CSV/TSV, OCR, and conversion helpers
-  extraction/pdf_extractor.py       # PDF/page/block extraction
-  extraction/table_extractor.py    # Robust table extraction
-  extraction/table_stitcher.py     # Cross-page table stitching
-  comparison/diff_engine.py          # Anchor-aware semantic diff engine
+  extraction/pdf_extractor.py      # PDF/page/block extraction with optional low-confidence vision fallback
+  extraction/table_extractor.py    # Robust deterministic table extraction
+  extraction/table_stitcher.py     # Cross-page table stitching and source metadata preservation
+  comparison/diff_engine.py        # Anchor-aware and order-preserving semantic diff engine
   services/table_tools.py            # Table previews and selected-column comparison
   jobs/queue.py         # Database-backed worker queue for scale-out containers
   summarizer.py         # LLM or deterministic summary table

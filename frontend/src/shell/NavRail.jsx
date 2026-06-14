@@ -1,84 +1,38 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React from "react";
 import {
+  Bot,
   FileOutput,
   FileSearch,
-  FileText,
   GitCompare,
   History,
-  MessageSquare,
-  Table,
 } from "lucide-react";
-import { fetchTools } from "../lib/api.js";
 
-const staticSections = [
+const sections = [
   {
-    label: "Workspace",
+    label: "AI Document Intelligence",
     items: [
-      { key: "home", label: "Chat", icon: MessageSquare },
+      { key: "compare", label: "Compare", icon: GitCompare },
+      { key: "extract", label: "Extract", icon: FileOutput },
       { key: "assistant", label: "Ask Document", icon: FileSearch },
-      { key: "jobs", label: "Sessions", icon: History },
+      { key: "jobs", label: "Work History", icon: History },
+    ],
+  },
+  {
+    label: "AI Agents",
+    items: [
+      { key: "agents", label: "Coming soon", icon: Bot, disabled: true, title: "Future skills and multi-agent workflows" },
     ],
   },
 ];
 
-const fallbackDocumentTools = [
-  { key: "compare", label: "Compare", icon: GitCompare },
-  { key: "extract", label: "Extract", icon: FileOutput },
-  { key: "tables", label: "Tables", icon: Table },
-  { key: "reports", label: "Reports", icon: FileText },
-];
-
-const toolRouteMap = {
-  "document.compare": { key: "compare", icon: GitCompare },
-  "document.extract": { key: "extract", icon: FileOutput },
-  "document.table.compare": { key: "tables", icon: Table },
-  "document.report.generate": { key: "reports", icon: FileText },
-};
-
 export function NavRail({ workspace, onNavigate, collapsed = false }) {
-  const [tools, setTools] = useState([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchTools()
-      .then((items) => {
-        if (!cancelled) setTools(items);
-      })
-      .catch(() => {
-        if (!cancelled) setTools([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const documentItems = useMemo(() => {
-    const mapped = tools
-      .map((tool) => {
-        const route = toolRouteMap[tool.name];
-        if (!route) return null;
-        return {
-          key: route.key,
-          label: readableToolLabel(tool.label),
-          icon: route.icon,
-        };
-      })
-      .filter(Boolean);
-    return mapped.length ? mapped : fallbackDocumentTools;
-  }, [tools]);
-
-  const sections = [
-    staticSections[0],
-    { label: "Documents", items: documentItems },
-  ];
-
   return (
     <nav className="workspace-nav" aria-label="Workspace navigation">
       {sections.map((section) => (
-        <div key={section.label} className={`workspace-nav-group${section.disabled ? " disabled" : ""}`}>
+        <div key={section.label} className="workspace-nav-group">
           {!collapsed && <div className="workspace-nav-label">{section.label}</div>}
           {section.items.map((item) => {
-            const active = workspace === item.key || (workspace === "home" && item.key === "home");
+            const active = workspace === item.key;
             return (
               <button
                 key={`${section.label}-${item.label}-${item.key}`}
@@ -97,11 +51,4 @@ export function NavRail({ workspace, onNavigate, collapsed = false }) {
       ))}
     </nav>
   );
-}
-
-function readableToolLabel(label = "") {
-  return String(label)
-    .replace(/^Altrai\s+/i, "")
-    .replace(/^Document\s+/i, "")
-    .trim() || "Tool";
 }

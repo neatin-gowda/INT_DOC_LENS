@@ -52,6 +52,9 @@ az cognitiveservices account deployment create -n oai-specdiff -g $RG \
   --deployment-name gpt-4o --model-name gpt-4o --model-version "2024-08-06" \
   --model-format OpenAI --sku-capacity 30 --sku-name "Standard"
 az cognitiveservices account deployment create -n oai-specdiff -g $RG \
+  --deployment-name gpt-4o-vision --model-name gpt-4o --model-version "2024-08-06" \
+  --model-format OpenAI --sku-capacity 20 --sku-name "Standard"
+az cognitiveservices account deployment create -n oai-specdiff -g $RG \
   --deployment-name embed --model-name text-embedding-3-small --model-version "1" \
   --model-format OpenAI --sku-capacity 50 --sku-name "Standard"
 
@@ -89,6 +92,7 @@ az containerapp create \
              AZURE_OPENAI_ENDPOINT=https://oai-specdiff.openai.azure.com \
              AZURE_OPENAI_API_KEY=secretref:openai-key \
              AZURE_OPENAI_DEPLOYMENT=gpt-4o \
+             AZURE_OPENAI_VISION_DEPLOYMENT=gpt-4o-vision \
              AZURE_OPENAI_EMBED_DEPLOYMENT=embed \
              BLOB_ACCOUNT=stspecdiffprod \
   --min-replicas 1 --max-replicas 5 --cpu 1.0 --memory 2.0Gi
@@ -96,6 +100,25 @@ az containerapp create \
 
 For Container Apps to pull the secrets from Key Vault, give its managed
 identity the `Key Vault Secrets User` role on `kv-specdiff`.
+
+### Optional AI extraction settings
+
+The document pipeline remains deterministic unless Azure OpenAI settings are
+provided. For low-confidence scanned or layout-heavy tables, configure:
+
+| Variable | Purpose |
+|---|---|
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint, for example `https://<resource>.openai.azure.com`. |
+| `AZURE_OPENAI_API_KEY` | API key or Key Vault secret reference. |
+| `AZURE_OPENAI_API_VERSION` | Optional API version override. |
+| `AZURE_OPENAI_VISION_DEPLOYMENT` | Recommended deployment for page/table vision fallback. |
+| `AZURE_OPENAI_DEPLOYMENT` | General chat/summarization deployment. |
+| `AZURE_OPENAI_EMBED_DEPLOYMENT` | Embedding deployment for retrieval and semantic search. |
+
+Use a vision-capable Azure OpenAI chat model for
+`AZURE_OPENAI_VISION_DEPLOYMENT`. The code records AI table confidence and token
+usage on extracted table metadata so job-level cost tracking can aggregate it
+later.
 
 ## 3. Frontend
 

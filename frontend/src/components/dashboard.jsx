@@ -26,7 +26,7 @@ export function LandingPage({ onExtract, onCompare, onJobs }) {
       <div className="quick-start-grid">
         <QuickStart title="Compare" detail="Baseline versus revised document review." onClick={onCompare} />
         <QuickStart title="Extract" detail="Single document extraction and query." onClick={onExtract} />
-        <QuickStart title="Sessions" detail="Resume completed document work." onClick={onJobs} />
+        <QuickStart title="Work History" detail="Resume completed document work." onClick={onJobs} />
       </div>
     </section>
   );
@@ -95,7 +95,7 @@ export function JobsDashboard({ onOpenJob, onAskJob, error }) {
     <section className="session-board">
       <div className="board-head">
         <div>
-          <h2>Sessions</h2>
+          <h2>Work History</h2>
         </div>
         <div className="board-actions">
           <span>{running} running</span>
@@ -110,7 +110,7 @@ export function JobsDashboard({ onOpenJob, onAskJob, error }) {
       {state.loading && !jobs.length ? (
         <SoftLoading label="Loading jobs" />
       ) : jobs.length === 0 ? (
-        <EmptyState label="No jobs are available yet." />
+        <EmptyState label="No document work is available yet." />
       ) : (
         <div className="job-list">
           {jobs.map((job) => (
@@ -165,7 +165,7 @@ function JobCard({ job, deleting, onOpen, onAsk, onDelete }) {
           <button type="button" onClick={onOpen} disabled={!complete} className="primary-action compact">
             Open
           </button>
-          <button type="button" onClick={onAsk} disabled={!complete} className="ghost-action compact">
+          <button type="button" onClick={onAsk} disabled={!complete || !isExtraction} className="ghost-action compact">
             Ask
           </button>
           <button type="button" onClick={onDelete} disabled={deleting} className="danger-action compact">

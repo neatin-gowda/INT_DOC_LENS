@@ -16,9 +16,12 @@ query layer, reports, and visual overlays.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import os
 import re
+import tempfile
 from collections import Counter
 from dataclasses import dataclass
 from typing import Optional
@@ -73,6 +76,202 @@ def render_pages(pdf_path: str, out_dir: str, zoom: float = 1.6) -> list[str]:
         doc.close()
 
     return paths
+
+
+def _table_dict_confidence(tbl: dict) -> float:
+    header = [str(cell or "").strip() for cell in tbl.get("header") or []]
+    rows = tbl.get("rows") or []
+    if not header or not rows:
+        return 0.55
+
+    row_widths = [len(row or []) for row in rows]
+    width = max(len(header), max(row_widths, default=0))
+    if width <= 0:
+        return 0.55
+
+    normalized_rows = [list(row or []) + [""] * (width - len(row or [])) for row in rows]
+    total_cells = width * max(1, len(normalized_rows))
+    filled_cells = sum(1 for row in normalized_rows for cell in row if str(cell or "").strip())
+    density = filled_cells / max(1, total_cells)
+    row_count_score = min(1.0, len(normalized_rows) / 4.0)
+    width_consistency = max((row_widths.count(value) for value in set(row_widths)), default=0) / max(1, len(row_widths))
+    useful_headers = sum(
+        1
+        for cell in header
+        if cell and not re.fullmatch(r"(?:col|column|value)\s*[_-]?\d+", cell, flags=re.I)
+    )
+    header_quality = useful_headers / max(1, len(header))
+    ragged_penalty = 1.0 - min(1.0, abs(width - (sum(len(row or []) for row in rows) / max(1, len(rows)))) / max(1, width))
+
+    score = (
+        0.55
+        + header_quality * 0.16
+        + density * 0.14
+        + row_count_score * 0.07
+        + width_consistency * 0.04
+        + ragged_penalty * 0.03
+    )
+    return round(max(0.55, min(0.99, score)), 3)
+
+
+def _safe_float(value: object, fallback: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _vision_table_config() -> tuple[str, str, str, str] | None:
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+    deployment = (
+        os.getenv("AZURE_OPENAI_VISION_DEPLOYMENT")
+        or os.getenv("AZURE_OPENAI_DEPLOYMENT")
+        or os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
+        or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+        or os.getenv("AZURE_OPENAI_MODEL")
+    )
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+    if not endpoint or not api_key or not deployment:
+        return None
+    return endpoint, api_key, deployment, api_version
+
+
+def _json_from_model_text(text: str) -> dict:
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
+        text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
+
+
+def _normalize_ai_tables(data: dict, page_width: float, page_height: float, usage: dict | None = None) -> list[dict]:
+    raw_tables = data.get("tables") if isinstance(data, dict) else None
+    if isinstance(raw_tables, dict):
+        raw_tables = [raw_tables]
+    if not isinstance(raw_tables, list):
+        raw_tables = [data] if isinstance(data, dict) and data.get("rows") else []
+
+    tables: list[dict] = []
+    for idx, item in enumerate(raw_tables):
+        if not isinstance(item, dict):
+            continue
+        rows = item.get("rows") or []
+        header = item.get("header") or item.get("columns") or []
+        if not isinstance(header, list) or not isinstance(rows, list) or not rows:
+            continue
+        normalized_rows = [[str(cell or "").strip() for cell in (row or [])] for row in rows if isinstance(row, list)]
+        if not normalized_rows:
+            continue
+        bbox = item.get("bbox")
+        if not (isinstance(bbox, list) and len(bbox) == 4):
+            bbox = [0, 0, page_width, page_height]
+        table = {
+            "bbox": tuple(float(x or 0) for x in bbox),
+            "header": [str(cell or "").strip() for cell in header],
+            "rows": normalized_rows,
+            "strategy": "AI_VISION",
+            "ai_extracted": True,
+            "ai_confidence": _safe_float(item.get("confidence") or data.get("confidence"), 0.90),
+            "ai_table_index": idx,
+        }
+        if usage:
+            table["ai_usage"] = usage
+        table["confidence"] = max(0.90, min(0.99, table["ai_confidence"]))
+        tables.append(table)
+    return tables
+
+
+def _extract_page_table_with_ai(image_path: str, page_width: float, page_height: float) -> list[dict]:
+    config = _vision_table_config()
+    if not config:
+        return []
+    endpoint, api_key, deployment, api_version = config
+
+    try:
+        from openai import AzureOpenAI
+
+        with open(image_path, "rb") as fh:
+            image_b64 = base64.b64encode(fh.read()).decode("ascii")
+
+        client = AzureOpenAI(api_key=api_key, azure_endpoint=endpoint, api_version=api_version)
+        response = client.chat.completions.create(
+            model=deployment,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Extract only structured tables from this document page. "
+                                "Return strict JSON with key tables. Each table must include "
+                                "header, rows, optional bbox [x0,y0,x1,y1] in page pixel coordinates, "
+                                "and confidence between 0 and 1. Do not include narrative paragraphs."
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                        },
+                    ],
+                }
+            ],
+        )
+        content = response.choices[0].message.content if response.choices else "{}"
+        usage = getattr(response, "usage", None)
+        usage_dict = {
+            "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+            "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+            "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+            "model": deployment,
+            "operation": "vision_table_extract",
+        } if usage else None
+        return _normalize_ai_tables(_json_from_model_text(content or "{}"), page_width, page_height, usage_dict)
+    except Exception:
+        return []
+
+
+def _enhance_low_confidence_tables(
+    pdf_path: str,
+    tables_by_page: dict[int, list[dict]],
+    page_sizes: dict[int, tuple[float, float]],
+) -> dict[int, list[dict]]:
+    if not _vision_table_config():
+        for tables in tables_by_page.values():
+            for tbl in tables:
+                tbl.setdefault("confidence", _table_dict_confidence(tbl))
+        return tables_by_page
+
+    low_pages: list[int] = []
+    for page, tables in tables_by_page.items():
+        for tbl in tables:
+            confidence = _table_dict_confidence(tbl)
+            tbl["confidence"] = confidence
+            if confidence < 0.90:
+                low_pages.append(page)
+                break
+
+    if not low_pages:
+        return tables_by_page
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="altrai_vision_pages_") as tmpdir:
+            page_images = render_pages(pdf_path, tmpdir)
+            for page in sorted(set(low_pages)):
+                image_path = page_images[page - 1] if 0 <= page - 1 < len(page_images) else None
+                if not image_path:
+                    continue
+                page_width, page_height = page_sizes.get(page, (612, 792))
+                ai_tables = _extract_page_table_with_ai(image_path, page_width, page_height)
+                if ai_tables:
+                    tables_by_page[page] = ai_tables
+    except Exception:
+        return tables_by_page
+
+    return tables_by_page
 
 
 def _collect_lines(pdf_path: str) -> list[_Line]:
@@ -552,6 +751,10 @@ def _source_table_metadata(st) -> list[dict]:
                 "strategy": item.get("strategy"),
                 "near_text": item.get("near_text"),
                 "n_rows": item.get("n_rows"),
+                "confidence": item.get("confidence"),
+                "ai_extracted": item.get("ai_extracted"),
+                "ai_confidence": item.get("ai_confidence"),
+                "ai_usage": item.get("ai_usage"),
             }
         )
 
@@ -601,6 +804,7 @@ def extract_blocks(
 
     # --- Tables: robust extract + cross-page stitch ---
     tables_by_page = extract_tables_robust(pdf_path)
+    tables_by_page = _enhance_low_confidence_tables(pdf_path, tables_by_page, page_sizes)
     stitched = sorted(stitch_tables(tables_by_page), key=_table_sort_key)
 
     # Build per-page table bboxes for line filtering.
@@ -636,6 +840,12 @@ def extract_blocks(
         header_sources = [str(x) for x in _meta_list(st, "header_sources") if x]
         strategies = [str(x) for x in _meta_list(st, "strategies") if x]
         source_tables = _source_table_metadata(st)
+        confidence_values = [
+            float(item.get("confidence"))
+            for item in source_tables
+            if item.get("confidence") is not None
+        ]
+        ai_usage_rows = [item.get("ai_usage") for item in source_tables if item.get("ai_usage")]
 
         table_title = _title_from_context(path_stack, near_texts, header, first_page)
         context = _table_context(path_stack, near_texts)
@@ -651,6 +861,9 @@ def extract_blocks(
             "header_sources": header_sources,
             "strategies": strategies,
             "source_tables": source_tables,
+            "extraction_confidence": round(sum(confidence_values) / len(confidence_values), 3) if confidence_values else None,
+            "ai_extracted": any(bool(item.get("ai_extracted")) for item in source_tables),
+            "ai_usage": ai_usage_rows,
             "page_width": page_width,
             "page_height": page_height,
         }

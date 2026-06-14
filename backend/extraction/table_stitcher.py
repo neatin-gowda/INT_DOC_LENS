@@ -387,6 +387,10 @@ def _merge_table(previous: StitchedTable, pno: int, current_table: dict) -> None
             "strategy": current_strategy,
             "near_text": current_near,
             "n_rows": len(rows),
+            "confidence": current_table.get("confidence"),
+            "ai_extracted": current_table.get("ai_extracted"),
+            "ai_confidence": current_table.get("ai_confidence"),
+            "ai_usage": current_table.get("ai_usage"),
         }
     )
 
@@ -422,6 +426,10 @@ def _new_stitched_table(pno: int, table: dict) -> StitchedTable:
                 "strategy": strategy,
                 "near_text": near_text,
                 "n_rows": len(rows),
+                "confidence": table.get("confidence"),
+                "ai_extracted": table.get("ai_extracted"),
+                "ai_confidence": table.get("ai_confidence"),
+                "ai_usage": table.get("ai_usage"),
             }
         ],
     )

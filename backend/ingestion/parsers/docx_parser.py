@@ -110,26 +110,30 @@ def _extract_docx(source_path: Path) -> list[Block]:
 
             if _looks_like_layout_table(normalized_rows, n_cols):
                 base_path = current_section.path if current_section else "/document"
+                layout_id = seq
                 for ri, row in enumerate(normalized_rows):
-                    row_text = " / ".join(_clean(cell) for cell in row if _clean(cell))
-                    if not row_text:
-                        continue
-                    block = _block(
-                        parent_id=current_section.id if current_section else None,
-                        block_type=BlockType.PARAGRAPH,
-                        path=f"{base_path}/layout_{seq}",
-                        text=row_text,
-                        payload={
-                            "text": row_text,
-                            "source_format": "docx",
-                            "layout_table": True,
-                            "layout_columns": [_clean(cell) for cell in row if _clean(cell)],
-                        },
-                        sequence=seq,
-                        page_number=_page_for_sequence(seq),
-                    )
-                    blocks.append(block)
-                    seq += 1
+                    for ci, cell in enumerate(row):
+                        cell_text = _clean(cell)
+                        if not cell_text:
+                            continue
+                        block = _block(
+                            parent_id=current_section.id if current_section else None,
+                            block_type=BlockType.PARAGRAPH,
+                            path=f"{base_path}/layout_{layout_id}_r{ri}_c{ci}",
+                            text=cell_text,
+                            payload={
+                                "text": cell_text,
+                                "source_format": "docx",
+                                "layout_table": True,
+                                "layout_row_index": ri,
+                                "layout_column_index": ci,
+                                "layout_column_count": n_cols,
+                            },
+                            sequence=seq,
+                            page_number=_page_for_sequence(seq),
+                        )
+                        blocks.append(block)
+                        seq += 1
                 continue
 
             header, body_rows, header_rows, header_index, header_strategy = _detect_header_band(normalized_rows, n_cols)

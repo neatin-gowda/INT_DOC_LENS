@@ -222,6 +222,28 @@ def _text_scripts(value: Any) -> set[str]:
         scripts.add("latin")
     return scripts
 
+def _script_distribution(value: Any) -> dict[str, float]:
+    text = _clean(value)
+    latin = len(re.findall(r"[A-Za-z]", text))
+    arabic = len(re.findall(r"[\u0600-\u06ff]", text))
+    total = latin + arabic
+    if not total:
+        return {"latin": 0.0, "arabic": 0.0}
+    return {"latin": latin / total, "arabic": arabic / total}
+
+def _has_bilingual_column_layout(rows: list[list[str]], n_cols: int) -> bool:
+    column_scripts: list[dict[str, float]] = []
+    for ci in range(n_cols):
+        text = " ".join(_clean(row[ci]) for row in rows if ci < len(row) and _clean(row[ci]))
+        if not text:
+            column_scripts.append({"latin": 0.0, "arabic": 0.0})
+            continue
+        column_scripts.append(_script_distribution(text))
+
+    latin_columns = [ci for ci, ratios in enumerate(column_scripts) if ratios["latin"] >= 0.40]
+    arabic_columns = [ci for ci, ratios in enumerate(column_scripts) if ratios["arabic"] >= 0.40]
+    return bool(latin_columns and arabic_columns and set(latin_columns) != set(arabic_columns))
+
 def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
     if n_cols < 2 or n_cols > 6:
         return False
@@ -229,6 +251,9 @@ def _looks_like_layout_table(rows: list[list[str]], n_cols: int) -> bool:
     filled_rows = [row for row in rows if _filled_count(row) >= 1]
     if not filled_rows:
         return False
+
+    if _has_bilingual_column_layout(filled_rows[:24], n_cols):
+        return True
 
     long_cell_count = 0
     short_code_count = 0

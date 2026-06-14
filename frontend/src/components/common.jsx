@@ -882,33 +882,6 @@ export function AiUsageCard({ usage }) {
   );
 }
 
-export function Tabs({ tab, setTab }) {
-  const items = [
-    ["viewer", "Review"],
-    ["query", "Ask"],
-    ["tables", "Tables"],
-    ["report", "Report"],
-  ];
-
-  return (
-    <nav className="workspace-tabs" aria-label="Comparison workspace tabs">
-      {items.map(([key, label]) => {
-        const active = tab === key;
-        return (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={active ? "active" : ""}
-            type="button"
-          >
-            {label}
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
-
 export function ProcessingState({ progress, message, status }) {
   const statusInfo = jobStatusInfo(status);
   const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));

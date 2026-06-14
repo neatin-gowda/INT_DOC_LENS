@@ -7,18 +7,16 @@ through one governed interface.
 
 ## Product Direction
 
-The primary surface should feel like a cloud desktop for document intelligence:
+The near-term surface should be an AI-powered document-intelligence workspace:
 
-- A persistent left navigation for workspaces, tools, job history, sources, and
-  administration.
-- A central work area that changes by task: compare, extract, review, generate,
-  search, or manage sources.
-- A right or bottom assistant panel for natural-language interaction with the
-  current document, job, table, or workspace.
+- A persistent left navigation for Compare, Extract, Ask Document, Work
+  History, and future AI Agents.
+- A central work area that changes by task: document comparison, single-document
+  extraction, grounded document question answering, or historical job review.
 - A quick upload area that supports drag-and-drop for baseline/revised files or
   single-document extraction without forcing users through multiple pages.
-- Role-aware views so departments see the tools, sources, and templates they are
-  allowed to use.
+- Future role-aware views so departments see only the agents, tools, sources,
+  and templates they are allowed to use.
 
 The UI should make the simple path obvious and keep expert controls available
 only when needed.
@@ -30,46 +28,50 @@ only when needed.
 1. User drops a baseline document and a revised document.
 2. The system starts a background job and shows live status.
 3. The work area opens a side-by-side review with visual preview, semantic
-   summary, table review, and report export.
-4. The assistant can answer questions against only this run unless the user
-   expands scope.
+   summary, and evidence-backed overlays.
+4. Table and report endpoints remain reusable API capabilities, but they are not
+   primary navigation items until the default comparison flow is excellent.
 
 ### Quick Extract
 
 1. User drops one or more files.
 2. The system extracts text, tables, images, metadata, key-values, and warnings.
 3. The work area shows structured output with downloadable JSON/report options.
-4. The assistant can answer questions about the extracted files.
+4. Ask Document can answer grounded questions about completed extraction runs.
 
-### Ask Across Sources
+### Ask Document
 
-1. User chooses a document collection, department source, or previous job.
-2. The assistant routes the question to the right RAG store and allowed tools.
-3. Responses cite source documents and expose tool calls/cost where appropriate.
+1. User uploads one document or opens a completed extraction job.
+2. The system queries the deterministic extraction store first.
+3. Responses cite source pages, tables, rows, cells, or spans where available.
+4. LLM streaming can be layered on later, but the default answer remains
+   grounded in extracted evidence.
 
-### Table Review
+### Advanced Table Review
 
 1. User selects a baseline table and revised table by page/topic.
 2. The system suggests the best match and auto-runs deterministic alignment.
 3. Advanced column/row selection is hidden unless the table has nested headers,
    vertical headers, or ambiguous row labels.
-4. AI review is a deliberate action, not part of the default path.
+4. AI/vision review is triggered autonomously for low-confidence extraction
+   cases, not exposed as a user-facing "improve accuracy" button.
 
 ## Information Architecture
 
 ```text
 AI Workspace
-  Home
-  Jobs
-  Compare
-  Extract
-  Table Review
-  Ask Documents
-  Sources
-  Templates
-  Skills & Tools
-  Automations
-  Admin
+  AI Document Intelligence
+    Compare
+    Extract
+    Ask Document
+    Work History
+  AI Agents
+    Coming Soon
+  Admin and Governance (future)
+    Capabilities
+    Models
+    Knowledge Bases
+    RBAC
 ```
 
 The current comparison and extraction pages should become workspaces inside this
@@ -113,8 +115,8 @@ The platform should support multiple retrieval scopes:
   project repositories.
 
 Every answer should carry scope, citations, and permission checks. A user should
-never be able to retrieve content through chat that they cannot open through the
-normal UI.
+never be able to retrieve content through Ask Document that they cannot open
+through the normal UI.
 
 ## Governance Requirements
 
@@ -132,10 +134,12 @@ Production readiness requires:
 
 - One shell, many tools.
 - Navigation on the left; job/status visibility always available.
-- Chat is contextual, not the only interface.
+- Ask Document is contextual and grounded; there is no standalone generic chat
+  workspace in the near-term product.
 - Upload should be possible from the active workspace.
 - Deterministic processing should run before AI.
-- AI actions should show cost and scope.
+- AI actions should run autonomously only when configured and should persist
+  cost, scope, model, and confidence metadata.
 - Advanced controls stay collapsed until the system cannot decide confidently.
 - Tables and previews must be readable for PDF, Word, spreadsheet, image/OCR,
   and mixed LTR/RTL documents.
@@ -144,8 +148,8 @@ Production readiness requires:
 
 The near-term product should stay document-workspace-first. Knowledge bases,
 models, MCP connectors, and autonomous agents remain platform capabilities, but
-they should not distract from the core document experience until the comparison,
-extraction, preview, citation, and grounded chat loop is excellent.
+they should not distract from the core document experience until comparison,
+extraction, preview, citation, and grounded Q&A are excellent.
 
 The default document workflow should be deterministic before it is generative:
 
@@ -164,9 +168,9 @@ The default document workflow should be deterministic before it is generative:
 7. Capture token usage for each AI call: input tokens, output tokens, model,
    tool name, run id, element id, user id, department, latency, and cost bucket.
 
-Every answer in document chat should cite the exact page, table, row, cell, or
+Every Ask Document answer should cite the exact page, table, row, cell, or
 span that supported it. When a user clicks a citation, the preview should open
-that document page and highlight the referenced region. This keeps chat useful
+that document page and highlight the referenced region. This keeps Q&A useful
 without turning it into an ungrounded assistant.
 
 ## Implementation Phases
@@ -174,24 +178,25 @@ without turning it into an ungrounded assistant.
 ### Phase 1: Shell And Navigation
 
 - Add a persistent workspace shell with left navigation.
-- Move current Home, Jobs, Compare, Extract, Table Review, and Ask Agent into
-  shell workspaces.
+- Move Compare, Extract, Ask Document, and Work History into shell workspaces.
+- Keep AI Agents visible only as a coming-soon area until backend orchestration,
+  RBAC, and tool registration are ready.
 - Keep existing backend endpoints.
 - Preserve current upload and result flows.
 
 Initial foundation: `frontend/src/components/workspaceShell.jsx` now provides a
-central collapsible left-navigation shell, command center, Ask Documents upload
-and chat placeholder, and placeholder modules for Agent Studio, Tool Studio,
-Workflow Runs, Knowledge & RAG, and Admin & RBAC.
+central collapsible left-navigation shell, Work History, Ask Document, and a
+future AI Agents placeholder.
 
 Ask Documents now uploads files through the existing extraction pipeline and can
 query completed extraction runs through `POST /extract-runs/{run_id}/query`.
 
-### Phase 2: Unified Assistant Panel
+### Phase 2: Grounded Ask Document
 
-- Add a contextual assistant panel that knows the active job/workspace.
-- Route queries to current run, extraction result, or selected document source.
-- Show citations, scope, and AI usage.
+- Route questions to the current extraction run.
+- Show citations, scope, and deterministic evidence.
+- Later, stream LLM responses over the same citation contract when Azure OpenAI
+  is configured.
 
 ### Phase 3: Tool Registry
 
@@ -210,6 +215,8 @@ the durable job store and current in-memory run cache.
 - Add source collections and per-department document stores.
 - Connect current `query` behavior to configurable retrieval scopes.
 - Add audit and permission checks around every retrieval.
+- Register AI Agents, skills, MCP connectors, and automations against the same
+  tool registry before exposing them in the UI.
 
 ### Phase 5: Templates And Generation
 
@@ -223,6 +230,7 @@ the durable job store and current in-memory run cache.
 - Remove obsolete prototype files from the repo.
 - Create a shell component and move navigation out of `Header`.
 - Keep `App.jsx` as state orchestration only.
-- Split broad helpers from `components/common.jsx` when the shell lands.
+- Keep generic chat, table review, and report-builder screens out of primary
+  navigation until the document workflows need them.
 - Add tool metadata for comparison, extraction, query, table comparison, and
   reports.

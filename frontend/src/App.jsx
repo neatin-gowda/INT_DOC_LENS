@@ -8,7 +8,6 @@ import {
 // Import modular components
 import {
   StatsBar,
-  Tabs,
   ProcessingState,
   ErrorBox,
   readResponseError,
@@ -19,10 +18,6 @@ import {
 import { JobsDashboard } from "./components/dashboard.jsx";
 import { UploadPanel, ExtractUploadPanel } from "./components/upload.jsx";
 import { SideBySide } from "./components/viewer.jsx";
-import { TablesWorkspace } from "./components/tables.jsx";
-import { QueryPanel } from "./features/ask/AskComparisonPanel.jsx";
-import { ChatPage } from "./features/chat/ChatPage.jsx";
-import { ReviewReport } from "./components/feedback.jsx";
 import { ExtractionWorkspace } from "./components/extraction.jsx";
 import { AskDocumentsWorkspace, WorkspaceShell } from "./components/workspaceShell.jsx";
 import { useDocumentTitle } from "./theme/useDocumentTitle.js";
@@ -47,26 +42,24 @@ const setSession = (key, value) => {
 };
 
 const workspacePaths = {
-  home: "/chat",
-  jobs: "/jobs",
   compare: "/compare",
   extract: "/extract",
   assistant: "/ask",
-  tables: "/documents/tables",
-  reports: "/documents/reports",
+  jobs: "/work-history",
+  agents: "/ai-agents",
 };
 
 const pathWorkspaces = {
-  "/": "home",
+  "/": "compare",
   ...Object.fromEntries(Object.entries(workspacePaths).map(([key, value]) => [value, key])),
 };
 
-const workspaceFromPath = (pathname) => pathWorkspaces[pathname] || "home";
+const workspaceFromPath = (pathname) => pathWorkspaces[pathname] || "compare";
 
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [workspace, setWorkspace] = useState(() => workspaceFromPath(window.location.pathname) || getSession("workspace", "home"));
+  const [workspace, setWorkspace] = useState(() => workspaceFromPath(window.location.pathname) || getSession("workspace", "compare"));
   const [runId, setRunId] = useState(() => getSession("runId", null));
   const [meta, setMeta] = useState(() => getSession("meta", null));
   const [tab, setTab] = useState(() => getSession("tab", "viewer"));
@@ -80,13 +73,11 @@ export default function App() {
   const [extractTab, setExtractTab] = useState(() => getSession("extractTab", "overview"));
   const [jobError, setJobError] = useState("");
   const pageTitle = {
-    home: "",
-    jobs: "Sessions",
     compare: "Compare",
     extract: "Extract",
     assistant: "Ask Document",
-    tables: "Tables",
-    reports: "Reports",
+    jobs: "Work History",
+    agents: "AI Agents",
   }[workspace] || "Workspace";
 
   useDocumentTitle(pageTitle);
@@ -108,13 +99,11 @@ export default function App() {
   }, [location.pathname]);
 
   useEffect(() => {
-    if (workspace === "tables") setTab("tables");
-    if (workspace === "reports") setTab("report");
     if (workspace === "compare" && tab !== "viewer") setTab("viewer");
   }, [workspace]);
 
   const resetAll = () => {
-    setWorkspace("home");
+    setWorkspace("compare");
     setRunId(null);
     setMeta(null);
     setPageNum(1);
@@ -136,15 +125,11 @@ export default function App() {
   };
 
   const goWorkspace = (nextWorkspace) => {
-    if (nextWorkspace === "home") {
-      resetAll();
-    } else {
-      setWorkspace(nextWorkspace);
-      setError("");
-      setExtractError("");
-      setJobError("");
-    }
-    navigate(workspacePaths[nextWorkspace] || "/", { replace: false });
+    setWorkspace(nextWorkspace);
+    setError("");
+    setExtractError("");
+    setJobError("");
+    navigate(workspacePaths[nextWorkspace] || workspacePaths.compare, { replace: false });
   };
 
   useEffect(() => {
@@ -384,16 +369,7 @@ export default function App() {
         return;
       }
 
-      const resp = await fetch(`${API}/runs/${job.run_id}`);
-      if (!resp.ok) throw new Error(await readResponseError(resp));
-      const data = await resp.json();
-      setExtractRunId(null);
-      setExtractMeta(null);
-      setExtractBusy(false);
-      setRunId(job.run_id);
-      setMeta(data);
-      setBusy(data.status !== "complete" && data.status !== "failed");
-      setWorkspace("assistant");
+      await openJob(job);
     } catch (err) {
       setJobError(friendlyFetchError(err));
     }
@@ -415,17 +391,13 @@ export default function App() {
         onNavigate={goWorkspace}
         onDownloadReport={downloadReport}
       >
-        {workspace === "home" && (
-          <ChatPage />
-        )}
-
         {workspace === "jobs" && (
           <JobsDashboard onOpenJob={openJob} onAskJob={askJob} error={jobError} />
         )}
 
         {workspace === "compare" && !isComplete && (
           <section className="workflow-panel">
-            <UploadPanel onUpload={onUpload} busy={busy} onBack={() => goWorkspace("home")} />
+            <UploadPanel onUpload={onUpload} busy={busy} onBack={() => goWorkspace("compare")} />
             {busy && meta && (
               <ProcessingState
                 progress={meta.progress || 0}
@@ -439,7 +411,7 @@ export default function App() {
 
         {workspace === "extract" && !isExtractComplete && (
           <section className="workflow-panel">
-            <ExtractUploadPanel onUpload={onExtractUpload} busy={extractBusy} onBack={() => goWorkspace("home")} />
+            <ExtractUploadPanel onUpload={onExtractUpload} busy={extractBusy} onBack={() => goWorkspace("compare")} />
             {extractBusy && extractMeta && (
               <ProcessingState
                 progress={extractMeta.progress || 0}
@@ -451,7 +423,7 @@ export default function App() {
           </section>
         )}
 
-        {["compare", "tables", "reports"].includes(workspace) && isComplete && runId && meta && (
+        {workspace === "compare" && isComplete && runId && meta && (
           <section className="comparison-workspace">
             <div className="comparison-head">
               <div>
@@ -460,13 +432,9 @@ export default function App() {
               <div className="comparison-id">#{String(runId).slice(0, 6)}</div>
             </div>
             <StatsBar meta={meta} />
-            <Tabs tab={tab} setTab={setTab} />
 
             <main className="workspace-surface">
-              {tab === "viewer" && <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />}
-              {tab === "query" && <QueryPanel runId={runId} />}
-              {tab === "tables" && <TablesWorkspace runId={runId} />}
-              {tab === "report" && <ReviewReport runId={runId} />}
+              <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />
             </main>
           </section>
         )}
@@ -481,13 +449,17 @@ export default function App() {
         )}
 
         {workspace === "assistant" && (
-          runId && isComplete ? (
-            <main className="workspace-surface">
-              <QueryPanel runId={runId} />
-            </main>
-          ) : (
-            <AskDocumentsWorkspace initialRunId={extractRunId || ""} initialMeta={extractMeta} />
-          )
+          <AskDocumentsWorkspace initialRunId={extractRunId || ""} initialMeta={extractMeta} />
+        )}
+
+        {workspace === "agents" && (
+          <section className="workspace-placeholder">
+            <h2>AI Agents</h2>
+            <p>Future skills and multi-agent workflows will live here after the document intelligence workspace is stable.</p>
+            <div className="placeholder-list">
+              <span>Coming soon</span>
+            </div>
+          </section>
         )}
 
       </WorkspaceShell>

@@ -26,6 +26,8 @@ Add these repository secrets before running the workflow:
 | `AZURE_OPENAI_ENDPOINT` | No | Required only for optional AI features. |
 | `AZURE_OPENAI_API_KEY` | No | Required only for optional AI features. |
 | `AZURE_OPENAI_DEPLOYMENT` | No | Chat deployment name. |
+| `AZURE_OPENAI_VISION_DEPLOYMENT` | No | Vision-capable chat deployment for low-confidence page/table extraction. |
+| `AZURE_OPENAI_API_VERSION` | No | Optional Azure OpenAI API version override. |
 | `AZURE_OPENAI_EMBED_DEPLOYMENT` | No | Embedding deployment name, for example `text-embedding-3-small`. |
 
 Optional repository variables:
@@ -72,6 +74,23 @@ Container App, applies `sql/schema.sql`, and deploys the frontend with
 The Bicep deployment is idempotent. If a resource with the generated name
 already exists in the resource group, Azure updates it. If it does not exist,
 Azure creates it.
+
+## Optional AI Model Setup
+
+The app can run without Azure OpenAI. When you are ready to test AI-assisted
+document accuracy, deploy:
+
+- one vision-capable chat deployment for low-confidence table/page extraction
+  and set `AZURE_OPENAI_VISION_DEPLOYMENT`;
+- one general chat deployment for summaries and future grounded Ask Document
+  responses and set `AZURE_OPENAI_DEPLOYMENT`;
+- one embedding deployment for retrieval and semantic search and set
+  `AZURE_OPENAI_EMBED_DEPLOYMENT`.
+
+Keep the deployment names stable. The backend reads deployment names from
+environment variables, so model upgrades should be handled by changing the Azure
+deployment behind the same name or updating the secret/variable during a
+planned release.
 
 ## Manual Infra Deploy
 

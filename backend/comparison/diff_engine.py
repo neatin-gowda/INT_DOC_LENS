@@ -423,6 +423,72 @@ def _pair_sorted_candidates(
     return pairs
 
 
+def _sequence_alignment_score(b: Block, t: Block) -> float:
+    score = _semantic_match_score(b, t)
+    if _canonical_text(b.text) == _canonical_text(t.text):
+        score += 0.05
+    if _page_sequence_affinity(b, t) >= 0.75:
+        score += 0.06
+    return min(1.0, score)
+
+
+def _align_sequence_dp(
+    base_list: list[Block],
+    target_list: list[Block],
+) -> list[tuple[Optional[Block], Optional[Block]]]:
+    """
+    Order-preserving alignment for repeated lines inside the same section/type.
+    This avoids greedy cross-pairing when identical placeholders or footers move.
+    """
+    base_items = sorted(base_list, key=lambda b: (b.page_number, b.sequence))
+    target_items = sorted(target_list, key=lambda b: (b.page_number, b.sequence))
+    m = len(base_items)
+    n = len(target_items)
+    gap_penalty = -0.18
+
+    scores = [[0.0] * (n + 1) for _ in range(m + 1)]
+    moves = [[""] * (n + 1) for _ in range(m + 1)]
+
+    for i in range(1, m + 1):
+        scores[i][0] = scores[i - 1][0] + gap_penalty
+        moves[i][0] = "up"
+    for j in range(1, n + 1):
+        scores[0][j] = scores[0][j - 1] + gap_penalty
+        moves[0][j] = "left"
+
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            diag = scores[i - 1][j - 1] + _sequence_alignment_score(base_items[i - 1], target_items[j - 1])
+            up = scores[i - 1][j] + gap_penalty
+            left = scores[i][j - 1] + gap_penalty
+            best = max(diag, up, left)
+            scores[i][j] = best
+            if best == diag:
+                moves[i][j] = "diag"
+            elif best == up:
+                moves[i][j] = "up"
+            else:
+                moves[i][j] = "left"
+
+    aligned: list[tuple[Optional[Block], Optional[Block]]] = []
+    i, j = m, n
+    while i > 0 or j > 0:
+        move = moves[i][j]
+        if i > 0 and j > 0 and move == "diag":
+            aligned.append((base_items[i - 1], target_items[j - 1]))
+            i -= 1
+            j -= 1
+        elif i > 0 and (j == 0 or move == "up"):
+            aligned.append((base_items[i - 1], None))
+            i -= 1
+        else:
+            aligned.append((None, target_items[j - 1]))
+            j -= 1
+
+    aligned.reverse()
+    return aligned
+
+
 def _align(base: list[Block], target: list[Block]) -> list[tuple[Optional[Block], Optional[Block]]]:
     pairs: list[tuple[Optional[Block], Optional[Block]]] = []
     used_b: set = set()
@@ -501,24 +567,27 @@ def _align(base: list[Block], target: list[Block]) -> list[tuple[Optional[Block]
 
     rem_b = [b for b in base if b.id not in used_b and b.block_type in _MATCH_TYPES]
     rem_t = [t for t in target if t.id not in used_t and t.block_type in _MATCH_TYPES]
+    by_sec_b: dict[tuple[str, BlockType], list[Block]] = defaultdict(list)
     by_sec_t: dict[tuple[str, BlockType], list[Block]] = defaultdict(list)
+    for b in rem_b:
+        by_sec_b[(_section_prefix(b.path, 2), b.block_type)].append(b)
     for t in rem_t:
         by_sec_t[(_section_prefix(t.path, 2), t.block_type)].append(t)
 
-    scored = []
-    for b in rem_b:
-        candidates = by_sec_t.get((_section_prefix(b.path, 2), b.block_type), [])
-        for t in candidates:
-            if t.id in used_t:
+    for key, b_list in by_sec_b.items():
+        t_list = by_sec_t.get(key, [])
+        if not t_list:
+            continue
+
+        for b, t in _align_sequence_dp(b_list, t_list):
+            if not b or not t or b.id in used_b or t.id in used_t:
                 continue
-            score = _semantic_match_score(b, t)
+            score = _sequence_alignment_score(b, t)
             threshold = 0.50 if b.block_type == BlockType.TABLE_ROW else 0.58
-            if _page_sequence_affinity(b, t) >= 0.75:
-                threshold -= 0.06
             if score >= threshold:
-                scored.append((score, b, t))
-    for b, t in _pair_sorted_candidates(scored, used_b, used_t):
-        pairs.append((b, t))
+                pairs.append((b, t))
+                used_b.add(b.id)
+                used_t.add(t.id)
 
     rem_b = [b for b in base if b.id not in used_b and b.block_type in _MATCH_TYPES]
     rem_t = [t for t in target if t.id not in used_t and t.block_type in _MATCH_TYPES]

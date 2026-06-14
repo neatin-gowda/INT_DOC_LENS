@@ -35,9 +35,9 @@ backend/
     parsers/             Format-specific DOCX, Excel/XLSB, CSV/TSV, OCR, and conversion helpers.
 
   extraction/
-    pdf_extractor.py     PDF block extraction, page rendering, OCR fallback, anchor tagging.
+    pdf_extractor.py     PDF block extraction, page rendering, OCR fallback, anchor tagging, optional low-confidence vision fallback.
     table_extractor.py   Table detection strategies for PDF pages.
-    table_stitcher.py    Cross-page table stitching.
+    table_stitcher.py    Cross-page table stitching and source-confidence preservation.
     runner.py            Deterministic enrichment over extracted blocks.
     schema.py            Local semantic classifiers, value typing, template fingerprinting.
     quality.py           Extraction quality scoring.
@@ -45,7 +45,7 @@ backend/
     providers/           Provider metadata and future provider boundaries.
 
   comparison/
-    diff_engine.py       Anchor-aware block/field/token diffing.
+    diff_engine.py       Anchor-aware, order-preserving block/field/token diffing.
 
   services/
     table_tools.py       Table discovery, viewing, row matching, and selected-column comparison helpers.
@@ -78,6 +78,7 @@ backend/
 - Backend container: `Dockerfile`
 - CLI smoke test: `python -m backend.run_cli --base old.pdf --target new.pdf --out ./out`
 - Frontend app: `frontend/src/App.jsx`
+- Frontend shell: `frontend/src/components/workspaceShell.jsx` and `frontend/src/shell/NavRail.jsx`
 - Frontend build: `cd frontend && npm run build`
 - Azure deploy: `.github/workflows/azure-full-deploy.yml`
 
@@ -92,6 +93,13 @@ The active comparison path is:
 - `backend/services/table_tools.py` for table discovery, previews, and selected-column comparison.
 - `backend/summarizer.py` for deterministic or Azure OpenAI-backed review summaries.
 - `backend/query.py` for natural-language questions over comparison results.
+- `frontend/src/features/ask/AskDocumentsWorkspace.jsx` for grounded Ask Document over extraction runs.
+- `frontend/src/components/dashboard.jsx` for Work History.
+
+The primary UI navigation is intentionally narrow: Compare, Extract, Ask
+Document, Work History, and a future AI Agents placeholder. Table and report
+capabilities stay available through backend endpoints and can be reintroduced as
+advanced flows later.
 
 ## Naming Rules
 
