@@ -52,6 +52,7 @@ export function AdminWorkspace() {
     onboarding_notes: "",
     learning_mode: "deterministic_first",
   });
+  const [initialSampleFiles, setInitialSampleFiles] = useState({ baseline: null, revised: null, variations: [] });
   const [sampleFiles, setSampleFiles] = useState({ baseline: null, revised: null, variations: [] });
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -124,8 +125,14 @@ export function AdminWorkspace() {
         headers: headers(),
         body: JSON.stringify(form),
       });
-      setNotice("Use case created.");
+      let sampleMessage = "";
+      if (data.id && hasAnySample(initialSampleFiles)) {
+        await uploadSamples(data.id, initialSampleFiles, form.onboarding_notes, form.learning_mode === "ai_assisted_bootstrap");
+        sampleMessage = " Sample documents learned and model profile bootstrapped.";
+      }
+      setNotice(`Use case created.${sampleMessage}`);
       setForm(emptyForm);
+      setInitialSampleFiles({ baseline: null, revised: null, variations: [] });
       await loadDatasets();
       if (data.id) await selectDataset(data.id);
     } catch (err) {
@@ -183,18 +190,7 @@ export function AdminWorkspace() {
     setError("");
     setNotice("");
     try {
-      const formData = new FormData();
-      if (sampleFiles.baseline) formData.append("baseline", sampleFiles.baseline);
-      if (sampleFiles.revised) formData.append("revised", sampleFiles.revised);
-      sampleFiles.variations.forEach((file) => formData.append("variations", file));
-      formData.append("notes", profileMeta.onboarding_notes || "");
-      formData.append("use_llm", String(profileMeta.learning_mode === "ai_assisted_bootstrap"));
-      const resp = await fetch(`${API}/admin/datasets/${selectedId}/samples`, {
-        method: "POST",
-        headers: { "X-User-Role": window.sessionStorage.getItem("simulated_role") || "platform_admin" },
-        body: formData,
-      });
-      if (!resp.ok) throw new Error(await readResponseError(resp));
+      await uploadSamples(selectedId, sampleFiles, profileMeta.onboarding_notes || "", profileMeta.learning_mode === "ai_assisted_bootstrap");
       setNotice("Sample documents learned and model profile updated.");
       setSampleFiles({ baseline: null, revised: null, variations: [] });
       await selectDataset(selectedId);
@@ -203,6 +199,22 @@ export function AdminWorkspace() {
     } finally {
       setBusy("");
     }
+  };
+
+  const uploadSamples = async (datasetId, files, notes, useLlm) => {
+    const formData = new FormData();
+    if (files.baseline) formData.append("baseline", files.baseline);
+    if (files.revised) formData.append("revised", files.revised);
+    files.variations.forEach((file) => formData.append("variations", file));
+    formData.append("notes", notes || "");
+    formData.append("use_llm", String(useLlm));
+    const resp = await fetch(`${API}/admin/datasets/${datasetId}/samples`, {
+      method: "POST",
+      headers: { "X-User-Role": window.sessionStorage.getItem("simulated_role") || "platform_admin" },
+      body: formData,
+    });
+    if (!resp.ok) throw new Error(await readResponseError(resp));
+    return resp.json();
   };
 
   const deleteDataset = async () => {
@@ -312,6 +324,26 @@ export function AdminWorkspace() {
               <textarea value={form.onboarding_notes} onChange={(e) => setForm({ ...form, onboarding_notes: e.target.value })} placeholder="Add business rules, known pain points, and what reviewers expect from this model." />
             </label>
             <RolePicker value={form.allowed_roles} onChange={(allowed_roles) => setForm({ ...form, allowed_roles })} />
+            <div className="seed-form inline">
+              <div>
+                <h4>Initial samples</h4>
+                <p>Optional, but recommended. Upload baseline and revised examples now to bootstrap metadata, table structure, stable keys, and page/layout profile for this use case.</p>
+              </div>
+              <div className="sample-upload-grid">
+                <label>
+                  Baseline sample
+                  <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setInitialSampleFiles({ ...initialSampleFiles, baseline: e.target.files?.[0] || null })} />
+                </label>
+                <label>
+                  Revised sample
+                  <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setInitialSampleFiles({ ...initialSampleFiles, revised: e.target.files?.[0] || null })} />
+                </label>
+                <label>
+                  Layout variations
+                  <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setInitialSampleFiles({ ...initialSampleFiles, variations: Array.from(e.target.files || []) })} />
+                </label>
+              </div>
+            </div>
             <button type="submit" className="primary-action" disabled={busy === "create"}>{busy === "create" ? "Creating" : "Create use case"}</button>
           </form>
         </main>
@@ -413,6 +445,10 @@ export function AdminWorkspace() {
       </section>
     </section>
   );
+}
+
+function hasAnySample(files) {
+  return Boolean(files?.baseline || files?.revised || files?.variations?.length);
 }
 
 function RolePicker({ value, onChange }) {

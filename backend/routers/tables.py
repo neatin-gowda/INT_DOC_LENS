@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..api_schemas import CompareTableColumnsReq, CompareTablesReq, TableViewReq
 from ..api_helpers import _ensure_complete
-from ..api_usage import add_usage
+from ..ai_usage import add_usage
 from ..services.table_tools import (
     _ai_selected_table_review,
     _align_columns,

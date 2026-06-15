@@ -68,6 +68,71 @@ def _db_required() -> None:
         raise HTTPException(503, "Database is not configured.")
 
 
+def _ensure_dataset_schema() -> None:
+    if not db_enabled():
+        return
+    with get_conn() as conn:
+        conn.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS document_family (
+                id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                tenant_id        TEXT NOT NULL DEFAULT 'default',
+                business_unit_id TEXT NOT NULL DEFAULT 'default',
+                supplier         TEXT NOT NULL,
+                family_name      TEXT NOT NULL,
+                domain           TEXT NOT NULL DEFAULT 'generic',
+                prompt_profile   JSONB NOT NULL DEFAULT '{}'::jsonb,
+                ui_profile       JSONB NOT NULL DEFAULT '{}'::jsonb,
+                template_profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+                template_version INT NOT NULL DEFAULT 1,
+                created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        for statement in (
+            "ALTER TABLE document_family ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'",
+            "ALTER TABLE document_family ADD COLUMN IF NOT EXISTS business_unit_id TEXT NOT NULL DEFAULT 'default'",
+            "ALTER TABLE document_family ADD COLUMN IF NOT EXISTS domain TEXT NOT NULL DEFAULT 'generic'",
+            "ALTER TABLE document_family ADD COLUMN IF NOT EXISTS prompt_profile JSONB NOT NULL DEFAULT '{}'::jsonb",
+            "ALTER TABLE document_family ADD COLUMN IF NOT EXISTS ui_profile JSONB NOT NULL DEFAULT '{}'::jsonb",
+            "ALTER TABLE document_family ADD COLUMN IF NOT EXISTS template_profile JSONB NOT NULL DEFAULT '{}'::jsonb",
+            "ALTER TABLE document_family ADD COLUMN IF NOT EXISTS template_version INT NOT NULL DEFAULT 1",
+            "ALTER TABLE document_family ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+            "ALTER TABLE document_family ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+        ):
+            conn.execute(statement)
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_document_family_scope_name
+            ON document_family (tenant_id, business_unit_id, supplier, family_name)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS spec_document (
+                id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                tenant_id           TEXT NOT NULL DEFAULT 'default',
+                business_unit_id    TEXT NOT NULL DEFAULT 'default',
+                family_id           UUID NOT NULL REFERENCES document_family(id),
+                label               TEXT NOT NULL,
+                version_tag         TEXT,
+                raw_pdf_blob_uri    TEXT NOT NULL DEFAULT '',
+                page_images_prefix  TEXT NOT NULL DEFAULT '',
+                page_count          INT NOT NULL DEFAULT 0,
+                sha256              CHAR(64) NOT NULL,
+                extracted_at        TIMESTAMPTZ,
+                coverage_pct        NUMERIC(5,2),
+                uploaded_by         TEXT,
+                uploaded_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_spec_document_family_sha ON spec_document (family_id, sha256)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_spec_document_family ON spec_document (family_id)")
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -408,6 +473,7 @@ def resolve_dataset_for_principal(family_id: str, principal: Optional[Principal]
             raise HTTPException(403, "You do not have access to the selected use case.")
         return dataset
 
+    _ensure_dataset_schema()
     family_uuid = _family_uuid(family_id)
     with get_conn() as conn:
         row = conn.execute(
@@ -439,6 +505,7 @@ def list_accessible_datasets():
         datasets.sort(key=lambda item: (str(item.get("supplier") or ""), str(item.get("family_name") or "")))
         return {"datasets": datasets}
 
+    _ensure_dataset_schema()
     with get_conn() as conn:
         rows = conn.execute(
             """
@@ -470,6 +537,7 @@ def list_admin_datasets():
         datasets.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return {"datasets": datasets}
 
+    _ensure_dataset_schema()
     with get_conn() as conn:
         if principal.is_platform_admin:
             rows = conn.execute(
@@ -523,6 +591,7 @@ def create_dataset(req: CreateDatasetReq):
         _write_local_datasets(datasets)
         return {"status": "success", "id": str(dataset["id"]), "storage": "local_json"}
 
+    _ensure_dataset_schema()
     prompt_profile = {
         "description": req.description.strip(),
         "onboarding_notes": req.onboarding_notes.strip(),
@@ -596,6 +665,7 @@ def get_dataset(family_id: str):
             raise HTTPException(403, "Access denied to this dataset.")
         return dataset
 
+    _ensure_dataset_schema()
     family_uuid = _family_uuid(family_id)
 
     with get_conn() as conn:
@@ -689,6 +759,7 @@ def update_dataset(family_id: str, req: UpdateDatasetReq):
         _write_local_datasets(datasets)
         return {"status": "success", "storage": "local_json"}
 
+    _ensure_dataset_schema()
     family_uuid = _family_uuid(family_id)
 
     with get_conn() as conn:
@@ -806,6 +877,7 @@ def delete_dataset(family_id: str):
         _write_local_documents([doc for doc in _read_local_documents() if str(doc.get("family_id")) != str(family_id)])
         return {"status": "success", "storage": "local_json"}
 
+    _ensure_dataset_schema()
     family_uuid = _family_uuid(family_id)
 
     with get_conn() as conn:
@@ -913,6 +985,7 @@ async def bootstrap_dataset_samples(
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
+    _ensure_dataset_schema()
     family_uuid = _family_uuid(family_id)
     with get_conn() as conn:
         family = conn.execute(
@@ -1067,6 +1140,7 @@ async def bootstrap_dataset(
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
+    _ensure_dataset_schema()
     family_uuid = _family_uuid(family_id)
 
     with get_conn() as conn:
@@ -1152,6 +1226,7 @@ def list_dataset_documents(family_id: str):
         docs.sort(key=lambda doc: str(doc.get("uploaded_at") or ""), reverse=True)
         return {"documents": docs}
 
+    _ensure_dataset_schema()
     family_uuid = _family_uuid(family_id)
 
     with get_conn() as conn:

@@ -7,8 +7,7 @@ from fastapi import APIRouter
 
 from ..api_schemas import QueryReq
 from ..api_helpers import _ensure_complete, _sync_job_metadata
-from ..api_usage import add_usage
-from ..job_store import empty_usage
+from ..ai_usage import add_usage, empty_usage
 from ..query import ai_health, query as nl_query
 
 router = APIRouter()

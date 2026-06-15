@@ -35,7 +35,8 @@ from ..api_helpers import (
     _page_dimensions_for,
 )
 from ..ingestion import save_upload_to_source, source_kind, supported_input_extensions
-from ..job_store import empty_usage, now_iso
+from ..ai_usage import empty_usage
+from ..job_store import now_iso
 from ..security import job_ownership_fields
 from ..models import Block, ChangeType
 from ..schema_discovery import infer_family_supplier_and_name, load_prompt_profile_for_family
@@ -310,7 +311,7 @@ def enhance_summary(run_id: str, req: EnhanceSummaryReq):
             "mode": "fast",
         }
 
-    from ..api_usage import add_usage
+    from ..ai_usage import add_usage
     add_usage(r, result.get("usage"))
     _sync_job_metadata(run_id)
     result["feedback_id"] = feedback["id"]
