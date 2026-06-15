@@ -4,6 +4,7 @@ Admin router for dataset/use-case onboarding.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tempfile
 import threading
@@ -302,6 +303,104 @@ def _validate_roles(roles: list[str]) -> None:
 
 def _upload_has_file(upload: Optional[UploadFile]) -> bool:
     return bool(upload and upload.filename)
+
+
+def _collect_sample_uploads(
+    baseline: Optional[UploadFile],
+    revised: Optional[UploadFile],
+    variations: Optional[list[UploadFile]],
+) -> list[tuple[str, UploadFile]]:
+    uploads = _collect_sample_uploads(baseline, revised, variations)
+    return uploads
+
+
+def _format_from_filename(filename: str | None) -> str:
+    suffix = Path(filename or "").suffix.lower()
+    if suffix == ".pdf":
+        return "pdf"
+    if suffix in {".doc", ".docx"}:
+        return "docx"
+    if suffix in {".xls", ".xlsx", ".xlsm", ".xlsb"}:
+        return "xlsx"
+    if suffix in {".csv", ".tsv"}:
+        return "csv"
+    if suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}:
+        return "image"
+    return "pdf"
+
+
+def _infer_supplier_family_from_uploads(uploads: list[tuple[str, UploadFile]], notes: str = "") -> tuple[str, str]:
+    stems = [Path(upload.filename or "").stem for _role, upload in uploads if upload.filename]
+    joined = " ".join([*stems, notes])
+    clean = re.sub(r"[_\-]+", " ", joined)
+    clean = re.sub(r"\b(?:baseline|revised|revision|rev|sample|variation|layout|document|doc|final|draft)\b", " ", clean, flags=re.I)
+    clean = re.sub(r"\b(?:19|20)\d{2}\b", " ", clean)
+    words = [word for word in re.split(r"\s+", clean.strip()) if word]
+
+    supplier = words[0] if words else "New"
+    supplier = supplier[:1].upper() + supplier[1:]
+    family_words = words[1:5] or ["Document", "Model"]
+    family_name = " ".join(word[:1].upper() + word[1:] for word in family_words)
+    return supplier, family_name
+
+
+def _infer_domain_from_context(text: str) -> str:
+    value = text.lower()
+    if any(token in value for token in ("vehicle", "ford", "bronco", "pcb", "pcv", "model year", "part number", "supplier")):
+        return "automotive"
+    if any(token in value for token in ("contract", "clause", "legal", "agreement", "policy")):
+        return "legal"
+    if any(token in value for token in ("invoice", "finance", "cost", "price", "rate", "amount")):
+        return "financial"
+    if any(token in value for token in ("employee", "hr", "benefit", "payroll")):
+        return "hr"
+    if any(token in value for token in ("drawing", "engineering", "specification", "tolerance")):
+        return "engineering"
+    return "generic"
+
+
+def _suggest_description(
+    *,
+    supplier: str,
+    family_name: str,
+    merged_profile: dict[str, Any],
+    uploads: list[tuple[str, UploadFile]],
+) -> str:
+    sample_profile = _json_dict(merged_profile.get("sample_profile"))
+    ai_profile = _json_dict(merged_profile.get("ai_reasoning_profile"))
+    formats = ", ".join(sorted({_format_from_filename(upload.filename) for _role, upload in uploads}))
+    complexity = ai_profile.get("complexity_rating") or "standard"
+    page_count = sample_profile.get("average_pages") or sample_profile.get("max_pages") or 0
+    return (
+        f"{supplier} {family_name} document model using {len(uploads)} representative sample(s)"
+        f" across {formats or 'supported'} formats. Average sample length is {page_count} pages;"
+        f" detected structure complexity is {complexity}."
+    )
+
+
+def _suggest_sample_plan(merged_profile: dict[str, Any], uploads: list[tuple[str, UploadFile]]) -> str:
+    roles = sorted({role for role, _upload in uploads})
+    sample_profile = _json_dict(merged_profile.get("sample_profile"))
+    min_pages = sample_profile.get("min_pages") or 0
+    max_pages = sample_profile.get("max_pages") or 0
+    return (
+        f"Seeded with {', '.join(roles)} sample roles. Keep 3-5 additional variations for each new layout, "
+        f"language pair, nested table style, or scanned source. Observed page range: {min_pages}-{max_pages}."
+    )
+
+
+def _suggest_onboarding_notes(merged_profile: dict[str, Any], notes: str) -> str:
+    ai_profile = _json_dict(merged_profile.get("ai_reasoning_profile"))
+    tips = [str(tip) for tip in ai_profile.get("enhancement_tips") or [] if str(tip).strip()]
+    reasons = [str(reason) for reason in ai_profile.get("complexity_reasons") or [] if str(reason).strip()]
+    parts = []
+    if notes.strip():
+        parts.append(notes.strip())
+    if reasons:
+        parts.append("Detected structure: " + "; ".join(reasons[:4]))
+    if tips:
+        parts.append("Recommended extraction focus: " + "; ".join(tips[:4]))
+    return "\n".join(parts)
 
 
 def _profile_dict(profile: Any) -> dict[str, Any]:
@@ -650,6 +749,85 @@ def create_dataset(req: CreateDatasetReq):
         ).fetchone()
 
     return {"status": "success", "id": str(row["id"])}
+
+
+@router.post("/admin/analyze-use-case-samples")
+async def analyze_use_case_samples(
+    baseline: Optional[UploadFile] = File(None),
+    revised: Optional[UploadFile] = File(None),
+    variations: Optional[list[UploadFile]] = File(None),
+    notes: str = Form(""),
+    use_llm: bool = Form(True),
+):
+    principal = current_principal()
+    _check_admin(principal)
+    uploads = _collect_sample_uploads(baseline, revised, variations)
+    if not uploads:
+        raise HTTPException(400, "Attach at least one representative sample before running analysis.")
+
+    supplier, family_name = _infer_supplier_family_from_uploads(uploads, notes)
+    family = {
+        "id": "analysis",
+        "supplier": supplier,
+        "family_name": family_name,
+    }
+    work_dir = Path(tempfile.mkdtemp(prefix="dataset_sample_analysis_"))
+    try:
+        learned_profiles = []
+        sample_documents = []
+        for idx, (sample_role, upload) in enumerate(uploads, start=1):
+            profile_dict, document, _pdf_path, _page_count = await _learn_uploaded_sample(
+                upload=upload,
+                sample_role=sample_role,
+                family_id="analysis",
+                family=family,
+                principal=principal,
+                work_dir=work_dir,
+                index=idx,
+                notes=notes,
+                use_llm=use_llm,
+            )
+            learned_profiles.append(profile_dict)
+            sample_documents.append(document)
+
+        merged_profile = _merge_learned_profile(
+            {},
+            learned_profiles,
+            sample_documents,
+            notes=notes,
+            use_llm=use_llm,
+        )
+        filenames = " ".join(str(upload.filename or "") for _role, upload in uploads)
+        context = f"{supplier} {family_name} {filenames} {notes}"
+        expected_formats = sorted({_format_from_filename(upload.filename) for _role, upload in uploads})
+        has_pair = any(role == "baseline" for role, _upload in uploads) and any(role == "revised" for role, _upload in uploads)
+        suggested_dataset = {
+            "supplier": supplier,
+            "family_name": family_name,
+            "domain": _infer_domain_from_context(context),
+            "description": _suggest_description(
+                supplier=supplier,
+                family_name=family_name,
+                merged_profile=merged_profile,
+                uploads=uploads,
+            ),
+            "use_case_type": "comparison" if has_pair else "extraction",
+            "expected_formats": expected_formats or ["pdf", "docx"],
+            "sample_plan": _suggest_sample_plan(merged_profile, uploads),
+            "onboarding_notes": _suggest_onboarding_notes(merged_profile, notes),
+            "learning_mode": "ai_assisted_bootstrap" if use_llm else "deterministic_first",
+            "allowed_roles": [],
+        }
+        return {
+            "status": "success",
+            "suggested_dataset": suggested_dataset,
+            "template_profile": merged_profile,
+            "documents": sample_documents,
+            "analysis": merged_profile.get("ai_reasoning_profile", {}),
+            "used_ai": bool(use_llm),
+        }
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @router.get("/admin/datasets/{family_id}")

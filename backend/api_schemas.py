@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CompareResponse(BaseModel):
@@ -22,6 +22,8 @@ class ExtractResponse(BaseModel):
 
 
 class QueryReq(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     question: str
     mode: str = "fast"
     response_language: str = "source"

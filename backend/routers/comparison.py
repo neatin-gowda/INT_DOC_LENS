@@ -15,7 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from ..api_schemas import CompareResponse
+from ..api_schemas import CompareResponse, EnhanceSummaryReq
 from ..api_helpers import (
     _RUNS,
     _ensure_run,
@@ -247,7 +247,6 @@ def get_summary(run_id: str):
 def enhance_summary(run_id: str, req: EnhanceSummaryReq):
     # This imports nl_query dynamically to prevent import cycles.
     from ..query import query as nl_query
-    from ..api_schemas import EnhanceSummaryReq
     r = _ensure_complete(run_id)
     quality = _summary_quality_profile(r, threshold=req.threshold)
 

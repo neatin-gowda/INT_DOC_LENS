@@ -1,0 +1,16 @@
+{
+  "name": "Altrai",
+  "short_name": "Altrai",
+  "description": "Unified enterprise AI workspace",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F8FAFC",
+  "theme_color": "#0A1F4D",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "64x64",
+      "type": "image/svg+xml"
+    }
+  ]
+}

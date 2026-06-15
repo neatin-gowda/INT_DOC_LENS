@@ -19,7 +19,7 @@ const emptyForm = {
   expected_formats: ["pdf", "docx"],
   sample_plan: "",
   onboarding_notes: "",
-  learning_mode: "deterministic_first",
+  learning_mode: "ai_assisted_bootstrap",
   allowed_roles: [],
 };
 
@@ -50,9 +50,11 @@ export function AdminWorkspace() {
     expected_formats: ["pdf", "docx"],
     sample_plan: "",
     onboarding_notes: "",
-    learning_mode: "deterministic_first",
+    learning_mode: "ai_assisted_bootstrap",
   });
   const [initialSampleFiles, setInitialSampleFiles] = useState({ baseline: null, revised: null, variations: [] });
+  const [useAiAnalysis, setUseAiAnalysis] = useState(true);
+  const [analysisPreview, setAnalysisPreview] = useState(null);
   const [sampleFiles, setSampleFiles] = useState({ baseline: null, revised: null, variations: [] });
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -133,6 +135,7 @@ export function AdminWorkspace() {
       setNotice(`Use case created.${sampleMessage}`);
       setForm(emptyForm);
       setInitialSampleFiles({ baseline: null, revised: null, variations: [] });
+      setAnalysisPreview(null);
       await loadDatasets();
       if (data.id) await selectDataset(data.id);
     } catch (err) {
@@ -217,6 +220,42 @@ export function AdminWorkspace() {
     return resp.json();
   };
 
+  const analyzeInitialSamples = async () => {
+    if (!hasAnySample(initialSampleFiles)) return;
+    setBusy("analyze");
+    setError("");
+    setNotice("");
+    try {
+      const formData = new FormData();
+      if (initialSampleFiles.baseline) formData.append("baseline", initialSampleFiles.baseline);
+      if (initialSampleFiles.revised) formData.append("revised", initialSampleFiles.revised);
+      initialSampleFiles.variations.forEach((file) => formData.append("variations", file));
+      formData.append("notes", form.onboarding_notes || form.sample_plan || "");
+      formData.append("use_llm", String(useAiAnalysis));
+
+      const resp = await fetch(`${API}/admin/analyze-use-case-samples`, {
+        method: "POST",
+        headers: { "X-User-Role": window.sessionStorage.getItem("simulated_role") || "platform_admin" },
+        body: formData,
+      });
+      if (!resp.ok) throw new Error(await readResponseError(resp));
+      const data = await resp.json();
+      const suggested = data.suggested_dataset || {};
+      setAnalysisPreview(data);
+      setForm({
+        ...form,
+        ...suggested,
+        allowed_roles: form.allowed_roles || [],
+        learning_mode: useAiAnalysis ? "ai_assisted_bootstrap" : "deterministic_first",
+      });
+      setNotice(useAiAnalysis ? "Sample analysis complete. Review the suggested use case model before creating it." : "Deterministic sample scan complete. Review the suggested use case model before creating it.");
+    } catch (err) {
+      setError(friendlyFetchError(err));
+    } finally {
+      setBusy("");
+    }
+  };
+
   const deleteDataset = async () => {
     if (!selectedId || !detail) return;
     setBusy("delete");
@@ -244,7 +283,7 @@ export function AdminWorkspace() {
       <div className="admin-intro">
         <div>
           <h2>Use Case Onboarding</h2>
-          <p>Register datasets, seed documents, access roles, and family-specific extraction guidance.</p>
+          <p>Create document models from representative samples. Use AI to suggest metadata, then keep governance and access settings with the saved use case.</p>
         </div>
       </div>
 
@@ -281,53 +320,22 @@ export function AdminWorkspace() {
 
         <main className="admin-panel">
           <div className="admin-panel-head">
-            <h3>Create Use Case</h3>
+            <div>
+              <h3>Onboard Document Model</h3>
+              <p>Start with baseline, revised, or layout samples. The platform learns the structure and suggests the use-case metadata.</p>
+            </div>
           </div>
-          <form className="admin-form" onSubmit={createDataset}>
-            <label>
-              Supplier or entity
-              <input value={form.supplier} required onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="Ford, HR, Finance, Legal" />
-            </label>
-            <label>
-              Use case or family
-              <input value={form.family_name} required onChange={(e) => setForm({ ...form, family_name: e.target.value })} placeholder="Order Guide, Policy, Contract" />
-            </label>
-            <label>
-              Use case type
-              <select value={form.use_case_type} onChange={(e) => setForm({ ...form, use_case_type: e.target.value })}>
-                <option value="comparison">Comparison</option>
-                <option value="extraction">Extraction</option>
-              </select>
-            </label>
-            <label>
-              Domain
-              <select value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })}>
-                <option value="generic">Generic</option>
-                <option value="automotive">Automotive</option>
-                <option value="legal">Legal</option>
-                <option value="financial">Financial</option>
-                <option value="hr">HR</option>
-                <option value="engineering">Engineering</option>
-              </select>
-            </label>
-            <FormatPicker value={form.expected_formats} onChange={(expected_formats) => setForm({ ...form, expected_formats })} />
-            <label>
-              Sample strategy
-              <textarea value={form.sample_plan} onChange={(e) => setForm({ ...form, sample_plan: e.target.value })} placeholder="Example: upload two model years plus 3-5 supplier variations with nested PCV/PCB tables." />
-            </label>
-            <label>
-              Content description
-              <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Describe tables, identifiers, expected fields, and business context." />
-            </label>
-            <label>
-              Onboarding notes
-              <textarea value={form.onboarding_notes} onChange={(e) => setForm({ ...form, onboarding_notes: e.target.value })} placeholder="Add business rules, known pain points, and what reviewers expect from this model." />
-            </label>
-            <RolePicker value={form.allowed_roles} onChange={(allowed_roles) => setForm({ ...form, allowed_roles })} />
-            <div className="seed-form inline">
-              <div>
-                <h4>Initial samples</h4>
-                <p>Optional, but recommended. Upload baseline and revised examples now to bootstrap metadata, table structure, stable keys, and page/layout profile for this use case.</p>
+          <form className="admin-form onboarding-flow" onSubmit={createDataset}>
+            <section className="sample-intake-card">
+              <div className="sample-intake-head">
+                <div>
+                  <h4>Representative Samples</h4>
+                  <p>Attach the documents that define this model. For comparison, use baseline and revised examples; add variations for alternate layouts or suppliers.</p>
+                </div>
+                <label className="ai-toggle">
+                  <input type="checkbox" checked={useAiAnalysis} onChange={(e) => setUseAiAnalysis(e.target.checked)} />
+                  Analyze with GPT-4o
+                </label>
               </div>
               <div className="sample-upload-grid">
                 <label>
@@ -343,8 +351,71 @@ export function AdminWorkspace() {
                   <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setInitialSampleFiles({ ...initialSampleFiles, variations: Array.from(e.target.files || []) })} />
                 </label>
               </div>
-            </div>
-            <button type="submit" className="primary-action" disabled={busy === "create"}>{busy === "create" ? "Creating" : "Create use case"}</button>
+              <div className="sample-actions">
+                <button type="button" className="secondary-action" onClick={analyzeInitialSamples} disabled={!hasAnySample(initialSampleFiles) || busy === "analyze"}>
+                  {busy === "analyze" ? "Analyzing samples" : "Analyze samples"}
+                </button>
+                <span>{hasAnySample(initialSampleFiles) ? "Analysis can prefill the fields below. You can still edit everything manually." : "Attach at least one sample to run analysis."}</span>
+              </div>
+            </section>
+
+            {analysisPreview ? (
+              <AnalysisPreviewCard data={analysisPreview} />
+            ) : null}
+
+            <section className="admin-review-card">
+              <div>
+                <h4>Review Model Details</h4>
+                <p>These fields become the dataset and document model used by compare and extract workflows.</p>
+              </div>
+              <div className="admin-review-grid">
+                <label>
+                  Supplier or entity
+                  <input value={form.supplier} required onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="Ford, HR, Finance, Legal" />
+                </label>
+                <label>
+                  Use case or family
+                  <input value={form.family_name} required onChange={(e) => setForm({ ...form, family_name: e.target.value })} placeholder="Order Guide, Policy, Contract" />
+                </label>
+                <label>
+                  Use case type
+                  <select value={form.use_case_type} onChange={(e) => setForm({ ...form, use_case_type: e.target.value })}>
+                    <option value="comparison">Comparison</option>
+                    <option value="extraction">Extraction</option>
+                  </select>
+                </label>
+                <label>
+                  Domain
+                  <select value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })}>
+                    <option value="generic">Generic</option>
+                    <option value="automotive">Automotive</option>
+                    <option value="legal">Legal</option>
+                    <option value="financial">Financial</option>
+                    <option value="hr">HR</option>
+                    <option value="engineering">Engineering</option>
+                  </select>
+                </label>
+                <div className="admin-wide-field">
+                  <FormatPicker value={form.expected_formats} onChange={(expected_formats) => setForm({ ...form, expected_formats })} />
+                </div>
+                <label>
+                  Content description
+                  <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Describe the documents, expected fields, tables, identifiers, and business context." />
+                </label>
+                <label>
+                  Onboarding notes
+                  <textarea value={form.onboarding_notes} onChange={(e) => setForm({ ...form, onboarding_notes: e.target.value })} placeholder="Known pain points, nested headers, language handling, reviewer expectations, or accuracy targets." />
+                </label>
+                <label className="admin-wide-field">
+                  Sample strategy
+                  <textarea value={form.sample_plan} onChange={(e) => setForm({ ...form, sample_plan: e.target.value })} placeholder="How many baseline/revised/variation samples should represent this model?" />
+                </label>
+              </div>
+            </section>
+
+            <button type="submit" className="primary-action" disabled={busy === "create"}>
+              {busy === "create" ? "Creating" : "Create use case"}
+            </button>
           </form>
         </main>
       </div>
@@ -451,6 +522,45 @@ function hasAnySample(files) {
   return Boolean(files?.baseline || files?.revised || files?.variations?.length);
 }
 
+function AnalysisPreviewCard({ data }) {
+  const suggested = data?.suggested_dataset || {};
+  const analysis = data?.analysis || {};
+  const confidence = analysis.confidence_score !== undefined ? Math.round(Number(analysis.confidence_score || 0) * 100) : null;
+  const reasons = Array.isArray(analysis.complexity_reasons) ? analysis.complexity_reasons : [];
+  const tips = Array.isArray(analysis.enhancement_tips) ? analysis.enhancement_tips : [];
+  return (
+    <section className="analysis-card">
+      <div className="analysis-card-head">
+        <div>
+          <h4>Sample Analysis</h4>
+          <p>{data?.used_ai ? "GPT-4o assisted the metadata suggestions." : "Deterministic scan generated metadata suggestions."}</p>
+        </div>
+        <span>{String(analysis.complexity_rating || "standard")} complexity</span>
+      </div>
+      <div className="analysis-grid">
+        <p>
+          <strong>{suggested.supplier || "Supplier pending"}</strong>
+          <small>{suggested.family_name || "Use case pending"}</small>
+        </p>
+        <p>
+          <strong>{suggested.use_case_type || "comparison"}</strong>
+          <small>{(suggested.expected_formats || []).join(", ") || "formats pending"}</small>
+        </p>
+        <p>
+          <strong>{suggested.domain || "generic"}</strong>
+          <small>{confidence !== null ? `${confidence}% estimated parser confidence` : "confidence pending"}</small>
+        </p>
+      </div>
+      {(reasons.length || tips.length) ? (
+        <div className="analysis-notes">
+          {reasons.slice(0, 3).map((item, index) => <span key={`reason-${index}`}>{item}</span>)}
+          {tips.slice(0, 3).map((item, index) => <span key={`tip-${index}`}>{item}</span>)}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function RolePicker({ value, onChange }) {
   const toggle = (role) => {
     onChange(value.includes(role) ? value.filter((item) => item !== role) : [...value, role]);
@@ -543,7 +653,7 @@ function AIReasoningSummary({ profile, onAddLabel }) {
   return (
     <div className="profile-card" style={{ gridColumn: "span 2" }}>
       <h4 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span>🧠 AI Onboarding Analysis</span>
+        <span>AI Onboarding Analysis</span>
         <span style={{
           fontSize: 11,
           fontWeight: 700,
@@ -603,7 +713,7 @@ function AIReasoningSummary({ profile, onAddLabel }) {
                 }}
                 title="Click to automatically create a mapping rule for this label"
               >
-                + {l}
+                Add {l}
               </button>
             ))}
           </span>

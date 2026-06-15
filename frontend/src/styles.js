@@ -2703,6 +2703,7 @@ export const css = `
     letter-spacing: 0;
   }
   .admin-intro p,
+  .admin-panel-head p,
   .admin-detail-head p,
   .seed-form p {
     margin: 6px 0 0;
@@ -2744,6 +2745,7 @@ export const css = `
   }
   .dataset-list,
   .admin-form,
+  .onboarding-flow,
   .admin-detail,
   .admin-config-grid,
   .seed-form {
@@ -2774,10 +2776,111 @@ export const css = `
   .admin-config-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .admin-review-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
   .admin-wide-field {
     grid-column: 1 / -1;
   }
+  .sample-intake-card,
+  .admin-review-card,
+  .analysis-card {
+    display: grid;
+    gap: 12px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface-sunken) 78%, transparent);
+    border-radius: var(--radius-md);
+    padding: 14px;
+  }
+  .sample-intake-head,
+  .analysis-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .sample-intake-head h4,
+  .admin-review-card h4,
+  .analysis-card h4 {
+    margin: 0;
+  }
+  .sample-intake-head p,
+  .admin-review-card p,
+  .analysis-card p,
+  .sample-actions span {
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+  .ai-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+    white-space: nowrap;
+    border: 1px solid color-mix(in srgb, var(--brand-orange) 34%, var(--border));
+    border-radius: 999px;
+    padding: 7px 10px;
+    background: color-mix(in srgb, var(--brand-orange) 8%, var(--surface-raised));
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 650;
+  }
+  .sample-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .analysis-card {
+    border-color: color-mix(in srgb, var(--brand-orange) 42%, var(--border));
+    background: color-mix(in srgb, var(--brand-orange) 8%, var(--surface-raised));
+  }
+  .analysis-card-head span {
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  .analysis-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .analysis-grid p {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    border-radius: var(--radius-md);
+    padding: 10px;
+  }
+  .analysis-grid strong,
+  .analysis-grid small {
+    overflow-wrap: anywhere;
+  }
+  .analysis-notes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .analysis-notes span {
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 5px 8px;
+    font-size: 12px;
+  }
   .admin-form label,
+  .admin-review-grid label,
   .admin-config-grid label,
   .seed-form label {
     display: grid;
@@ -2789,6 +2892,9 @@ export const css = `
   .admin-form input,
   .admin-form select,
   .admin-form textarea,
+  .admin-review-grid input,
+  .admin-review-grid select,
+  .admin-review-grid textarea,
   .admin-config-grid input,
   .admin-config-grid select,
   .admin-config-grid textarea,
@@ -2802,6 +2908,7 @@ export const css = `
     min-width: 0;
   }
   .admin-form textarea,
+  .admin-review-grid textarea,
   .admin-config-grid textarea {
     min-height: 92px;
     resize: vertical;
@@ -2907,6 +3014,8 @@ export const css = `
     .ask-documents-grid,
     .job-card,
     .admin-grid,
+    .admin-review-grid,
+    .analysis-grid,
     .admin-config-grid,
     .sample-upload-grid,
     .admin-profile-grid {

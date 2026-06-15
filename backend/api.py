@@ -94,6 +94,7 @@ def root():
             "GET /tools",
             "GET /datasets",
             "GET /admin/datasets",
+            "POST /admin/analyze-use-case-samples",
             "POST /admin/datasets/{id}/samples",
             "GET /ai-health",
             "GET /runs/{id}",
