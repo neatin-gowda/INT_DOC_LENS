@@ -2428,6 +2428,18 @@ export const css = `
     margin: 6px 0 0;
     color: var(--text-secondary);
   }
+  .admin-model-badge {
+    display: inline-flex;
+    width: fit-content;
+    margin-top: 8px;
+    border: 1px solid color-mix(in srgb, var(--brand-orange) 38%, var(--border));
+    background: color-mix(in srgb, var(--brand-orange) 9%, var(--surface-raised));
+    color: var(--text-primary);
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 600;
+  }
   .admin-notice {
     border: 1px solid color-mix(in srgb, #1f7e41 48%, var(--border));
     background: color-mix(in srgb, #1f7e41 12%, var(--surface-raised));
@@ -2482,8 +2494,12 @@ export const css = `
   .admin-config-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .admin-wide-field {
+    grid-column: 1 / -1;
+  }
   .admin-form label,
-  .admin-config-grid label {
+  .admin-config-grid label,
+  .seed-form label {
     display: grid;
     gap: 6px;
     color: var(--text-secondary);
@@ -2493,6 +2509,8 @@ export const css = `
   .admin-form input,
   .admin-form select,
   .admin-form textarea,
+  .admin-config-grid input,
+  .admin-config-grid select,
   .admin-config-grid textarea,
   .seed-form input {
     width: 100%;
@@ -2521,6 +2539,28 @@ export const css = `
     flex-wrap: wrap;
     gap: 8px 12px;
   }
+  .format-picker {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    color: var(--text-primary);
+  }
+  .format-picker legend {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 5px;
+  }
+  .format-picker label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+  }
   .role-picker legend {
     color: var(--text-secondary);
     font-size: 13px;
@@ -2538,9 +2578,14 @@ export const css = `
     border-top: 1px solid var(--border);
     padding-top: 14px;
   }
-  .admin-profile-grid {
+  .sample-upload-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .admin-profile-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
   }
   .profile-card {
@@ -2583,6 +2628,7 @@ export const css = `
     .job-card,
     .admin-grid,
     .admin-config-grid,
+    .sample-upload-grid,
     .admin-profile-grid {
       grid-template-columns: 1fr;
     }

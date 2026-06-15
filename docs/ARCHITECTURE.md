@@ -170,6 +170,16 @@ role, and upload representative seed documents. The backend stores this as:
 - `document_family.template_profile`: stable key patterns, nested-table hints,
   column rules, and auto-discovered structure.
 
+The use case is treated as the internal document model. Admin onboarding now
+captures the model type (`comparison` or `extraction`), expected formats,
+sample strategy, reviewer notes, and learning mode. For comparison models,
+admins can upload baseline, revised, and additional variation samples. The
+backend learns each sample, stores the sample role, page counts, notes, and
+profile signals, then summarizes them inside `template_profile.sample_profile`.
+This gives the product a Nanonets-style onboarding path: a department provides
+representative examples once, and later runs reuse the learned profile instead
+of repeatedly sending whole documents to an LLM.
+
 The default extraction and comparison path remains deterministic. AI is used as
 an optional accelerator for profile discovery, low-confidence vision repair, and
 grounded summaries when the configured deployment is available. If it is not

@@ -89,8 +89,9 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL, go to **Admin Studio**, create a use case, and optionally
-bootstrap it with a seed document. Compare and Extract intentionally require an
+Open the Vite URL, go to **Admin Studio**, create a comparison or extraction
+use case, select expected formats, and bootstrap it with baseline/revised sample
+documents plus layout variations. Compare and Extract intentionally require an
 accessible use case before upload. During local development, Vite proxies
 `/api/*` requests to `http://localhost:8000`, and Admin Studio falls back to
 `/tmp/doculens_datasets.json` plus `/tmp/doculens_dataset_documents.json` when

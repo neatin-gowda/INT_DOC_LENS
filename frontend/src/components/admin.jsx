@@ -15,8 +15,27 @@ const emptyForm = {
   family_name: "",
   domain: "generic",
   description: "",
+  use_case_type: "comparison",
+  expected_formats: ["pdf", "docx"],
+  sample_plan: "",
+  onboarding_notes: "",
+  learning_mode: "deterministic_first",
   allowed_roles: [],
 };
+
+const formatOptions = [
+  ["pdf", "PDF"],
+  ["docx", "Word"],
+  ["xlsx", "Excel"],
+  ["csv", "CSV/TSV"],
+  ["image", "Scanned image"],
+];
+
+const learningModes = [
+  ["deterministic_first", "Deterministic first"],
+  ["ai_assisted_bootstrap", "AI-assisted bootstrap"],
+  ["manual_profile", "Manual profile"],
+];
 
 export function AdminWorkspace() {
   const [datasets, setDatasets] = useState([]);
@@ -26,7 +45,14 @@ export function AdminWorkspace() {
   const [guidelines, setGuidelines] = useState("");
   const [roles, setRoles] = useState([]);
   const [columnRules, setColumnRules] = useState("");
-  const [seedFile, setSeedFile] = useState(null);
+  const [profileMeta, setProfileMeta] = useState({
+    use_case_type: "comparison",
+    expected_formats: ["pdf", "docx"],
+    sample_plan: "",
+    onboarding_notes: "",
+    learning_mode: "deterministic_first",
+  });
+  const [sampleFiles, setSampleFiles] = useState({ baseline: null, revised: null, variations: [] });
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -64,6 +90,13 @@ export function AdminWorkspace() {
       setDetail(data);
       setGuidelines(data.prompt_guidelines || "");
       setRoles(data.allowed_roles || []);
+      setProfileMeta({
+        use_case_type: data.use_case_type || "comparison",
+        expected_formats: data.expected_formats || ["pdf", "docx"],
+        sample_plan: data.sample_plan || "",
+        onboarding_notes: data.onboarding_notes || "",
+        learning_mode: data.learning_mode || "deterministic_first",
+      });
       setColumnRules(JSON.stringify(data.template_profile?.column_rules || [], null, 2));
       await loadDocuments(id);
     } catch (err) {
@@ -115,6 +148,7 @@ export function AdminWorkspace() {
           prompt_guidelines: guidelines,
           allowed_roles: roles,
           column_rules: parseColumnRules(columnRules),
+          ...profileMeta,
         }),
       });
       setNotice("Use case settings saved.");
@@ -127,24 +161,27 @@ export function AdminWorkspace() {
     }
   };
 
-  const bootstrap = async (event) => {
+  const bootstrapSamples = async (event) => {
     event.preventDefault();
-    if (!selectedId || !seedFile) return;
+    if (!selectedId || (!sampleFiles.baseline && !sampleFiles.revised && sampleFiles.variations.length === 0)) return;
     setBusy("bootstrap");
     setError("");
     setNotice("");
     try {
       const formData = new FormData();
-      formData.append("file", seedFile);
-      formData.append("use_llm", "true");
-      const resp = await fetch(`${API}/admin/datasets/${selectedId}/bootstrap`, {
+      if (sampleFiles.baseline) formData.append("baseline", sampleFiles.baseline);
+      if (sampleFiles.revised) formData.append("revised", sampleFiles.revised);
+      sampleFiles.variations.forEach((file) => formData.append("variations", file));
+      formData.append("notes", profileMeta.onboarding_notes || "");
+      formData.append("use_llm", String(profileMeta.learning_mode === "ai_assisted_bootstrap"));
+      const resp = await fetch(`${API}/admin/datasets/${selectedId}/samples`, {
         method: "POST",
         headers: { "X-User-Role": window.sessionStorage.getItem("simulated_role") || "platform_admin" },
         body: formData,
       });
       if (!resp.ok) throw new Error(await readResponseError(resp));
-      setNotice("Seed document learned and template profile updated.");
-      setSeedFile(null);
+      setNotice("Sample documents learned and model profile updated.");
+      setSampleFiles({ baseline: null, revised: null, variations: [] });
       await selectDataset(selectedId);
     } catch (err) {
       setError(friendlyFetchError(err));
@@ -208,7 +245,7 @@ export function AdminWorkspace() {
                 >
                   <strong>{item.supplier}</strong>
                   <span>{item.family_name}</span>
-                  <small>{item.domain || "generic"} · {(item.allowed_roles || []).length || "all"} roles</small>
+                  <small>{item.use_case_type || "comparison"} · {(item.expected_formats || []).join(", ") || "formats"} · {(item.allowed_roles || []).length || "all"} roles</small>
                 </button>
               ))}
             </div>
@@ -229,6 +266,13 @@ export function AdminWorkspace() {
               <input value={form.family_name} required onChange={(e) => setForm({ ...form, family_name: e.target.value })} placeholder="Order Guide, Policy, Contract" />
             </label>
             <label>
+              Use case type
+              <select value={form.use_case_type} onChange={(e) => setForm({ ...form, use_case_type: e.target.value })}>
+                <option value="comparison">Comparison</option>
+                <option value="extraction">Extraction</option>
+              </select>
+            </label>
+            <label>
               Domain
               <select value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })}>
                 <option value="generic">Generic</option>
@@ -239,9 +283,18 @@ export function AdminWorkspace() {
                 <option value="engineering">Engineering</option>
               </select>
             </label>
+            <FormatPicker value={form.expected_formats} onChange={(expected_formats) => setForm({ ...form, expected_formats })} />
+            <label>
+              Sample strategy
+              <textarea value={form.sample_plan} onChange={(e) => setForm({ ...form, sample_plan: e.target.value })} placeholder="Example: upload two model years plus 3-5 supplier variations with nested PCV/PCB tables." />
+            </label>
             <label>
               Content description
               <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Describe tables, identifiers, expected fields, and business context." />
+            </label>
+            <label>
+              Onboarding notes
+              <textarea value={form.onboarding_notes} onChange={(e) => setForm({ ...form, onboarding_notes: e.target.value })} placeholder="Add business rules, known pain points, and what reviewers expect from this model." />
             </label>
             <RolePicker value={form.allowed_roles} onChange={(allowed_roles) => setForm({ ...form, allowed_roles })} />
             <button type="submit" className="primary-action" disabled={busy === "create"}>{busy === "create" ? "Creating" : "Create use case"}</button>
@@ -258,6 +311,7 @@ export function AdminWorkspace() {
               <div>
                 <h3>{detail.supplier} · {detail.family_name}</h3>
                 <p>{detail.description || "No description yet."}</p>
+                <span className="admin-model-badge">{profileMeta.use_case_type} model · {(profileMeta.expected_formats || []).join(", ")}</span>
               </div>
               <button type="button" className="danger-action compact" onClick={deleteDataset} disabled={busy === "delete"}>
                 {busy === "delete" ? "Deleting" : "Delete"}
@@ -265,6 +319,30 @@ export function AdminWorkspace() {
             </div>
 
             <div className="admin-config-grid">
+              <label>
+                Use case type
+                <select value={profileMeta.use_case_type} onChange={(e) => setProfileMeta({ ...profileMeta, use_case_type: e.target.value })}>
+                  <option value="comparison">Comparison</option>
+                  <option value="extraction">Extraction</option>
+                </select>
+              </label>
+              <label>
+                Learning mode
+                <select value={profileMeta.learning_mode} onChange={(e) => setProfileMeta({ ...profileMeta, learning_mode: e.target.value })}>
+                  {learningModes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <div className="admin-wide-field">
+                <FormatPicker value={profileMeta.expected_formats} onChange={(expected_formats) => setProfileMeta({ ...profileMeta, expected_formats })} />
+              </div>
+              <label>
+                Sample strategy
+                <textarea value={profileMeta.sample_plan} onChange={(e) => setProfileMeta({ ...profileMeta, sample_plan: e.target.value })} placeholder="How many samples or variations should represent this model?" />
+              </label>
+              <label>
+                Onboarding notes
+                <textarea value={profileMeta.onboarding_notes} onChange={(e) => setProfileMeta({ ...profileMeta, onboarding_notes: e.target.value })} placeholder="Business context, known table layouts, accuracy targets, and reviewer comments." />
+              </label>
               <label>
                 Prompt and extraction guidelines
                 <textarea value={guidelines} onChange={(e) => setGuidelines(e.target.value)} placeholder="Example: prioritize PCB thickness, PCV code changes, nested pricing rows, or legal obligations." />
@@ -279,21 +357,35 @@ export function AdminWorkspace() {
               {busy === "save" ? "Saving" : "Save profile settings"}
             </button>
 
-            <form className="seed-form" onSubmit={bootstrap}>
+            <form className="seed-form" onSubmit={bootstrapSamples}>
               <div>
-                <h4>Seed Document Learning</h4>
-                <p>Upload a representative document to bootstrap headings, stable keys, table signatures, and column rules.</p>
+                <h4>Sample Document Learning</h4>
+                <p>For comparison models, upload a baseline, revised document, and any format/layout variations. The profile stores structure, page range, table signatures, stable keys, and reviewer guidance.</p>
               </div>
-              <input type="file" accept=".pdf,.doc,.docx" onChange={(e) => setSeedFile(e.target.files?.[0] || null)} />
-              <button type="submit" className="primary-action" disabled={!seedFile || busy === "bootstrap"}>
-                {busy === "bootstrap" ? "Learning" : "Learn from seed"}
+              <div className="sample-upload-grid">
+                <label>
+                  Baseline sample
+                  <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setSampleFiles({ ...sampleFiles, baseline: e.target.files?.[0] || null })} />
+                </label>
+                <label>
+                  Revised sample
+                  <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setSampleFiles({ ...sampleFiles, revised: e.target.files?.[0] || null })} />
+                </label>
+                <label>
+                  Additional variations
+                  <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setSampleFiles({ ...sampleFiles, variations: Array.from(e.target.files || []) })} />
+                </label>
+              </div>
+              <button type="submit" className="primary-action" disabled={(!sampleFiles.baseline && !sampleFiles.revised && sampleFiles.variations.length === 0) || busy === "bootstrap"}>
+                {busy === "bootstrap" ? "Learning" : "Learn from samples"}
               </button>
             </form>
 
             <div className="admin-profile-grid">
+              <ProfileSummary profile={detail.template_profile?.sample_profile} />
               <ProfileCard title="Stable Keys" items={detail.template_profile?.stable_key_patterns} labelKey="name" valueKey="regex" />
               <ProfileCard title="Column Rules" items={detail.template_profile?.column_rules} labelKey="role" valueKey="pattern" />
-              <ProfileCard title="Seed Documents" items={documents} labelKey="label" valueKey="page_count" />
+              <ProfileCard title="Sample Documents" items={documents} labelKey="label" valueKey="page_count" />
             </div>
           </div>
         )}
@@ -316,6 +408,47 @@ function RolePicker({ value, onChange }) {
         </label>
       ))}
     </fieldset>
+  );
+}
+
+function FormatPicker({ value, onChange }) {
+  const selected = Array.isArray(value) ? value : [];
+  const toggle = (format) => {
+    onChange(selected.includes(format) ? selected.filter((item) => item !== format) : [...selected, format]);
+  };
+  return (
+    <fieldset className="format-picker">
+      <legend>Expected formats</legend>
+      {formatOptions.map(([format, label]) => (
+        <label key={format}>
+          <input type="checkbox" checked={selected.includes(format)} onChange={() => toggle(format)} />
+          {label}
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+function ProfileSummary({ profile }) {
+  const data = profile && typeof profile === "object" ? profile : {};
+  return (
+    <div className="profile-card">
+      <h4>Model Samples</h4>
+      <p>
+        <strong>{String(data.sample_count || 0)} samples</strong>
+        <small>{(data.roles_present || []).join(", ") || "No roles learned yet"}</small>
+      </p>
+      <p>
+        <strong>{String(data.average_pages || 0)} avg pages</strong>
+        <small>{String(data.min_pages || 0)} min · {String(data.max_pages || 0)} max</small>
+      </p>
+      {data.last_bootstrap_notes ? (
+        <p>
+          <strong>Latest notes</strong>
+          <small>{String(data.last_bootstrap_notes)}</small>
+        </p>
+      ) : null}
+    </div>
   );
 }
 

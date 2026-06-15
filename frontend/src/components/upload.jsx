@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { API, FILE_ACCEPT } from "../config.js";
 
 export function UploadPanel({ onUpload, busy, onAdmin }) {
-  const datasetState = useDatasets();
+  const datasetState = useDatasets("comparison");
   const locked = busy || datasetState.loading || !datasetState.selectedId || datasetState.datasets.length === 0;
 
   return (
@@ -34,7 +34,7 @@ export function UploadPanel({ onUpload, busy, onAdmin }) {
 }
 
 export function ExtractUploadPanel({ onUpload, busy, onAdmin }) {
-  const datasetState = useDatasets();
+  const datasetState = useDatasets("extraction");
   const locked = busy || datasetState.loading || !datasetState.selectedId || datasetState.datasets.length === 0;
 
   return (
@@ -72,7 +72,7 @@ export function ExtractUploadPanel({ onUpload, busy, onAdmin }) {
   );
 }
 
-function useDatasets() {
+function useDatasets(useCaseType) {
   const [datasets, setDatasets] = useState([]);
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -90,7 +90,8 @@ function useDatasets() {
         });
         if (!resp.ok) throw new Error(`Could not load use cases (${resp.status})`);
         const payload = await resp.json();
-        const items = payload.datasets || [];
+        const allItems = payload.datasets || [];
+        const items = allItems.filter((item) => (item.use_case_type || "comparison") === useCaseType);
         if (!active) return;
         setDatasets(items);
         setSelectedId((current) => current || items[0]?.id || "");

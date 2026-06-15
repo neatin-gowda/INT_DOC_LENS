@@ -35,6 +35,11 @@ class CreateDatasetReq(BaseModel):
     family_name: str
     domain: str = "generic"
     description: str = ""
+    use_case_type: str = "comparison"
+    expected_formats: list[str] = Field(default_factory=lambda: ["pdf", "docx"])
+    sample_plan: str = ""
+    onboarding_notes: str = ""
+    learning_mode: str = "deterministic_first"
     allowed_roles: list[str] = Field(default_factory=list)
 
 
@@ -43,6 +48,11 @@ class UpdateDatasetReq(BaseModel):
     family_name: Optional[str] = None
     domain: Optional[str] = None
     description: Optional[str] = None
+    use_case_type: Optional[str] = None
+    expected_formats: Optional[list[str]] = None
+    sample_plan: Optional[str] = None
+    onboarding_notes: Optional[str] = None
+    learning_mode: Optional[str] = None
     allowed_roles: Optional[list[str]] = None
     prompt_guidelines: Optional[str] = None
     column_rules: Optional[list[dict[str, str]]] = None
@@ -60,6 +70,26 @@ def _db_required() -> None:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _clean_list(values: list[str] | None, allowed: set[str], fallback: list[str]) -> list[str]:
+    cleaned = []
+    for value in values or []:
+        item = str(value or "").strip().lower()
+        if item in allowed and item not in cleaned:
+            cleaned.append(item)
+    return cleaned or fallback
+
+
+def _clean_use_case_type(value: str | None) -> str:
+    item = str(value or "comparison").strip().lower()
+    return item if item in {"comparison", "extraction"} else "comparison"
+
+
+def _clean_learning_mode(value: str | None) -> str:
+    item = str(value or "deterministic_first").strip().lower()
+    allowed = {"deterministic_first", "ai_assisted_bootstrap", "manual_profile"}
+    return item if item in allowed else "deterministic_first"
 
 
 def _read_json_file(path: Path, lock: threading.Lock) -> list[dict[str, Any]]:
@@ -106,9 +136,21 @@ def _local_dataset_record(
     now = _utc_now()
     prompt_profile = {
         "description": req.description.strip(),
+        "onboarding_notes": req.onboarding_notes.strip(),
         "guidelines": "",
         "summarization_directives": "",
         "extraction_directives": "",
+    }
+    ui_profile = {
+        "allowed_roles": req.allowed_roles,
+        "use_case_type": _clean_use_case_type(req.use_case_type),
+        "expected_formats": _clean_list(
+            req.expected_formats,
+            {"pdf", "docx", "xlsx", "xls", "xlsm", "xlsb", "csv", "tsv", "image"},
+            ["pdf", "docx"],
+        ),
+        "sample_plan": req.sample_plan.strip(),
+        "learning_mode": _clean_learning_mode(req.learning_mode),
     }
     return {
         "id": dataset_id or str(uuid.uuid4()),
@@ -118,8 +160,8 @@ def _local_dataset_record(
         "family_name": req.family_name.strip(),
         "domain": req.domain.strip() or "generic",
         "prompt_profile": prompt_profile,
-        "ui_profile": {"allowed_roles": req.allowed_roles},
-        "template_profile": {},
+        "ui_profile": ui_profile,
+        "template_profile": {"sample_documents": [], "sample_profile": {}},
         "created_at": now,
         "updated_at": now,
         "storage": "local_json",
@@ -173,12 +215,17 @@ def _dataset_record(row: dict[str, Any]) -> dict[str, Any]:
     family["ui_profile"] = ui_profile
     family["template_profile"] = template_profile
     family["description"] = prompt_profile.get("description") or ""
+    family["onboarding_notes"] = prompt_profile.get("onboarding_notes") or ""
     family["prompt_guidelines"] = (
         prompt_profile.get("guidelines")
         or prompt_profile.get("summarization_directives")
         or ""
     )
     family["allowed_roles"] = ui_profile.get("allowed_roles") or []
+    family["use_case_type"] = ui_profile.get("use_case_type") or "comparison"
+    family["expected_formats"] = ui_profile.get("expected_formats") or ["pdf", "docx"]
+    family["sample_plan"] = ui_profile.get("sample_plan") or ""
+    family["learning_mode"] = ui_profile.get("learning_mode") or "deterministic_first"
     return family
 
 
@@ -186,6 +233,122 @@ def _validate_roles(roles: list[str]) -> None:
     for role in roles:
         if role not in ALL_ROLES:
             raise HTTPException(400, f"Invalid role: {role}")
+
+
+def _upload_has_file(upload: Optional[UploadFile]) -> bool:
+    return bool(upload and upload.filename)
+
+
+def _profile_dict(profile: Any) -> dict[str, Any]:
+    if hasattr(profile, "model_dump"):
+        return profile.model_dump()
+    if hasattr(profile, "dict"):
+        return profile.dict()
+    return _json_dict(profile)
+
+
+def _merge_unique_rules(existing: list[Any], learned: list[Any], key: str) -> list[Any]:
+    out = []
+    seen = set()
+    for item in [*(existing or []), *(learned or [])]:
+        if not isinstance(item, dict):
+            continue
+        identity = str(item.get(key) or item).strip().lower()
+        if identity in seen:
+            continue
+        seen.add(identity)
+        out.append(item)
+    return out
+
+
+def _merge_learned_profile(
+    existing_profile: dict[str, Any],
+    learned_profiles: list[dict[str, Any]],
+    sample_documents: list[dict[str, Any]],
+    *,
+    notes: str = "",
+    use_llm: bool = False,
+) -> dict[str, Any]:
+    merged = dict(existing_profile or {})
+    existing_samples = list(merged.get("sample_documents") or [])
+    merged["sample_documents"] = [*existing_samples, *sample_documents]
+
+    for profile in learned_profiles:
+        if not isinstance(profile, dict):
+            continue
+        for key, value in profile.items():
+            if key in {"column_rules", "stable_key_patterns"}:
+                continue
+            if key not in merged or merged.get(key) in (None, "", [], {}):
+                merged[key] = value
+
+        merged["column_rules"] = _merge_unique_rules(
+            list(merged.get("column_rules") or []),
+            list(profile.get("column_rules") or []),
+            "pattern",
+        )
+        merged["stable_key_patterns"] = _merge_unique_rules(
+            list(merged.get("stable_key_patterns") or []),
+            list(profile.get("stable_key_patterns") or []),
+            "regex",
+        )
+
+    pages = [int(doc.get("page_count") or 0) for doc in merged["sample_documents"] if int(doc.get("page_count") or 0) > 0]
+    roles = sorted({str(doc.get("sample_role") or "variation") for doc in merged["sample_documents"]})
+    merged["sample_profile"] = {
+        "sample_count": len(merged["sample_documents"]),
+        "roles_present": roles,
+        "average_pages": round(sum(pages) / len(pages), 2) if pages else 0,
+        "min_pages": min(pages) if pages else 0,
+        "max_pages": max(pages) if pages else 0,
+        "last_bootstrap_notes": notes.strip(),
+        "last_bootstrap_used_ai": bool(use_llm),
+        "last_bootstrap_at": _utc_now(),
+    }
+    return merged
+
+
+async def _learn_uploaded_sample(
+    *,
+    upload: UploadFile,
+    sample_role: str,
+    family_id: str,
+    family: dict[str, Any],
+    principal: Principal,
+    work_dir: Path,
+    index: int,
+    notes: str,
+    use_llm: bool,
+) -> tuple[dict[str, Any], dict[str, Any], Path, int]:
+    from ..ingestion import normalize_to_pdf
+    from ..extraction.pdf_extractor import render_pages
+    from ..schema_discovery import discover
+
+    safe_name = Path(upload.filename or f"sample_{index}").name
+    source_path = work_dir / f"{index}_{sample_role}_{safe_name}"
+    with source_path.open("wb") as buffer:
+        shutil.copyfileobj(upload.file, buffer)
+
+    converted_dir = work_dir / "converted"
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = normalize_to_pdf(source_path, converted_dir / f"{sample_role}_{index}")
+    page_imgs = render_pages(str(pdf_path), str(work_dir / f"pages_{sample_role}_{index}"))
+    profile = discover(str(pdf_path), family["supplier"], family["family_name"], use_llm=use_llm)
+    profile_dict = _profile_dict(profile)
+
+    document = {
+        "id": str(uuid.uuid4()),
+        "family_id": str(family_id),
+        "sample_role": sample_role,
+        "label": Path(upload.filename or f"sample_{index}").stem,
+        "filename": upload.filename,
+        "page_count": len(page_imgs),
+        "notes": notes.strip(),
+        "use_llm": bool(use_llm),
+        "uploaded_by": principal.user_id,
+        "uploaded_at": _utc_now(),
+    }
+    return profile_dict, document, pdf_path, len(page_imgs)
 
 
 def resolve_dataset_for_principal(family_id: str, principal: Optional[Principal] = None) -> dict[str, Any]:
@@ -319,11 +482,22 @@ def create_dataset(req: CreateDatasetReq):
 
     prompt_profile = {
         "description": req.description.strip(),
+        "onboarding_notes": req.onboarding_notes.strip(),
         "guidelines": "",
         "summarization_directives": "",
         "extraction_directives": "",
     }
-    ui_profile = {"allowed_roles": req.allowed_roles}
+    ui_profile = {
+        "allowed_roles": req.allowed_roles,
+        "use_case_type": _clean_use_case_type(req.use_case_type),
+        "expected_formats": _clean_list(
+            req.expected_formats,
+            {"pdf", "docx", "xlsx", "xls", "xlsm", "xlsb", "csv", "tsv", "image"},
+            ["pdf", "docx"],
+        ),
+        "sample_plan": req.sample_plan.strip(),
+        "learning_mode": _clean_learning_mode(req.learning_mode),
+    }
     tenant_id = principal.tenant_id
     business_unit_id = principal.business_unit_id if principal.is_business_unit_admin else "default"
 
@@ -348,7 +522,7 @@ def create_dataset(req: CreateDatasetReq):
                 tenant_id, business_unit_id, supplier, family_name, domain,
                 prompt_profile, ui_profile, template_profile
             )
-            VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, '{}'::jsonb)
+            VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
             RETURNING id
             """,
             (
@@ -359,6 +533,7 @@ def create_dataset(req: CreateDatasetReq):
                 req.domain.strip() or "generic",
                 json.dumps(prompt_profile, ensure_ascii=False),
                 json.dumps(ui_profile, ensure_ascii=False),
+                json.dumps({"sample_documents": [], "sample_profile": {}}, ensure_ascii=False),
             ),
         ).fetchone()
 
@@ -433,10 +608,24 @@ def update_dataset(family_id: str, req: UpdateDatasetReq):
 
         if req.description is not None:
             prompt_profile["description"] = req.description.strip()
+        if req.onboarding_notes is not None:
+            prompt_profile["onboarding_notes"] = req.onboarding_notes.strip()
         if req.prompt_guidelines is not None:
             prompt_profile["guidelines"] = req.prompt_guidelines.strip()
             prompt_profile["summarization_directives"] = req.prompt_guidelines.strip()
             prompt_profile["extraction_directives"] = req.prompt_guidelines.strip()
+        if req.use_case_type is not None:
+            ui_profile["use_case_type"] = _clean_use_case_type(req.use_case_type)
+        if req.expected_formats is not None:
+            ui_profile["expected_formats"] = _clean_list(
+                req.expected_formats,
+                {"pdf", "docx", "xlsx", "xls", "xlsm", "xlsb", "csv", "tsv", "image"},
+                ["pdf", "docx"],
+            )
+        if req.sample_plan is not None:
+            ui_profile["sample_plan"] = req.sample_plan.strip()
+        if req.learning_mode is not None:
+            ui_profile["learning_mode"] = _clean_learning_mode(req.learning_mode)
         if req.allowed_roles is not None:
             _validate_roles(req.allowed_roles)
             ui_profile["allowed_roles"] = req.allowed_roles
@@ -509,10 +698,24 @@ def update_dataset(family_id: str, req: UpdateDatasetReq):
 
         if req.description is not None:
             prompt_profile["description"] = req.description.strip()
+        if req.onboarding_notes is not None:
+            prompt_profile["onboarding_notes"] = req.onboarding_notes.strip()
         if req.prompt_guidelines is not None:
             prompt_profile["guidelines"] = req.prompt_guidelines.strip()
             prompt_profile["summarization_directives"] = req.prompt_guidelines.strip()
             prompt_profile["extraction_directives"] = req.prompt_guidelines.strip()
+        if req.use_case_type is not None:
+            ui_profile["use_case_type"] = _clean_use_case_type(req.use_case_type)
+        if req.expected_formats is not None:
+            ui_profile["expected_formats"] = _clean_list(
+                req.expected_formats,
+                {"pdf", "docx", "xlsx", "xls", "xlsm", "xlsb", "csv", "tsv", "image"},
+                ["pdf", "docx"],
+            )
+        if req.sample_plan is not None:
+            ui_profile["sample_plan"] = req.sample_plan.strip()
+        if req.learning_mode is not None:
+            ui_profile["learning_mode"] = _clean_learning_mode(req.learning_mode)
         if req.allowed_roles is not None:
             _validate_roles(req.allowed_roles)
             ui_profile["allowed_roles"] = req.allowed_roles
@@ -589,6 +792,171 @@ def delete_dataset(family_id: str):
         conn.execute("DELETE FROM document_family WHERE id = %s", (family_uuid,))
 
     return {"status": "success"}
+
+
+@router.post("/admin/datasets/{family_id}/samples")
+async def bootstrap_dataset_samples(
+    family_id: str,
+    baseline: Optional[UploadFile] = File(None),
+    revised: Optional[UploadFile] = File(None),
+    variations: Optional[list[UploadFile]] = File(None),
+    notes: str = Form(""),
+    use_llm: bool = Form(True),
+):
+    principal = current_principal()
+    _check_admin(principal)
+
+    uploads: list[tuple[str, UploadFile]] = []
+    if _upload_has_file(baseline):
+        uploads.append(("baseline", baseline))
+    if _upload_has_file(revised):
+        uploads.append(("revised", revised))
+    for variation in variations or []:
+        if _upload_has_file(variation):
+            uploads.append(("variation", variation))
+    if not uploads:
+        raise HTTPException(400, "Upload at least one baseline, revised, or variation sample document.")
+
+    if not db_enabled():
+        datasets = _read_local_datasets()
+        index = next((idx for idx, item in enumerate(datasets) if str(item.get("id")) == str(family_id)), None)
+        if index is None:
+            raise HTTPException(404, "Dataset not found.")
+        family = _dataset_record(datasets[index])
+        if not can_access_family(principal, family):
+            raise HTTPException(403, "Access denied to this dataset.")
+
+        work_dir = Path(tempfile.mkdtemp(prefix=f"dataset_samples_{family_id}_"))
+        try:
+            learned_profiles = []
+            sample_documents = []
+            for idx, (sample_role, upload) in enumerate(uploads, start=1):
+                profile_dict, document, _pdf_path, _page_count = await _learn_uploaded_sample(
+                    upload=upload,
+                    sample_role=sample_role,
+                    family_id=family_id,
+                    family=family,
+                    principal=principal,
+                    work_dir=work_dir,
+                    index=idx,
+                    notes=notes,
+                    use_llm=use_llm,
+                )
+                document["storage"] = "local_json"
+                learned_profiles.append(profile_dict)
+                sample_documents.append(document)
+
+            existing_profile = _json_dict(family.get("template_profile"))
+            datasets[index]["template_profile"] = _merge_learned_profile(
+                existing_profile,
+                learned_profiles,
+                sample_documents,
+                notes=notes,
+                use_llm=use_llm,
+            )
+            datasets[index]["updated_at"] = _utc_now()
+            _write_local_datasets(datasets)
+
+            documents = _read_local_documents()
+            documents = [*sample_documents, *documents]
+            _write_local_documents(documents)
+
+            return {
+                "status": "success",
+                "documents": sample_documents,
+                "sample_profile": datasets[index]["template_profile"].get("sample_profile", {}),
+                "storage": "local_json",
+            }
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+    family_uuid = _family_uuid(family_id)
+    with get_conn() as conn:
+        family = conn.execute(
+            """
+            SELECT id, tenant_id, business_unit_id, supplier, family_name, template_profile, ui_profile
+            FROM document_family
+            WHERE id = %s
+            """,
+            (family_uuid,),
+        ).fetchone()
+    if not family:
+        raise HTTPException(404, "Dataset not found.")
+    dataset = _dataset_record(family)
+    if not can_access_family(principal, dataset):
+        raise HTTPException(403, "Access denied to this dataset.")
+
+    work_dir = Path(tempfile.mkdtemp(prefix=f"dataset_samples_{family_id}_"))
+    try:
+        from ..persistence import _upsert_document
+
+        learned_profiles = []
+        sample_documents = []
+        processed: list[tuple[dict[str, Any], Path, int]] = []
+        for idx, (sample_role, upload) in enumerate(uploads, start=1):
+            profile_dict, document, pdf_path, page_count = await _learn_uploaded_sample(
+                upload=upload,
+                sample_role=sample_role,
+                family_id=family_id,
+                family=dataset,
+                principal=principal,
+                work_dir=work_dir,
+                index=idx,
+                notes=notes,
+                use_llm=use_llm,
+            )
+            learned_profiles.append(profile_dict)
+            sample_documents.append(document)
+            processed.append((document, pdf_path, page_count))
+
+        existing_profile = _json_dict(dataset.get("template_profile"))
+        merged_profile = _merge_learned_profile(
+            existing_profile,
+            learned_profiles,
+            sample_documents,
+            notes=notes,
+            use_llm=use_llm,
+        )
+
+        with get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE document_family
+                SET template_profile = %s::jsonb,
+                    updated_at = now()
+                WHERE id = %s
+                """,
+                (json.dumps(merged_profile, ensure_ascii=False, default=str), family_uuid),
+            )
+            for document, pdf_path, page_count in processed:
+                doc_id = _upsert_document(
+                    conn,
+                    family_id=family_uuid,
+                    tenant_id=family["tenant_id"],
+                    business_unit_id=family["business_unit_id"],
+                    uploaded_by=principal.user_id,
+                    label=document["label"],
+                    pdf_path=pdf_path,
+                    page_count=page_count,
+                    coverage=0.0,
+                )
+                conn.execute(
+                    """
+                    UPDATE spec_document
+                    SET version_tag = %s
+                    WHERE id = %s
+                    """,
+                    (document["sample_role"], doc_id),
+                )
+                document["id"] = str(doc_id)
+
+        return {
+            "status": "success",
+            "documents": sample_documents,
+            "sample_profile": merged_profile.get("sample_profile", {}),
+        }
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @router.post("/admin/datasets/{family_id}/bootstrap")
