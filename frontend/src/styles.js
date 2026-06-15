@@ -1171,9 +1171,26 @@ export const css = `
   .dl-scrollbar::-webkit-scrollbar { height: 10px; width: 10px; }
   .dl-scrollbar::-webkit-scrollbar-thumb { background: #c9c0b0; border-radius: 999px; }
   .dl-scrollbar::-webkit-scrollbar-track { background: #f2ece2; }
+  .processing-state {
+    margin-top: 20px;
+    color: var(--text-primary);
+  }
+  .processing-state-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 7px;
+    color: var(--text-primary);
+    font-size: 13px;
+  }
+  .processing-state p {
+    margin: 10px 0 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
   .progress-track {
     height: 7px;
-    background: #e9e2d7;
+    background: color-mix(in srgb, var(--border) 60%, transparent);
     border-radius: 999px;
     overflow: hidden;
     position: relative;
@@ -1184,19 +1201,19 @@ export const css = `
     border-radius: 999px;
     overflow: hidden;
     position: relative;
-    background: #9a7a10;
+    background: linear-gradient(90deg, #c45510, #e08a2e);
     transition: width 450ms ease, background 250ms ease;
   }
   .progress-fill.running,
   .progress-fill.queued,
   .progress-fill.uploading {
-    background: var(--surface-raised);
+    background: linear-gradient(90deg, #c45510 0%, #e08a2e 45%, #0a1f4d 100%);
   }
   .progress-fill.complete {
-    background: #2f6f5b;
+    background: linear-gradient(90deg, #1f7e41, #37a36a);
   }
   .progress-fill.failed {
-    background: #bb3030;
+    background: linear-gradient(90deg, #b02e2e, #d75a4a);
   }
   .progress-fill.running::after,
   .progress-fill.queued::after,
@@ -1205,7 +1222,7 @@ export const css = `
     position: absolute;
     inset: 0;
     transform: translateX(-100%);
-    background: var(--surface-raised);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.62), transparent);
     animation: progress-shimmer 1.45s ease-in-out infinite;
   }
   @keyframes progress-shimmer {
@@ -1311,6 +1328,70 @@ export const css = `
     overflow-y: hidden;
     border: 1px solid #eee7dc;
     border-radius: 8px;
+  }
+  .viewer-toolbar-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-inline-start: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    padding: 4px 7px;
+  }
+  .viewer-toolbar-group button {
+    min-width: 28px;
+    min-height: 26px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .viewer-toolbar-group button:hover {
+    border-color: var(--border);
+    background: var(--surface-raised);
+  }
+  .viewer-toolbar-group span {
+    min-width: 44px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .viewer-sync-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .viewer-sync-toggle input {
+    accent-color: var(--brand-orange);
+  }
+  .pdf-zoom-stage {
+    position: relative;
+    transform-origin: top left;
+    transition: width 120ms ease;
+  }
+  th.vertical-th {
+    padding: 10px 4px !important;
+    height: 132px;
+    min-width: 32px;
+    max-width: 54px;
+    vertical-align: bottom !important;
+    text-align: center;
+  }
+  .vertical-th-text {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+    display: inline-block;
+    vertical-align: middle;
+    text-align: center;
   }
   .cell-wrap {
     white-space: normal;
@@ -2201,6 +2282,171 @@ export const css = `
     background: #1d1112;
     color: #ffb2b2;
   }
+  .admin-studio {
+    display: grid;
+    gap: 16px;
+  }
+  .admin-intro,
+  .admin-panel {
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+  }
+  .admin-intro,
+  .admin-panel {
+    padding: 16px;
+  }
+  .admin-intro h2,
+  .admin-panel h3,
+  .admin-panel h4 {
+    margin: 0;
+    color: var(--text-primary);
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  .admin-intro p,
+  .admin-detail-head p,
+  .seed-form p {
+    margin: 6px 0 0;
+    color: var(--text-secondary);
+  }
+  .admin-notice {
+    border: 1px solid color-mix(in srgb, #1f7e41 48%, var(--border));
+    background: color-mix(in srgb, #1f7e41 12%, var(--surface-raised));
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    font-weight: 600;
+  }
+  .admin-grid {
+    display: grid;
+    grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  .admin-panel-head,
+  .admin-detail-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 14px;
+  }
+  .dataset-list,
+  .admin-form,
+  .admin-detail,
+  .admin-config-grid,
+  .seed-form {
+    display: grid;
+    gap: 12px;
+  }
+  .dataset-item {
+    width: 100%;
+    text-align: start;
+    display: grid;
+    gap: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    padding: 11px;
+  }
+  .dataset-item.active {
+    border-color: var(--brand-orange);
+    background: color-mix(in srgb, var(--brand-orange) 9%, var(--surface-raised));
+  }
+  .dataset-item span,
+  .dataset-item small,
+  .profile-card span,
+  .profile-card small {
+    color: var(--text-secondary);
+  }
+  .admin-config-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .admin-form label,
+  .admin-config-grid label {
+    display: grid;
+    gap: 6px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .admin-form input,
+  .admin-form select,
+  .admin-form textarea,
+  .admin-config-grid textarea,
+  .seed-form input {
+    width: 100%;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    padding: 9px 10px;
+    min-width: 0;
+  }
+  .admin-form textarea,
+  .admin-config-grid textarea {
+    min-height: 92px;
+    resize: vertical;
+  }
+  .admin-config-grid textarea.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    min-height: 140px;
+  }
+  .role-picker {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+  .role-picker legend {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 5px;
+  }
+  .role-picker label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+  }
+  .seed-form {
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  .admin-profile-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .profile-card {
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    min-width: 0;
+  }
+  .profile-card p {
+    display: grid;
+    gap: 2px;
+    margin: 8px 0 0;
+    overflow-wrap: anywhere;
+  }
+  .comparison-head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
   @media (prefers-color-scheme: dark) {
     .theme-system .danger-action {
       border-color: #4d2528;
@@ -2218,7 +2464,10 @@ export const css = `
       height: auto;
     }
     .ask-documents-grid,
-    .job-card {
+    .job-card,
+    .admin-grid,
+    .admin-config-grid,
+    .admin-profile-grid {
       grid-template-columns: 1fr;
     }
     .job-side {

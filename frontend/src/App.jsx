@@ -20,6 +20,7 @@ import { UploadPanel, ExtractUploadPanel } from "./components/upload.jsx";
 import { SideBySide } from "./components/viewer.jsx";
 import { ExtractionWorkspace } from "./components/extraction.jsx";
 import { AskDocumentsWorkspace, WorkspaceShell } from "./components/workspaceShell.jsx";
+import { AdminWorkspace } from "./components/admin.jsx";
 import { useDocumentTitle } from "./theme/useDocumentTitle.js";
 
 const getSession = (key, fallback) => {
@@ -47,6 +48,7 @@ const workspacePaths = {
   assistant: "/ask",
   jobs: "/work-history",
   agents: "/ai-agents",
+  admin: "/admin",
 };
 
 const pathWorkspaces = {
@@ -79,6 +81,7 @@ export default function App() {
     assistant: "Ask Document",
     jobs: "Work History",
     agents: "AI Agents",
+    admin: "Admin Studio",
   }[workspace] || "Workspace";
 
   useDocumentTitle(pageTitle);
@@ -125,6 +128,25 @@ export default function App() {
         console.error(e);
       }
     }
+  };
+
+  const startNewCompare = () => {
+    setRunId(null);
+    setMeta(null);
+    setBusy(false);
+    setError("");
+    setPageNum(1);
+    setTab("viewer");
+    goWorkspace("compare");
+  };
+
+  const startNewExtract = () => {
+    setExtractRunId(null);
+    setExtractMeta(null);
+    setExtractBusy(false);
+    setExtractError("");
+    setExtractTab("overview");
+    goWorkspace("extract");
   };
 
   const goWorkspace = (nextWorkspace, options = {}) => {
@@ -398,7 +420,14 @@ export default function App() {
         onDownloadReport={downloadReport}
       >
         {workspace === "jobs" && (
-          <JobsDashboard onOpenJob={openJob} onAskJob={askJob} error={jobError} historyKind={historyKind} />
+          <JobsDashboard
+            onOpenJob={openJob}
+            onAskJob={askJob}
+            error={jobError}
+            historyKind={historyKind}
+            onStartCompare={startNewCompare}
+            onStartExtract={startNewExtract}
+          />
         )}
 
         {workspace === "compare" && !isComplete && (
@@ -435,7 +464,12 @@ export default function App() {
               <div>
                 <h2 dir="auto">{meta.base_label || "Baseline"} → {meta.target_label || "Revised"}</h2>
               </div>
-              <div className="comparison-id">#{String(runId).slice(0, 6)}</div>
+              <div className="comparison-head-actions">
+                <button type="button" className="ghost-action compact" onClick={startNewCompare}>
+                  New comparison
+                </button>
+                <div className="comparison-id">#{String(runId).slice(0, 6)}</div>
+              </div>
             </div>
             <StatsBar meta={meta} />
 
@@ -466,6 +500,10 @@ export default function App() {
               <span>Coming soon</span>
             </div>
           </section>
+        )}
+
+        {workspace === "admin" && (
+          <AdminWorkspace />
         )}
 
       </WorkspaceShell>

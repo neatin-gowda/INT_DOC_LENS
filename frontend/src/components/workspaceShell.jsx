@@ -12,6 +12,7 @@ const workspaceLabels = {
   extract: "Extract",
   assistant: "Ask Document",
   agents: "AI Agents",
+  admin: "Admin Studio",
 };
 
 const historyActions = {

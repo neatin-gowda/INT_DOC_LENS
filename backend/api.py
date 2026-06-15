@@ -24,7 +24,7 @@ from .security import (
     reset_current_principal,
     set_current_principal,
 )
-from .routers import comparison, extraction, queries, feedback, tables, reports, tools
+from .routers import comparison, extraction, queries, feedback, tables, reports, tools, admin
 
 app = FastAPI(title="Altrai API", version="0.1.0")
 
@@ -70,6 +70,7 @@ app.include_router(feedback.router)
 app.include_router(tables.router)
 app.include_router(reports.router)
 app.include_router(tools.router)
+app.include_router(admin.router)
 
 @app.get("/")
 def root():
@@ -91,6 +92,8 @@ def root():
             "DELETE /jobs/{id}",
             "GET /db-health",
             "GET /tools",
+            "GET /datasets",
+            "GET /admin/datasets",
             "GET /ai-health",
             "GET /runs/{id}",
             "GET /runs/{id}/diff",

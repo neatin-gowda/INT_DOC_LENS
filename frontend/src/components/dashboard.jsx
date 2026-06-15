@@ -41,7 +41,14 @@ function QuickStart({ title, detail, onClick }) {
   );
 }
 
-export function JobsDashboard({ onOpenJob, onAskJob, error, historyKind = "all" }) {
+export function JobsDashboard({
+  onOpenJob,
+  onAskJob,
+  error,
+  historyKind = "all",
+  onStartCompare,
+  onStartExtract,
+}) {
   const [state, setState] = useState({ loading: true, error: "", jobs: [] });
   const [deleteId, setDeleteId] = useState("");
 
@@ -108,6 +115,8 @@ export function JobsDashboard({ onOpenJob, onAskJob, error, historyKind = "all" 
           <h2>{heading}</h2>
         </div>
         <div className="board-actions">
+          <button type="button" onClick={onStartCompare} className="primary-action compact">New compare</button>
+          <button type="button" onClick={onStartExtract} className="ghost-action compact">New extract</button>
           <span>{running} running</span>
           <span>{complete} complete</span>
           <button type="button" onClick={loadJobs} className="ghost-action">Refresh</button>

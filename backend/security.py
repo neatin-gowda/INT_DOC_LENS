@@ -120,6 +120,25 @@ def can_access_job(principal: Principal, job: dict[str, Any]) -> bool:
     return created_by == principal.user_id
 
 
+def can_access_family(principal: Principal, family: dict[str, Any]) -> bool:
+    if auth_mode() == "disabled":
+        return True
+    if principal.is_platform_admin:
+        return True
+
+    tenant_id = str(family.get("tenant_id") or "default")
+    business_unit_id = str(family.get("business_unit_id") or "default")
+    if principal.tenant_id != tenant_id:
+        return False
+
+    ui_profile = family.get("ui_profile") or {}
+    allowed_roles = ui_profile.get("allowed_roles")
+    if isinstance(allowed_roles, list) and allowed_roles and principal.role not in allowed_roles:
+        return False
+
+    return principal.business_unit_id == business_unit_id
+
+
 def job_ownership_fields(principal: Optional[Principal] = None) -> dict[str, str]:
     principal = principal or current_principal()
     return {

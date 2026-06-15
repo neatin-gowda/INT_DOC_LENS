@@ -25,6 +25,7 @@ class QueryReq(BaseModel):
     question: str
     mode: str = "fast"
     response_language: str = "source"
+    model_name: Optional[str] = None
 
 
 class FeedbackReq(BaseModel):

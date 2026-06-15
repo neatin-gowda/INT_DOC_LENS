@@ -1667,14 +1667,24 @@ def llm_freeform_answer(
     rows: list[dict],
     semantic_rows: list[dict],
     response_language: str = "source",
+    model_name: Optional[str] = None,
+    prompt_profile: Optional[dict] = None,
 ) -> tuple[Optional[dict], Optional[str]]:
     config = _openai_config()
     endpoint = _env_first(AI_ENV_NAMES["endpoint"])
     api_key = _env_first(AI_ENV_NAMES["api_key"])
-    deploy = str(config.get("deployment") or "")
+    deploy = model_name or str(config.get("deployment") or "")
 
-    if not config["configured"]:
-        return None, "Azure OpenAI chat is not configured: missing " + ", ".join(config["missing"])
+    is_configured = bool(endpoint and api_key and deploy)
+    missing = []
+    if not endpoint:
+        missing.append("AZURE_OPENAI_ENDPOINT")
+    if not api_key:
+        missing.append("AZURE_OPENAI_API_KEY")
+    if not deploy:
+        missing.append("AZURE_OPENAI_DEPLOYMENT")
+    if not is_configured:
+        return None, "Azure OpenAI chat is not configured: missing " + ", ".join(missing)
 
     evidence_rows = _curated_ai_evidence(nl, rows, semantic_rows)
     if not evidence_rows:
@@ -1691,18 +1701,19 @@ def llm_freeform_answer(
 
         def _send(evidence_payload: list[dict]):
             evidence = json.dumps(evidence_payload, ensure_ascii=False, default=str)
+            user_content = AI_REVIEW_PROMPT.format(
+                question=nl,
+                evidence=evidence,
+                response_language=response_language or "source",
+            )
+            profile_context = _prompt_profile_context(prompt_profile)
+            if profile_context:
+                user_content = f"{profile_context}\n\n{user_content}"
             return client.chat.completions.create(
                 model=deploy,
                 messages=[
                     {"role": "system", "content": "Return strict JSON only. Do not include markdown fences."},
-                    {
-                        "role": "user",
-                        "content": AI_REVIEW_PROMPT.format(
-                            question=nl,
-                            evidence=evidence,
-                            response_language=response_language or "source",
-                        ),
-                    },
+                    {"role": "user", "content": user_content},
                 ],
                 temperature=0.15,
                 max_tokens=3500,
@@ -1843,6 +1854,57 @@ def _build_answer(question: str, rows: list[dict], plan: dict) -> str:
     return " ".join(parts)
 
 
+def _prompt_profile_context(prompt_profile: Optional[dict]) -> str:
+    if not isinstance(prompt_profile, dict) or not prompt_profile:
+        return ""
+    parts = []
+    description = str(prompt_profile.get("description") or "").strip()
+    if description:
+        parts.append(f"Document family description:\n{description}")
+    directives = []
+    for key in ("summarization_directives", "extraction_directives", "guidelines"):
+        value = prompt_profile.get(key)
+        if isinstance(value, str) and value.strip():
+            directives.append(value.strip())
+        elif isinstance(value, list):
+            directives.extend(str(item).strip() for item in value if str(item).strip())
+    if directives:
+        parts.append("Additional document-family guidelines:\n" + "\n".join(f"- {item}" for item in directives[:12]))
+    return "\n\n".join(parts)
+
+
+def _prompt_profile_for_run(db_run_id: Optional[str]) -> dict:
+    if not db_run_id or not db_enabled():
+        return {}
+    try:
+        run_id = db_run_id
+        try:
+            import uuid
+            run_id = uuid.UUID(str(db_run_id))
+        except ValueError:
+            pass
+        with get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT f.prompt_profile
+                FROM document_family f
+                JOIN comparison_run c ON c.family_id = f.id
+                WHERE c.id = %s
+                """,
+                (run_id,),
+            ).fetchone()
+        profile = row["prompt_profile"] if row else {}
+        if isinstance(profile, str):
+            try:
+                profile = json.loads(profile)
+            except json.JSONDecodeError:
+                return {}
+        return profile if isinstance(profile, dict) else {}
+    except Exception as exc:
+        print(f"Error loading prompt profile for query: {exc}")
+        return {}
+
+
 def query(
     nl: str,
     diffs: list[BlockDiff],
@@ -1851,8 +1913,10 @@ def query(
     db_run_id: Optional[str] = None,
     mode: str = "fast",
     response_language: str = "source",
+    model_name: Optional[str] = None,
 ) -> dict:
     usage_accum = merge_usage()
+    prompt_profile = _prompt_profile_for_run(db_run_id)
 
     if _is_out_of_scope_question(nl):
         return {
@@ -1908,7 +1972,14 @@ def query(
     rows = _merge_many_rows(table_rows, _focused_identifier_rows(rows, nl), rows, semantic_rows, limit=450)
 
     if use_ai:
-        ai_result, ai_error = llm_freeform_answer(nl, rows, semantic_rows, response_language=response_language)
+        ai_result, ai_error = llm_freeform_answer(
+            nl,
+            rows,
+            semantic_rows,
+            response_language=response_language,
+            model_name=model_name,
+            prompt_profile=prompt_profile,
+        )
         if ai_result:
             usage_accum = merge_usage(usage_accum, ai_result.get("usage"))
             ai_result["usage"] = usage_accum
@@ -1936,7 +2007,12 @@ def query(
         fallback["ai_called"] = False
         fallback["ai_unavailable"] = True
         fallback["ai_error"] = ai_error or "Azure OpenAI did not return a usable response."
-        fallback["answer"] = "AI Summarization is unavailable right now. I could not generate a model-assisted answer from the extracted evidence."
+        deterministic_answer = fallback.get("answer") or _build_answer(nl, rows, plan)
+        fallback["answer"] = (
+            "AI Summarization is unavailable right now. "
+            "Here is the deterministic answer from extracted evidence:\n\n"
+            f"{deterministic_answer}"
+        )
         fallback["response_language"] = response_language
         fallback["usage"] = usage_accum
         return fallback

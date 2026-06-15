@@ -5,6 +5,7 @@ import {
   FileSearch,
   GitCompare,
   History,
+  ShieldCheck,
 } from "lucide-react";
 
 const sections = [
@@ -15,6 +16,12 @@ const sections = [
       { key: "extract", label: "Extract", icon: FileOutput },
       { key: "assistant", label: "Ask Document", icon: FileSearch },
       { key: "jobs", label: "Work History", icon: History },
+    ],
+  },
+  {
+    label: "Administration",
+    items: [
+      { key: "admin", label: "Admin Studio", icon: ShieldCheck, title: "Use cases, datasets, and access policies" },
     ],
   },
   {

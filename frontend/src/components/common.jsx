@@ -888,8 +888,8 @@ export function ProcessingState({ progress, message, status }) {
   const width = statusInfo.isFailed ? 100 : Math.max(7, statusInfo.isComplete ? 100 : safeProgress);
 
   return (
-    <div style={{ marginTop: 20 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 7, color: "#475467", fontSize: 13 }}>
+    <div className="processing-state">
+      <div className="processing-state-head">
         <span style={{ fontWeight: 600 }}>{message}</span>
         <span>{safeProgress}%</span>
       </div>
@@ -901,8 +901,8 @@ export function ProcessingState({ progress, message, status }) {
           }}
         />
       </div>
-      <p style={{ margin: "10px 0 0", color: "#667085", fontSize: 13 }}>
-        The comparison is still running. This view updates automatically as the backend reports progress.
+      <p>
+        The job is still running. This view updates automatically as the backend reports progress.
       </p>
     </div>
   );

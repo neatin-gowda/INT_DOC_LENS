@@ -15,7 +15,6 @@ export function UploadPanel({ onUpload, busy }) {
         <FileInput label="Revised" helper="Latest or proposed file" name="target" disabled={busy} />
 
         <div className="workflow-action-rail">
-          <div className="process-status-card">Review pipeline</div>
           <button disabled={busy} className="primary-action full">
             {busy ? "Processing" : "Compare documents"}
           </button>
@@ -45,7 +44,6 @@ export function ExtractUploadPanel({ onUpload, busy }) {
         />
 
         <div className="workflow-action-rail">
-          <div className="process-status-card">Extraction run</div>
           <button disabled={busy} className="primary-action full">
             {busy ? "Extracting" : "Extract content"}
           </button>

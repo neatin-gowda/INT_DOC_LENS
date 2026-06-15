@@ -47,6 +47,8 @@ backend/
   comparison/
     diff_engine.py       Anchor-aware, order-preserving block/field/token diffing.
 
+  schema_discovery.py    TemplateProfile discovery, family inference, prompt-profile lookup, and feedback learning.
+
   services/
     table_tools.py       Table discovery, viewing, row matching, and selected-column comparison helpers.
 
@@ -60,6 +62,7 @@ backend/
     reports.py           PDF report and AI summary PDF endpoints.
     tables.py            Table list, table view, selected-table comparison, and table report.
     tools.py             Tool discovery endpoint.
+    admin.py             Use-case/dataset onboarding, seed learning, and profile governance.
 
   jobs/
     queue.py             Database-backed worker queue for ACA scale-out safety.
@@ -79,6 +82,8 @@ backend/
 - CLI smoke test: `python -m backend.run_cli --base old.pdf --target new.pdf --out ./out`
 - Frontend app: `frontend/src/App.jsx`
 - Frontend shell: `frontend/src/components/workspaceShell.jsx` and `frontend/src/shell/NavRail.jsx`
+- Frontend admin: `frontend/src/components/admin.jsx`
+- Static Web Apps routing: `frontend/public/staticwebapp.config.json`
 - Frontend build: `cd frontend && npm run build`
 - Azure deploy: `.github/workflows/azure-full-deploy.yml`
 
@@ -93,13 +98,16 @@ The active comparison path is:
 - `backend/services/table_tools.py` for table discovery, previews, and selected-column comparison.
 - `backend/summarizer.py` for deterministic or Azure OpenAI-backed review summaries.
 - `backend/query.py` for natural-language questions over comparison results.
-- `frontend/src/features/ask/AskDocumentsWorkspace.jsx` for grounded Ask Document over extraction runs.
+- `backend/schema_discovery.py` for recurring family grouping, profile bootstrap, and feedback-trained rule refinement.
+- `backend/routers/admin.py` for governed use-case onboarding, seed documents, prompt profiles, and role access.
+- `frontend/src/components/workspaceShell.jsx` for the shell and grounded Ask Document over extraction runs.
 - `frontend/src/components/dashboard.jsx` for Work History.
+- `frontend/src/components/admin.jsx` for Admin Studio dataset onboarding.
 
 The primary UI navigation is intentionally narrow: Compare, Extract, Ask
-Document, Work History, and a future AI Agents placeholder. Table and report
-capabilities stay available through backend endpoints and can be reintroduced as
-advanced flows later.
+Document, Work History, Admin Studio, and a future AI Agents placeholder. Table
+and report capabilities stay available through backend endpoints and can be
+reintroduced as advanced flows later.
 
 ## Naming Rules
 

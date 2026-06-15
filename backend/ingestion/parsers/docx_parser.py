@@ -19,6 +19,10 @@ from .utils import (
     _row_text,
 )
 
+
+PRESERVE_DOCX_TABLES = True
+
+
 def _iter_docx_blocks(document):
     from docx.table import Table
     from docx.text.paragraph import Paragraph
@@ -108,7 +112,7 @@ def _extract_docx(source_path: Path) -> list[Block]:
             n_cols = max(len(row) for row in rows)
             normalized_rows = [row + [""] * (n_cols - len(row)) for row in rows]
 
-            if _looks_like_layout_table(normalized_rows, n_cols):
+            if not PRESERVE_DOCX_TABLES and _looks_like_layout_table(normalized_rows, n_cols):
                 base_path = current_section.path if current_section else "/document"
                 layout_id = seq
                 for ri, row in enumerate(normalized_rows):

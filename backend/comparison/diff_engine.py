@@ -205,7 +205,13 @@ def _section_prefix(path: str | None, depth: int = 2) -> str:
     parts = [p for p in (path or "").split("/") if p]
     cleaned = []
     for part in parts:
-        if part.startswith("table_") or part.startswith("row_"):
+        if (
+            part.startswith("table_")
+            or part.startswith("row_")
+            or part.startswith("layout_")
+            or part.startswith("line_")
+            or part.startswith("p_")
+        ):
             continue
         cleaned.append(part)
     return "/" + "/".join(cleaned[:depth]) if cleaned else ""

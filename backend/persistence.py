@@ -382,8 +382,8 @@ def persist_run(
         base_block_map = _insert_blocks(conn, base_doc_id, base_blocks, enable_embeddings=enable_embeddings, usage_callback=usage_callback)
         target_block_map = _insert_blocks(conn, target_doc_id, target_blocks, enable_embeddings=enable_embeddings, usage_callback=usage_callback)
 
-        _insert_tables(conn, base_doc_id, base_blocks, base_block_map)
-        _insert_tables(conn, target_doc_id, target_blocks, target_block_map)
+        base_table_maps = _insert_tables(conn, base_doc_id, base_blocks, base_block_map)
+        target_table_maps = _insert_tables(conn, target_doc_id, target_blocks, target_block_map)
 
         comparison_id = _upsert_comparison_run(
             conn,
@@ -395,6 +395,15 @@ def persist_run(
         )
 
         _insert_block_diffs(conn, comparison_id, diffs, base_block_map, target_block_map)
+        _insert_table_comparisons(
+            conn,
+            comparison_id,
+            base_blocks,
+            target_blocks,
+            diffs,
+            base_table_maps,
+            target_table_maps,
+        )
 
         return str(comparison_id)
 
@@ -557,7 +566,12 @@ def _insert_blocks(conn, document_id, blocks: list[Block], *, enable_embeddings:
     return block_id_map
 
 
-def _insert_tables(conn, document_id, blocks: list[Block], block_id_map: dict[Any, uuid.UUID]) -> None:
+def _insert_tables(
+    conn,
+    document_id,
+    blocks: list[Block],
+    block_id_map: dict[Any, uuid.UUID],
+) -> dict[Any, tuple[uuid.UUID, dict[int, uuid.UUID], dict[int, uuid.UUID]]]:
     template_profile = {}
     try:
         row = conn.execute(
@@ -583,6 +597,7 @@ def _insert_tables(conn, document_id, blocks: list[Block], block_id_map: dict[An
     )
 
     table_index = 0
+    table_maps = {}
 
     for table in blocks:
         if table.block_type.value != "table":
@@ -664,7 +679,10 @@ def _insert_tables(conn, document_id, blocks: list[Block], block_id_map: dict[An
         row_id_map = _insert_table_rows(conn, table_id, rows, block_id_map)
         _insert_table_cells(conn, table_id, rows, columns, row_id_map, column_id_map)
 
+        table_maps[table.id] = (table_id, column_id_map, row_id_map)
         table_index += 1
+
+    return table_maps
 
 
 def _insert_table_columns(
@@ -879,6 +897,7 @@ def _upsert_comparison_run(
 
     comparison_id = row["id"]
 
+    conn.execute("DELETE FROM table_comparison_result WHERE run_id = %s", (comparison_id,))
     conn.execute("DELETE FROM block_diff WHERE run_id = %s", (comparison_id,))
 
     return comparison_id
@@ -976,6 +995,221 @@ def _insert_block_diffs(
                 """,
                 diff_data,
             )
+
+
+def _change_value(change_type: Any) -> str:
+    return str(getattr(change_type, "value", change_type) or "").upper()
+
+
+def _cell_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _insert_table_comparisons(
+    conn,
+    comparison_id: uuid.UUID,
+    base_blocks: list[Block],
+    target_blocks: list[Block],
+    diffs: list[BlockDiff],
+    base_table_maps: dict[Any, tuple[uuid.UUID, dict[int, uuid.UUID], dict[int, uuid.UUID]]],
+    target_table_maps: dict[Any, tuple[uuid.UUID, dict[int, uuid.UUID], dict[int, uuid.UUID]]],
+) -> None:
+    try:
+        from .services.table_tools import (
+            _align_columns,
+            _align_rows,
+            _column_names,
+            _compare_row_values,
+            _guess_row_label_columns,
+            _row_key_for_table,
+            _row_values_for_table,
+            _table_exposure,
+            _table_rows,
+        )
+    except Exception as exc:
+        print(f"Could not load table comparison helpers: {exc}")
+        return
+
+    base_by_id = {block.id: block for block in base_blocks}
+    target_by_id = {block.id: block for block in target_blocks}
+
+    for diff in diffs:
+        if _change_value(diff.change_type) not in {"MODIFIED", "UNCHANGED"}:
+            continue
+        if not diff.base_block_id or not diff.target_block_id:
+            continue
+
+        base_table = base_by_id.get(diff.base_block_id)
+        target_table = target_by_id.get(diff.target_block_id)
+        if not base_table or not target_table:
+            continue
+        if base_table.block_type.value != "table" or target_table.block_type.value != "table":
+            continue
+
+        base_map = base_table_maps.get(base_table.id)
+        target_map = target_table_maps.get(target_table.id)
+        if not base_map or not target_map:
+            continue
+
+        base_table_id, base_col_map, base_row_map = base_map
+        target_table_id, target_col_map, target_row_map = target_map
+
+        try:
+            base_rows = _table_rows(base_table, base_blocks)
+            target_rows = _table_rows(target_table, target_blocks)
+            base_columns = _column_names(base_table, base_rows)
+            target_columns = _column_names(target_table, target_rows)
+
+            if not _table_exposure(base_table, base_rows, base_columns)["is_real_table"]:
+                continue
+            if not _table_exposure(target_table, target_rows, target_columns)["is_real_table"]:
+                continue
+
+            base_row_cols = _guess_row_label_columns(base_columns, base_rows, base_table)
+            target_row_cols = _guess_row_label_columns(target_columns, target_rows, target_table)
+            base_value_cols = [col for col in base_columns if col not in base_row_cols]
+            target_value_cols = [col for col in target_columns if col not in target_row_cols]
+            value_alignment = _align_columns(base_value_cols, target_value_cols)
+            row_pairs = _align_rows(base_rows, target_rows, base_row_cols, target_row_cols, base_table, target_table)
+
+            base_row_indexes = {row.id: idx for idx, row in enumerate(base_rows)}
+            target_row_indexes = {row.id: idx for idx, row in enumerate(target_rows)}
+            counts = {"ADDED": 0, "DELETED": 0, "MODIFIED": 0, "UNCHANGED": 0}
+            cell_diffs = []
+            table_comparison_id = uuid.uuid4()
+
+            for base_row, target_row, match_score in row_pairs:
+                field_diffs = _compare_row_values(base_row, target_row, value_alignment, base_table, target_table)
+                if base_row is None and target_row is not None:
+                    row_change = "ADDED"
+                elif target_row is None and base_row is not None:
+                    row_change = "DELETED"
+                elif field_diffs:
+                    row_change = "MODIFIED"
+                else:
+                    row_change = "UNCHANGED"
+                counts[row_change] += 1
+
+                if row_change == "UNCHANGED":
+                    continue
+
+                base_idx = base_row_indexes.get(base_row.id) if base_row else None
+                target_idx = target_row_indexes.get(target_row.id) if target_row else None
+                base_row_id = base_row_map.get(base_idx) if base_idx is not None else None
+                target_row_id = target_row_map.get(target_idx) if target_idx is not None else None
+                row_key_base = _row_key_for_table(base_table, base_row, base_row_cols) if base_row else None
+                row_key_target = _row_key_for_table(target_table, target_row, target_row_cols) if target_row else None
+                base_values = _row_values_for_table(base_table, base_row, base_columns) if base_row else {}
+                target_values = _row_values_for_table(target_table, target_row, target_columns) if target_row else {}
+
+                for field in field_diffs:
+                    field_name = str(field.get("field") or "")
+                    base_col = field_name
+                    target_col = field_name
+                    if " -> " in field_name:
+                        base_col, target_col = [part.strip() for part in field_name.split(" -> ", 1)]
+
+                    base_col_idx = base_columns.index(base_col) if base_col in base_columns else None
+                    target_col_idx = target_columns.index(target_col) if target_col in target_columns else None
+                    change_type = _change_value(field.get("change_type") or row_change)
+                    if change_type not in {"ADDED", "DELETED", "MODIFIED", "UNCHANGED"}:
+                        change_type = row_change
+
+                    cell_diffs.append(
+                        (
+                            table_comparison_id,
+                            base_row_id,
+                            target_row_id,
+                            base_col_map.get(base_col_idx) if base_col_idx is not None else None,
+                            target_col_map.get(target_col_idx) if target_col_idx is not None else None,
+                            row_key_base,
+                            row_key_target,
+                            base_col if base_col_idx is not None else None,
+                            target_col if target_col_idx is not None else None,
+                            _cell_text(field.get("before", base_values.get(base_col))),
+                            _cell_text(field.get("after", target_values.get(target_col))),
+                            change_type,
+                            float(match_score or 0.0),
+                            1.0,
+                            "Cell-level table comparison",
+                        )
+                    )
+
+            if counts["ADDED"] + counts["DELETED"] + counts["MODIFIED"] == 0:
+                continue
+
+            result_summary = (
+                f"Compared {len(base_rows)} baseline row(s) with {len(target_rows)} revised row(s). "
+                f"Found {counts['ADDED']} added, {counts['DELETED']} deleted, "
+                f"{counts['MODIFIED']} modified, and {counts['UNCHANGED']} unchanged row(s)."
+            )
+            conn.execute(
+                """
+                INSERT INTO table_comparison_result (
+                    id,
+                    run_id,
+                    base_table_id,
+                    target_table_id,
+                    base_row_columns,
+                    target_row_columns,
+                    base_value_columns,
+                    target_value_columns,
+                    counts,
+                    result_summary,
+                    result_json
+                )
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s::jsonb)
+                """,
+                (
+                    table_comparison_id,
+                    comparison_id,
+                    base_table_id,
+                    target_table_id,
+                    _json(base_row_cols),
+                    _json(target_row_cols),
+                    _json(base_value_cols),
+                    _json(target_value_cols),
+                    _json(counts),
+                    result_summary,
+                    _json(
+                        {
+                            "status": "complete",
+                            "value_alignment": value_alignment,
+                            "row_pair_count": len(row_pairs),
+                        }
+                    ),
+                ),
+            )
+
+            if cell_diffs:
+                with conn.cursor() as cur:
+                    cur.executemany(
+                        """
+                        INSERT INTO table_comparison_cell_diff (
+                            table_comparison_id,
+                            base_row_id,
+                            target_row_id,
+                            base_column_id,
+                            target_column_id,
+                            row_key_base,
+                            row_key_target,
+                            column_name_base,
+                            column_name_target,
+                            before_value,
+                            after_value,
+                            change_type,
+                            similarity,
+                            confidence,
+                            insight
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        cell_diffs,
+                    )
+        except Exception as exc:
+            print(f"Could not persist table comparison for run {comparison_id}: {exc}")
 
 
 def _to_plain(value: Any) -> Any:

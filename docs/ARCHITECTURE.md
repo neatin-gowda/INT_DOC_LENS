@@ -145,11 +145,36 @@ active UI exposes:
 - **Extract** for single-document structure extraction.
 - **Ask Document** for grounded questions over completed extraction runs.
 - **Work History** for reopening and deleting completed jobs.
+- **Admin Studio** for onboarding document families, seed documents, role access,
+  and profile learning.
 - **AI Agents** as a placeholder for future governed skills and MCP-style tools.
 
 The backend keeps reusable endpoints for tables, reports, queries, and tool
 metadata so future work can expose them through agents or advanced flows without
 duplicating business logic.
+
+Azure Static Web Apps must serve React routes through `index.html`. The frontend
+ships `frontend/public/staticwebapp.config.json` so direct refreshes on routes
+such as `/compare`, `/extract`, `/ask`, `/work-history`, and `/admin` do not
+return a static-host 404.
+
+## Governed use-case onboarding
+
+Document families are the product boundary for accuracy improvement. Admins can
+register a supplier/use case, describe the document content, restrict access by
+role, and upload representative seed documents. The backend stores this as:
+
+- `document_family.prompt_profile`: business description and extraction/summary
+  guidelines that can be passed to optional Azure OpenAI calls.
+- `document_family.ui_profile`: role visibility and future UI affordances.
+- `document_family.template_profile`: stable key patterns, nested-table hints,
+  column rules, and auto-discovered structure.
+
+The default extraction and comparison path remains deterministic. AI is used as
+an optional accelerator for profile discovery, low-confidence vision repair, and
+grounded summaries when the configured deployment is available. If it is not
+available, endpoints return deterministic evidence rather than failing the user
+workflow.
 
 ## Extraction accuracy improvements
 
@@ -173,9 +198,33 @@ DocuLens package:
 - **Word-level precision**: token diffs keep `SequenceMatcher` `autojunk`
   disabled and refine replace operations so one changed word does not paint an
   entire sentence as modified.
+- **Family profiles and learning**: recurring uploads are grouped by inferred
+  supplier/family from labels and headings. The first persisted comparison can
+  bootstrap a `TemplateProfile`; later reviewer feedback can refine
+  `template_profile.column_rules`, stable-key patterns, and prompt-profile
+  directives.
 
 AI remains optional. If Azure OpenAI is not configured, the deterministic path
 still runs and reports the available parser confidence.
+
+## Template and feedback learning loop
+
+`document_family.template_profile` stores reusable extraction rules for a
+recurring document family. The profile now includes `column_rules`, which are
+applied when table columns are inserted into Postgres so learned roles such as
+`pcv`, `amount`, `code`, `row_label`, `date`, `status`, and `value` are reused
+on future uploads.
+
+`document_family.prompt_profile` stores family-specific guidance for AI-backed
+summaries and focused enhancements. The comparison pipeline loads this profile
+before calling the summarizer, and the feedback enhancement route appends the
+same directives to its prompt.
+
+Reviewer feedback is persisted first. If the database and Azure OpenAI are
+configured, a background self-learning task then refines both profiles from the
+feedback, existing extracted table columns, and the current family profile. If
+that task fails, feedback remains saved and deterministic processing is not
+blocked.
 
 ## Azure deployment topology
 

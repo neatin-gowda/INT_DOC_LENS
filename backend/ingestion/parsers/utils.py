@@ -156,14 +156,28 @@ def _looks_like_header_row(row: list[str], body_sample: list[list[str]], n_cols:
     return False
 
 def _merge_header_rows(header_rows: list[list[str]], n_cols: int) -> list[str]:
+    filled_header_rows: list[list[str]] = []
+    if len(header_rows) > 1:
+        for row in header_rows:
+            filled_row = []
+            last_value = ""
+            for col in range(n_cols):
+                value = _clean(row[col] if col < len(row) else "")
+                if value:
+                    last_value = value
+                filled_row.append(value or last_value)
+            filled_header_rows.append(filled_row)
+    else:
+        filled_header_rows = [[_clean(cell) for cell in row] for row in header_rows]
+
     merged: list[str] = []
     previous = ""
 
     for col in range(n_cols):
         parts = []
         last = ""
-        for row in header_rows:
-            value = _clean(row[col] if col < len(row) else "")
+        for row in filled_header_rows:
+            value = row[col] if col < len(row) else ""
             if not value:
                 continue
             if value == last:

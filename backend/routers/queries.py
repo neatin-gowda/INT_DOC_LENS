@@ -29,6 +29,7 @@ def post_query(run_id: str, req: QueryReq):
         db_run_id=r.get("db_run_id"),
         mode=req.mode,
         response_language=req.response_language,
+        model_name=req.model_name,
     )
 
     if isinstance(result, dict):

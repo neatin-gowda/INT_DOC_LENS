@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { API, COLORS } from "../config.js";
 import { smallTh, smallTd } from "../styles.js";
 import {
@@ -15,11 +15,42 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
   const maxPages = Math.max(basePages, targetPages);
   const [basePage, setBasePage] = useState(pageNum);
   const [targetPage, setTargetPage] = useState(pageNum);
+  const [zoom, setZoom] = useState(100);
+  const [syncScroll, setSyncScroll] = useState(true);
+  const leftScrollRef = useRef(null);
+  const rightScrollRef = useRef(null);
 
   useEffect(() => {
     setBasePage(pageNum);
     setTargetPage(pageNum);
   }, [runId, pageNum]);
+
+  useEffect(() => {
+    if (!syncScroll) return undefined;
+    const leftEl = leftScrollRef.current;
+    const rightEl = rightScrollRef.current;
+    if (!leftEl || !rightEl) return undefined;
+
+    let syncing = false;
+    const syncFrom = (source, target) => {
+      if (syncing) return;
+      syncing = true;
+      target.scrollTop = source.scrollTop;
+      target.scrollLeft = source.scrollLeft;
+      window.requestAnimationFrame(() => {
+        syncing = false;
+      });
+    };
+    const onLeftScroll = () => syncFrom(leftEl, rightEl);
+    const onRightScroll = () => syncFrom(rightEl, leftEl);
+
+    leftEl.addEventListener("scroll", onLeftScroll, { passive: true });
+    rightEl.addEventListener("scroll", onRightScroll, { passive: true });
+    return () => {
+      leftEl.removeEventListener("scroll", onLeftScroll);
+      rightEl.removeEventListener("scroll", onRightScroll);
+    };
+  }, [runId, pageNum, syncScroll]);
 
   const goBoth = (nextPage) => {
     const safePage = Math.max(1, Math.min(maxPages, nextPage));
@@ -38,6 +69,22 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
         <button onClick={() => goBoth(pageNum + 1)} disabled={pageNum >= maxPages} style={navButtonStyle(pageNum >= maxPages)}>
           Next both
         </button>
+        <div className="viewer-toolbar-group" aria-label="PDF zoom controls">
+          <button type="button" onClick={() => setZoom((value) => Math.max(50, value - 25))} title="Zoom out">
+            -
+          </button>
+          <span>{zoom}%</span>
+          <button type="button" onClick={() => setZoom((value) => Math.min(300, value + 25))} title="Zoom in">
+            +
+          </button>
+          <button type="button" onClick={() => setZoom(100)} title="Reset zoom">
+            Reset
+          </button>
+        </div>
+        <label className="viewer-sync-toggle">
+          <input type="checkbox" checked={syncScroll} onChange={(event) => setSyncScroll(event.target.checked)} />
+          <span>Sync scroll</span>
+        </label>
         <Legend />
       </div>
 
@@ -51,6 +98,8 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
           label="Baseline document"
           docName={meta.base_label}
           format={meta.base_format}
+          zoom={zoom}
+          scrollRef={leftScrollRef}
         />
         <PageView
           runId={runId}
@@ -61,6 +110,8 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
           label="Revised document"
           docName={meta.target_label}
           format={meta.target_format}
+          zoom={zoom}
+          scrollRef={rightScrollRef}
         />
       </div>
     </div>
@@ -85,7 +136,7 @@ export function LegendChip({ label, color, border }) {
   );
 }
 
-export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, docName, format }) {
+export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, docName, format, zoom = 100, scrollRef }) {
   const [overlay, setOverlay] = useState({ regions: [] });
   const [nativePage, setNativePage] = useState(null);
   const [imageState, setImageState] = useState("idle");
@@ -152,13 +203,17 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
         </div>
       </div>
 
-      <div className={`doc-frame dl-scrollbar ${useNativeViewer ? "native" : ""}`}>
+      <div
+        ref={scrollRef}
+        className={`doc-frame dl-scrollbar ${useNativeViewer ? "native" : ""}`}
+        style={{ overflow: "auto", maxHeight: "75vh", position: "relative" }}
+      >
         {!pageExists ? (
           <EmptyPage pageNum={pageNum} />
         ) : useNativeViewer ? (
           <NativePageView page={nativePage} side={side} />
         ) : (
-          <>
+          <div className="pdf-zoom-stage" style={{ width: `${zoom}%` }}>
             {imageState === "loading" && (
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", background: "var(--surface-raised)", zIndex: 1, fontWeight: 600 }}>
                 Loading page {pageNum}
@@ -206,7 +261,7 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
                 />
               );
             })}
-          </>
+          </div>
         )}
       </div>
     </div>
@@ -338,9 +393,27 @@ export function NativeTable({ item, viewerType }) {
         <table className={`native-table ${isSpreadsheet ? "spreadsheet" : ""}`} style={{ fontSize: isSpreadsheet ? 12 : 12 }}>
           <thead>
             <tr style={{ background: "var(--surface-sunken)", color: "var(--text-primary)" }}>
-              {header.map((col) => (
-                <th key={col} dir="auto" style={smallTh}>{col}</th>
-              ))}
+              {header.map((col, idx) => {
+                const lower = String(col || "").toLowerCase();
+                const isVertical = idx > 0 && (
+                  lower.includes("pcv") ||
+                  lower.includes("pcb") ||
+                  lower.includes("model") ||
+                  lower.includes("spec") ||
+                  String(col || "").length <= 4 ||
+                  (header.length >= 6 && String(col || "").length <= 12)
+                );
+                return (
+                  <th
+                    key={col}
+                    dir="auto"
+                    className={isVertical ? "vertical-th" : ""}
+                    style={isVertical ? { ...smallTh, verticalAlign: "bottom" } : smallTh}
+                  >
+                    {isVertical ? <span className="vertical-th-text">{col}</span> : col}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -391,6 +464,7 @@ export function nativeTablePlainText(item) {
 }
 
 export function nativeTableLooksLikeLayoutText(item, viewerType) {
+  if (item?.payload?.source_format === "docx") return false;
   if (viewerType !== "document") return false;
 
   const originalHeader = Array.isArray(item?.header) ? item.header : [];
