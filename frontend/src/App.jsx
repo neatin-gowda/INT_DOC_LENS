@@ -519,7 +519,7 @@ export default function App() {
             <main className="workspace-surface">
               {tab === "viewer" && <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />}
               {tab === "report" && <ReviewReport runId={runId} />}
-              {tab === "query" && <QueryPanel runId={runId} />}
+              {tab === "query" && <QueryPanel runId={runId} onGoBoth={(p) => { setPageNum(p); setTab("viewer"); }} />}
               {tab === "accuracy" && <AccuracyImprovementTab runId={runId} meta={meta} />}
               {tab === "tables" && <TablesWorkspace runId={runId} />}
             </main>
