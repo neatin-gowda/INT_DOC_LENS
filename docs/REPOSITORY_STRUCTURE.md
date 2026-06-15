@@ -62,7 +62,7 @@ backend/
     reports.py           PDF report and AI summary PDF endpoints.
     tables.py            Table list, table view, selected-table comparison, and table report.
     tools.py             Tool discovery endpoint.
-    admin.py             Use-case/dataset onboarding, seed learning, and profile governance.
+    admin.py             Use-case/dataset onboarding, seed learning, profile governance, and local JSON fallback.
 
   jobs/
     queue.py             Database-backed worker queue for ACA scale-out safety.
@@ -81,6 +81,7 @@ backend/
 - Backend container: `Dockerfile`
 - CLI smoke test: `python -m backend.run_cli --base old.pdf --target new.pdf --out ./out`
 - Frontend app: `frontend/src/App.jsx`
+- Frontend local API proxy: `frontend/vite.config.js`
 - Frontend shell: `frontend/src/components/workspaceShell.jsx` and `frontend/src/shell/NavRail.jsx`
 - Frontend admin: `frontend/src/components/admin.jsx`
 - Static Web Apps routing: `frontend/public/staticwebapp.config.json`
@@ -99,7 +100,7 @@ The active comparison path is:
 - `backend/summarizer.py` for deterministic or Azure OpenAI-backed review summaries.
 - `backend/query.py` for natural-language questions over comparison results.
 - `backend/schema_discovery.py` for recurring family grouping, profile bootstrap, and feedback-trained rule refinement.
-- `backend/routers/admin.py` for governed use-case onboarding, seed documents, prompt profiles, and role access.
+- `backend/routers/admin.py` for governed use-case onboarding, seed documents, prompt profiles, role access, and `/tmp` JSON fallback when Postgres is offline locally.
 - `frontend/src/components/workspaceShell.jsx` for the shell and grounded Ask Document over extraction runs.
 - `frontend/src/components/dashboard.jsx` for Work History.
 - `frontend/src/components/admin.jsx` for Admin Studio dataset onboarding.

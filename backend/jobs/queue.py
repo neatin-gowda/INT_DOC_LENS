@@ -8,7 +8,7 @@ import time
 import threading
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ..db import db_enabled, get_conn
 from ..api_helpers import _RUNS, _process_compare, _process_extract, _sync_job_metadata
@@ -52,6 +52,7 @@ def enqueue_job(
                 args["base_label"],
                 args["target_label"],
                 args["use_llm"],
+                args.get("family_id"),
             )
         else:
             target = _process_extract
@@ -61,6 +62,7 @@ def enqueue_job(
                 [Path(s) for s in args["sources"]],
                 args["label"],
                 args["use_ai"],
+                args.get("family_id"),
             )
             
         worker = threading.Thread(
@@ -137,6 +139,7 @@ def worker_loop() -> None:
                         base_label=args["base_label"],
                         target_label=args["target_label"],
                         use_llm=args["use_llm"],
+                        family_id=args.get("family_id"),
                     )
                 elif kind == "extraction":
                     _process_extract(
@@ -145,6 +148,7 @@ def worker_loop() -> None:
                         sources=[Path(s) for s in args["sources"]],
                         label=args["label"],
                         use_ai=args["use_ai"],
+                        family_id=args.get("family_id"),
                     )
             else:
                 time.sleep(2)

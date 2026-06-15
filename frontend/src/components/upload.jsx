@@ -1,7 +1,10 @@
-import React, { useRef, useState } from "react";
-import { FILE_ACCEPT } from "../config.js";
+import React, { useEffect, useRef, useState } from "react";
+import { API, FILE_ACCEPT } from "../config.js";
 
-export function UploadPanel({ onUpload, busy }) {
+export function UploadPanel({ onUpload, busy, onAdmin }) {
+  const datasetState = useDatasets();
+  const locked = busy || datasetState.loading || !datasetState.selectedId || datasetState.datasets.length === 0;
+
   return (
     <form onSubmit={onUpload} className="doc-workflow-card">
       <div className="workflow-card-head">
@@ -10,12 +13,17 @@ export function UploadPanel({ onUpload, busy }) {
         </div>
       </div>
 
+      <UseCaseSelector {...datasetState} busy={busy} onAdmin={onAdmin} />
+      {!datasetState.loading && datasetState.datasets.length === 0 ? (
+        <UseCaseRequiredNotice onAdmin={onAdmin} />
+      ) : null}
+
       <div className="upload-grid compare">
-        <FileInput label="Baseline" helper="Approved or reference file" name="base" disabled={busy} />
-        <FileInput label="Revised" helper="Latest or proposed file" name="target" disabled={busy} />
+        <FileInput label="Baseline" helper="Approved or reference file" name="base" disabled={locked} />
+        <FileInput label="Revised" helper="Latest or proposed file" name="target" disabled={locked} />
 
         <div className="workflow-action-rail">
-          <button disabled={busy} className="primary-action full">
+          <button disabled={locked} className="primary-action full">
             {busy ? "Processing" : "Compare documents"}
           </button>
           <div className="workflow-note">Side-by-side preview, semantic changes, and export.</div>
@@ -25,7 +33,10 @@ export function UploadPanel({ onUpload, busy }) {
   );
 }
 
-export function ExtractUploadPanel({ onUpload, busy }) {
+export function ExtractUploadPanel({ onUpload, busy, onAdmin }) {
+  const datasetState = useDatasets();
+  const locked = busy || datasetState.loading || !datasetState.selectedId || datasetState.datasets.length === 0;
+
   return (
     <form onSubmit={onUpload} className="doc-workflow-card">
       <div className="workflow-card-head">
@@ -34,17 +45,22 @@ export function ExtractUploadPanel({ onUpload, busy }) {
         </div>
       </div>
 
+      <UseCaseSelector {...datasetState} busy={busy} onAdmin={onAdmin} />
+      {!datasetState.loading && datasetState.datasets.length === 0 ? (
+        <UseCaseRequiredNotice onAdmin={onAdmin} />
+      ) : null}
+
       <div className="upload-grid extract">
         <FileInput
           label="Document or image"
           helper="PDF, image, Word, Excel, xlsb, CSV, or TSV"
           name="document"
-          disabled={busy}
+          disabled={locked}
           multiple
         />
 
         <div className="workflow-action-rail">
-          <button disabled={busy} className="primary-action full">
+          <button disabled={locked} className="primary-action full">
             {busy ? "Extracting" : "Extract content"}
           </button>
           <div className="workflow-note">
@@ -53,6 +69,88 @@ export function ExtractUploadPanel({ onUpload, busy }) {
         </div>
       </div>
     </form>
+  );
+}
+
+function useDatasets() {
+  const [datasets, setDatasets] = useState([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const role = window.sessionStorage.getItem("simulated_role") || "platform_admin";
+        const resp = await fetch(`${API}/datasets`, {
+          headers: { "X-User-Role": role },
+        });
+        if (!resp.ok) throw new Error(`Could not load use cases (${resp.status})`);
+        const payload = await resp.json();
+        const items = payload.datasets || [];
+        if (!active) return;
+        setDatasets(items);
+        setSelectedId((current) => current || items[0]?.id || "");
+      } catch (err) {
+        if (!active) return;
+        setDatasets([]);
+        setSelectedId("");
+        setError(err?.message || "Could not load use cases.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return { datasets, selectedId, setSelectedId, loading, error };
+}
+
+function UseCaseSelector({ datasets, selectedId, setSelectedId, loading, error, busy, onAdmin }) {
+  return (
+    <div className="usecase-selector">
+      <label>
+        <span>Use case</span>
+        <select
+          name="family_id"
+          value={selectedId}
+          onChange={(event) => setSelectedId(event.target.value)}
+          required
+          disabled={busy || loading || datasets.length === 0}
+        >
+          <option value="" disabled>{loading ? "Loading use cases" : "Select a use case"}</option>
+          {datasets.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.supplier} - {item.family_name} ({item.domain || "generic"})
+            </option>
+          ))}
+        </select>
+      </label>
+      {error ? <p className="usecase-error">{error}</p> : null}
+      {datasets.length > 0 ? (
+        <button type="button" className="ghost-action compact" onClick={onAdmin}>
+          Manage
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function UseCaseRequiredNotice({ onAdmin }) {
+  return (
+    <div className="usecase-required">
+      <strong>Use case required</strong>
+      <p>Create or bootstrap a document use case before uploading files. The selected use case supplies metadata, template rules, access policy, and extraction guidance.</p>
+      <button type="button" className="primary-action compact" onClick={onAdmin}>
+        Open Admin Studio
+      </button>
+    </div>
   );
 }
 

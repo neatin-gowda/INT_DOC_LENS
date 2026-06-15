@@ -6,7 +6,9 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+import threading
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -22,6 +24,10 @@ from ..security import (
 )
 
 router = APIRouter()
+_LOCAL_DATASETS_PATH = Path("/tmp/doculens_datasets.json")
+_LOCAL_DOCUMENTS_PATH = Path("/tmp/doculens_dataset_documents.json")
+_LOCAL_DATASETS_LOCK = threading.Lock()
+_LOCAL_DOCUMENTS_LOCK = threading.Lock()
 
 
 class CreateDatasetReq(BaseModel):
@@ -50,6 +56,100 @@ def _check_admin(principal: Principal) -> None:
 def _db_required() -> None:
     if not db_enabled():
         raise HTTPException(503, "Database is not configured.")
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _read_json_file(path: Path, lock: threading.Lock) -> list[dict[str, Any]]:
+    with lock:
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+    return data if isinstance(data, list) else []
+
+
+def _write_json_file(path: Path, lock: threading.Lock, data: list[dict[str, Any]]) -> None:
+    with lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f"{path.suffix}.{uuid.uuid4().hex}.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        tmp.replace(path)
+
+
+def _read_local_datasets() -> list[dict[str, Any]]:
+    return _read_json_file(_LOCAL_DATASETS_PATH, _LOCAL_DATASETS_LOCK)
+
+
+def _write_local_datasets(datasets: list[dict[str, Any]]) -> None:
+    _write_json_file(_LOCAL_DATASETS_PATH, _LOCAL_DATASETS_LOCK, datasets)
+
+
+def _read_local_documents() -> list[dict[str, Any]]:
+    return _read_json_file(_LOCAL_DOCUMENTS_PATH, _LOCAL_DOCUMENTS_LOCK)
+
+
+def _write_local_documents(documents: list[dict[str, Any]]) -> None:
+    _write_json_file(_LOCAL_DOCUMENTS_PATH, _LOCAL_DOCUMENTS_LOCK, documents)
+
+
+def _local_dataset_record(
+    req: CreateDatasetReq,
+    principal: Principal,
+    *,
+    dataset_id: Optional[str] = None,
+) -> dict[str, Any]:
+    now = _utc_now()
+    prompt_profile = {
+        "description": req.description.strip(),
+        "guidelines": "",
+        "summarization_directives": "",
+        "extraction_directives": "",
+    }
+    return {
+        "id": dataset_id or str(uuid.uuid4()),
+        "tenant_id": principal.tenant_id,
+        "business_unit_id": principal.business_unit_id if principal.is_business_unit_admin else "default",
+        "supplier": req.supplier.strip(),
+        "family_name": req.family_name.strip(),
+        "domain": req.domain.strip() or "generic",
+        "prompt_profile": prompt_profile,
+        "ui_profile": {"allowed_roles": req.allowed_roles},
+        "template_profile": {},
+        "created_at": now,
+        "updated_at": now,
+        "storage": "local_json",
+    }
+
+
+def _find_local_dataset(family_id: str) -> Optional[dict[str, Any]]:
+    for dataset in _read_local_datasets():
+        if str(dataset.get("id")) == str(family_id):
+            return dataset
+    return None
+
+
+def _local_duplicate(
+    datasets: list[dict[str, Any]],
+    *,
+    tenant_id: str,
+    business_unit_id: str,
+    supplier: str,
+    family_name: str,
+    exclude_id: Optional[str] = None,
+) -> bool:
+    return any(
+        str(item.get("id")) != str(exclude_id)
+        and str(item.get("tenant_id") or "default") == tenant_id
+        and str(item.get("business_unit_id") or "default") == business_unit_id
+        and str(item.get("supplier") or "").strip().lower() == supplier.strip().lower()
+        and str(item.get("family_name") or "").strip().lower() == family_name.strip().lower()
+        for item in datasets
+    )
 
 
 def _json_dict(value: Any) -> dict[str, Any]:
@@ -88,11 +188,50 @@ def _validate_roles(roles: list[str]) -> None:
             raise HTTPException(400, f"Invalid role: {role}")
 
 
+def resolve_dataset_for_principal(family_id: str, principal: Optional[Principal] = None) -> dict[str, Any]:
+    principal = principal or current_principal()
+    if not family_id:
+        raise HTTPException(400, "A use case must be selected before document processing.")
+
+    if not db_enabled():
+        dataset = _find_local_dataset(family_id)
+        if not dataset:
+            raise HTTPException(404, "Selected use case was not found.")
+        dataset = _dataset_record(dataset)
+        if not can_access_family(principal, dataset):
+            raise HTTPException(403, "You do not have access to the selected use case.")
+        return dataset
+
+    family_uuid = _family_uuid(family_id)
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, tenant_id, business_unit_id, supplier, family_name, domain,
+                   prompt_profile, ui_profile, template_profile, created_at, updated_at
+            FROM document_family
+            WHERE id = %s
+            """,
+            (family_uuid,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Selected use case was not found.")
+    dataset = _dataset_record(row)
+    if not can_access_family(principal, dataset):
+        raise HTTPException(403, "You do not have access to the selected use case.")
+    return dataset
+
+
 @router.get("/datasets")
 def list_accessible_datasets():
     principal = current_principal()
     if not db_enabled():
-        return {"datasets": []}
+        datasets = []
+        for item in _read_local_datasets():
+            dataset = _dataset_record(item)
+            if can_access_family(principal, dataset):
+                datasets.append(dataset)
+        datasets.sort(key=lambda item: (str(item.get("supplier") or ""), str(item.get("family_name") or "")))
+        return {"datasets": datasets}
 
     with get_conn() as conn:
         rows = conn.execute(
@@ -117,7 +256,13 @@ def list_admin_datasets():
     principal = current_principal()
     _check_admin(principal)
     if not db_enabled():
-        return {"datasets": []}
+        datasets = []
+        for item in _read_local_datasets():
+            dataset = _dataset_record(item)
+            if principal.is_platform_admin or can_access_family(principal, dataset):
+                datasets.append(dataset)
+        datasets.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return {"datasets": datasets}
 
     with get_conn() as conn:
         if principal.is_platform_admin:
@@ -148,13 +293,29 @@ def list_admin_datasets():
 def create_dataset(req: CreateDatasetReq):
     principal = current_principal()
     _check_admin(principal)
-    _db_required()
     _validate_roles(req.allowed_roles)
 
     supplier = req.supplier.strip()
     family_name = req.family_name.strip()
     if not supplier or not family_name:
         raise HTTPException(400, "Supplier and family name are required.")
+
+    if not db_enabled():
+        tenant_id = principal.tenant_id
+        business_unit_id = principal.business_unit_id if principal.is_business_unit_admin else "default"
+        datasets = _read_local_datasets()
+        if _local_duplicate(
+            datasets,
+            tenant_id=tenant_id,
+            business_unit_id=business_unit_id,
+            supplier=supplier,
+            family_name=family_name,
+        ):
+            raise HTTPException(400, "A use case with this supplier and family already exists.")
+        dataset = _local_dataset_record(req, principal)
+        datasets.append(dataset)
+        _write_local_datasets(datasets)
+        return {"status": "success", "id": str(dataset["id"]), "storage": "local_json"}
 
     prompt_profile = {
         "description": req.description.strip(),
@@ -208,7 +369,15 @@ def create_dataset(req: CreateDatasetReq):
 def get_dataset(family_id: str):
     principal = current_principal()
     _check_admin(principal)
-    _db_required()
+    if not db_enabled():
+        dataset = _find_local_dataset(family_id)
+        if not dataset:
+            raise HTTPException(404, "Dataset not found.")
+        dataset = _dataset_record(dataset)
+        if not can_access_family(principal, dataset):
+            raise HTTPException(403, "Access denied to this dataset.")
+        return dataset
+
     family_uuid = _family_uuid(family_id)
 
     with get_conn() as conn:
@@ -234,7 +403,60 @@ def get_dataset(family_id: str):
 def update_dataset(family_id: str, req: UpdateDatasetReq):
     principal = current_principal()
     _check_admin(principal)
-    _db_required()
+    if not db_enabled():
+        datasets = _read_local_datasets()
+        index = next((idx for idx, item in enumerate(datasets) if str(item.get("id")) == str(family_id)), None)
+        if index is None:
+            raise HTTPException(404, "Dataset not found.")
+
+        dataset = _dataset_record(datasets[index])
+        if not can_access_family(principal, dataset):
+            raise HTTPException(403, "Access denied to this dataset.")
+
+        prompt_profile = dataset["prompt_profile"]
+        ui_profile = dataset["ui_profile"]
+        template_profile = dataset["template_profile"]
+        supplier = req.supplier.strip() if req.supplier is not None else dataset["supplier"]
+        family_name = req.family_name.strip() if req.family_name is not None else dataset["family_name"]
+        domain = req.domain.strip() if req.domain is not None else dataset["domain"]
+        if not supplier or not family_name:
+            raise HTTPException(400, "Supplier and family name are required.")
+        if _local_duplicate(
+            datasets,
+            tenant_id=str(dataset.get("tenant_id") or "default"),
+            business_unit_id=str(dataset.get("business_unit_id") or "default"),
+            supplier=supplier,
+            family_name=family_name,
+            exclude_id=family_id,
+        ):
+            raise HTTPException(400, "A use case with this supplier and family already exists.")
+
+        if req.description is not None:
+            prompt_profile["description"] = req.description.strip()
+        if req.prompt_guidelines is not None:
+            prompt_profile["guidelines"] = req.prompt_guidelines.strip()
+            prompt_profile["summarization_directives"] = req.prompt_guidelines.strip()
+            prompt_profile["extraction_directives"] = req.prompt_guidelines.strip()
+        if req.allowed_roles is not None:
+            _validate_roles(req.allowed_roles)
+            ui_profile["allowed_roles"] = req.allowed_roles
+        if req.column_rules is not None:
+            template_profile["column_rules"] = req.column_rules
+
+        datasets[index].update(
+            {
+                "supplier": supplier,
+                "family_name": family_name,
+                "domain": domain or "generic",
+                "prompt_profile": prompt_profile,
+                "ui_profile": ui_profile,
+                "template_profile": template_profile,
+                "updated_at": _utc_now(),
+            }
+        )
+        _write_local_datasets(datasets)
+        return {"status": "success", "storage": "local_json"}
+
     family_uuid = _family_uuid(family_id)
 
     with get_conn() as conn:
@@ -327,7 +549,17 @@ def update_dataset(family_id: str, req: UpdateDatasetReq):
 def delete_dataset(family_id: str):
     principal = current_principal()
     _check_admin(principal)
-    _db_required()
+    if not db_enabled():
+        datasets = _read_local_datasets()
+        dataset = next((item for item in datasets if str(item.get("id")) == str(family_id)), None)
+        if not dataset:
+            raise HTTPException(404, "Dataset not found.")
+        if not can_access_family(principal, _dataset_record(dataset)):
+            raise HTTPException(403, "Access denied to this dataset.")
+        _write_local_datasets([item for item in datasets if str(item.get("id")) != str(family_id)])
+        _write_local_documents([doc for doc in _read_local_documents() if str(doc.get("family_id")) != str(family_id)])
+        return {"status": "success", "storage": "local_json"}
+
     family_uuid = _family_uuid(family_id)
 
     with get_conn() as conn:
@@ -367,7 +599,63 @@ async def bootstrap_dataset(
 ):
     principal = current_principal()
     _check_admin(principal)
-    _db_required()
+    if not db_enabled():
+        datasets = _read_local_datasets()
+        index = next((idx for idx, item in enumerate(datasets) if str(item.get("id")) == str(family_id)), None)
+        if index is None:
+            raise HTTPException(404, "Dataset not found.")
+        family = _dataset_record(datasets[index])
+        if not can_access_family(principal, family):
+            raise HTTPException(403, "Access denied to this dataset.")
+
+        work_dir = Path(tempfile.mkdtemp(prefix=f"dataset_bootstrap_{family_id}_"))
+        try:
+            source_path = work_dir / (file.filename or "seed_document")
+            with source_path.open("wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            from ..ingestion import normalize_to_pdf
+            from ..extraction.pdf_extractor import render_pages
+            from ..schema_discovery import discover
+
+            converted_dir = work_dir / "converted"
+            converted_dir.mkdir(parents=True, exist_ok=True)
+            pdf_path = normalize_to_pdf(source_path, converted_dir / "bootstrap_doc")
+            page_imgs = render_pages(str(pdf_path), str(work_dir / "pages"))
+            profile = discover(str(pdf_path), family["supplier"], family["family_name"], use_llm=use_llm)
+            profile_dict = profile.model_dump() if hasattr(profile, "model_dump") else profile.dict()
+
+            existing_profile = _json_dict(family.get("template_profile"))
+            if not profile_dict.get("column_rules") and existing_profile.get("column_rules"):
+                profile_dict["column_rules"] = existing_profile["column_rules"]
+
+            datasets[index]["template_profile"] = profile_dict
+            datasets[index]["updated_at"] = _utc_now()
+            _write_local_datasets(datasets)
+
+            document = {
+                "id": str(uuid.uuid4()),
+                "family_id": str(family_id),
+                "label": Path(file.filename or "seed_document").stem,
+                "filename": file.filename,
+                "page_count": len(page_imgs),
+                "uploaded_by": principal.user_id,
+                "uploaded_at": _utc_now(),
+                "storage": "local_json",
+            }
+            documents = _read_local_documents()
+            documents.insert(0, document)
+            _write_local_documents(documents)
+
+            return {
+                "status": "success",
+                "document_id": document["id"],
+                "discovered_profile": profile_dict,
+                "storage": "local_json",
+            }
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
     family_uuid = _family_uuid(family_id)
 
     with get_conn() as conn:
@@ -443,7 +731,16 @@ async def bootstrap_dataset(
 def list_dataset_documents(family_id: str):
     principal = current_principal()
     _check_admin(principal)
-    _db_required()
+    if not db_enabled():
+        dataset = _find_local_dataset(family_id)
+        if not dataset:
+            raise HTTPException(404, "Dataset not found.")
+        if not can_access_family(principal, _dataset_record(dataset)):
+            raise HTTPException(403, "Access denied.")
+        docs = [doc for doc in _read_local_documents() if str(doc.get("family_id")) == str(family_id)]
+        docs.sort(key=lambda doc: str(doc.get("uploaded_at") or ""), reverse=True)
+        return {"documents": docs}
+
     family_uuid = _family_uuid(family_id)
 
     with get_conn() as conn:

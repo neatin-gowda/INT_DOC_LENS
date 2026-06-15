@@ -335,6 +335,7 @@ def persist_run(
     target_page_count: int,
     enable_embeddings: bool = True,
     usage_callback=None,
+    family_id: Optional[str] = None,
 ) -> Optional[str]:
     """
     Persist comparison data to PostgreSQL.
@@ -347,18 +348,35 @@ def persist_run(
         return None
 
     with get_conn() as conn:
-        family_id = _upsert_family(
-            conn,
-            family_supplier,
-            family_name,
-            tenant_id=tenant_id,
-            business_unit_id=business_unit_id,
-            pdf_path_for_discovery=base_pdf,
-        )
+        if family_id:
+            family_uuid = uuid.UUID(str(family_id))
+            row = conn.execute(
+                """
+                SELECT id, supplier, family_name
+                FROM document_family
+                WHERE id = %s
+                  AND tenant_id = %s
+                  AND business_unit_id = %s
+                """,
+                (family_uuid, tenant_id, business_unit_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("Selected document family was not found for this tenant/business unit.")
+            family_supplier = row["supplier"]
+            family_name = row["family_name"]
+        else:
+            family_uuid = _upsert_family(
+                conn,
+                family_supplier,
+                family_name,
+                tenant_id=tenant_id,
+                business_unit_id=business_unit_id,
+                pdf_path_for_discovery=base_pdf,
+            )
 
         base_doc_id = _upsert_document(
             conn,
-            family_id=family_id,
+            family_id=family_uuid,
             tenant_id=tenant_id,
             business_unit_id=business_unit_id,
             uploaded_by=uploaded_by,
@@ -369,7 +387,7 @@ def persist_run(
         )
         target_doc_id = _upsert_document(
             conn,
-            family_id=family_id,
+            family_id=family_uuid,
             tenant_id=tenant_id,
             business_unit_id=business_unit_id,
             uploaded_by=uploaded_by,
@@ -387,7 +405,7 @@ def persist_run(
 
         comparison_id = _upsert_comparison_run(
             conn,
-            family_id=family_id,
+            family_id=family_uuid,
             base_doc_id=base_doc_id,
             target_doc_id=target_doc_id,
             summary=summary,

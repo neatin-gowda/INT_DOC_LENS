@@ -723,6 +723,117 @@ export const css = `
       color: #0b1f3a;
     }
   }
+  .usecase-selector {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: end;
+    margin: 0 0 12px;
+  }
+  .usecase-selector label {
+    display: grid;
+    gap: 6px;
+    color: #aebacc;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .usecase-selector select {
+    min-height: 42px;
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: #ffffff;
+    padding: 0 11px;
+    font: inherit;
+    outline: none;
+  }
+  .usecase-selector select:focus {
+    border-color: rgba(201,111,26,.68);
+    box-shadow: 0 0 0 3px rgba(201,111,26,.16);
+  }
+  .usecase-selector select:disabled {
+    opacity: .64;
+    cursor: default;
+  }
+  .usecase-error {
+    grid-column: 1 / -1;
+    margin: -2px 0 0;
+    color: #fecaca;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .usecase-required {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    margin: 0 0 12px;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(201,111,26,.32);
+    background: rgba(201,111,26,.10);
+    color: #e5edf7;
+  }
+  .usecase-required strong {
+    display: block;
+    margin-bottom: 3px;
+    color: #ffd08a;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .usecase-required p {
+    margin: 0;
+    color: #aebacc;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .theme-light .usecase-selector label {
+    color: #64748b;
+  }
+  .theme-light .usecase-selector select {
+    border-color: rgba(11,31,58,.12);
+    background: #ffffff;
+    color: #0b1f3a;
+  }
+  .theme-light .usecase-error {
+    color: #991b1b;
+  }
+  .theme-light .usecase-required {
+    border-color: rgba(201,111,26,.26);
+    background: #fff7ed;
+    color: #0b1f3a;
+  }
+  .theme-light .usecase-required strong {
+    color: #9a4b13;
+  }
+  .theme-light .usecase-required p {
+    color: #64748b;
+  }
+  @media (prefers-color-scheme: light) {
+    .theme-system .usecase-selector label {
+      color: #64748b;
+    }
+    .theme-system .usecase-selector select {
+      border-color: rgba(11,31,58,.12);
+      background: #ffffff;
+      color: #0b1f3a;
+    }
+    .theme-system .usecase-error {
+      color: #991b1b;
+    }
+    .theme-system .usecase-required {
+      border-color: rgba(201,111,26,.26);
+      background: #fff7ed;
+      color: #0b1f3a;
+    }
+    .theme-system .usecase-required strong {
+      color: #9a4b13;
+    }
+    .theme-system .usecase-required p {
+      color: #64748b;
+    }
+  }
 
   .upload-grid {
     display: grid;
@@ -1929,6 +2040,11 @@ export const css = `
     .upload-grid.compare,
     .upload-grid.extract {
       grid-template-columns: 1fr;
+    }
+    .usecase-selector,
+    .usecase-required {
+      grid-template-columns: 1fr;
+      align-items: stretch;
     }
     .command-tiles {
       grid-template-columns: 1fr;

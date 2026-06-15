@@ -40,6 +40,7 @@ from ..security import job_ownership_fields
 from ..models import Block, ChangeType
 from ..schema_discovery import infer_family_supplier_and_name, load_prompt_profile_for_family
 from ..services.table_tools import _column_names, _table_exposure, _table_rows
+from .admin import resolve_dataset_for_principal
 
 router = APIRouter()
 
@@ -64,9 +65,14 @@ async def compare(
     base: UploadFile = File(..., description="Older / previous version document"),
     target: UploadFile = File(..., description="Newer / current version document"),
     use_llm: bool = Form(False),
+    family_id: Optional[str] = Form(None),
 ):
     if not base.filename or not target.filename:
         raise HTTPException(400, "Both files required")
+    if not family_id:
+        raise HTTPException(400, "A use case must be selected before document comparison.")
+
+    selected_dataset = resolve_dataset_for_principal(family_id)
 
     run_id = str(uuid.uuid4())
     work = Path(tempfile.mkdtemp(prefix=f"specdiff_{run_id}_"))
@@ -93,6 +99,11 @@ async def compare(
         "coverage": {},
         "ai_usage": empty_usage(),
         "supported_upload_formats": supported_input_extensions(),
+        "family_id": str(family_id or ""),
+        "family_supplier": selected_dataset.get("supplier") if selected_dataset else None,
+        "family_name": selected_dataset.get("family_name") if selected_dataset else None,
+        "prompt_profile": selected_dataset.get("prompt_profile") if selected_dataset else {},
+        "template_profile": selected_dataset.get("template_profile") if selected_dataset else {},
     })
     _sync_job_metadata(run_id)
 
@@ -133,6 +144,7 @@ async def compare(
             "base_label": base_label,
             "target_label": target_label,
             "use_llm": use_llm,
+            "family_id": str(family_id or ""),
         },
         run_dict=_RUNS[run_id],
     )

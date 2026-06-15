@@ -82,13 +82,19 @@ python -m backend.run_cli \
 
 # API mode
 uvicorn backend.api:app --reload
-# then POST two PDFs to http://localhost:8000/compare
 
 # Frontend
 cd frontend
 npm install
 npm run dev
 ```
+
+Open the Vite URL, go to **Admin Studio**, create a use case, and optionally
+bootstrap it with a seed document. Compare and Extract intentionally require an
+accessible use case before upload. During local development, Vite proxies
+`/api/*` requests to `http://localhost:8000`, and Admin Studio falls back to
+`/tmp/doculens_datasets.json` plus `/tmp/doculens_dataset_documents.json` when
+Postgres is not configured.
 
 For LLM-powered summaries set:
 

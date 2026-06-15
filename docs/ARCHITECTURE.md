@@ -176,6 +176,19 @@ grounded summaries when the configured deployment is available. If it is not
 available, endpoints return deterministic evidence rather than failing the user
 workflow.
 
+Compare and Extract require a selected document family. The UI hides upload
+controls until at least one accessible use case exists, and the API rejects
+processing requests without a valid `family_id`. This keeps every run attached
+to a model-reference boundary: metadata, seed examples, prompt guidance, learned
+table rules, and role policy travel together.
+
+For local development, Admin Studio does not require Postgres to be online. When
+`db_enabled()` is false, `backend/routers/admin.py` stores use cases in
+`/tmp/doculens_datasets.json` and seed-document records in
+`/tmp/doculens_dataset_documents.json` using locked, atomic JSON writes. This
+matches the local job-store behavior closely enough for onboarding tests while
+keeping the production path on Postgres.
+
 ## Extraction accuracy improvements
 
 Recent backend changes focus on hard document scenarios from the reference

@@ -254,9 +254,14 @@ export default function App() {
     const form = new FormData(e.currentTarget);
     const base = form.get("base");
     const target = form.get("target");
+    const familyId = String(form.get("family_id") || "").trim();
 
     if (!base || !target || !base.name || !target.name) {
       setError("Please select both documents before starting.");
+      return;
+    }
+    if (!familyId) {
+      setError("Please select a document use case before starting comparison.");
       return;
     }
 
@@ -306,9 +311,14 @@ export default function App() {
 
     const form = new FormData(e.currentTarget);
     const documents = form.getAll("document").filter((file) => file && file.name);
+    const familyId = String(form.get("family_id") || "").trim();
 
     if (!documents.length) {
       setExtractError("Please select at least one document, spreadsheet, PDF, or image before starting extraction.");
+      return;
+    }
+    if (!familyId) {
+      setExtractError("Please select a document use case before starting extraction.");
       return;
     }
 
@@ -432,7 +442,7 @@ export default function App() {
 
         {workspace === "compare" && !isComplete && (
           <section className="workflow-panel">
-            <UploadPanel onUpload={onUpload} busy={busy} />
+            <UploadPanel onUpload={onUpload} busy={busy} onAdmin={() => goWorkspace("admin")} />
             {busy && meta && (
               <ProcessingState
                 progress={meta.progress || 0}
@@ -446,7 +456,7 @@ export default function App() {
 
         {workspace === "extract" && !isExtractComplete && (
           <section className="workflow-panel">
-            <ExtractUploadPanel onUpload={onExtractUpload} busy={extractBusy} />
+            <ExtractUploadPanel onUpload={onExtractUpload} busy={extractBusy} onAdmin={() => goWorkspace("admin")} />
             {extractBusy && extractMeta && (
               <ProcessingState
                 progress={extractMeta.progress || 0}

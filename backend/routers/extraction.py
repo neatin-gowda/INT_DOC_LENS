@@ -31,6 +31,7 @@ from ..ingestion import save_upload_to_source, source_kind, supported_input_exte
 from ..job_store import empty_usage, now_iso
 from ..security import job_ownership_fields
 from ..services.table_tools import _table_matrix
+from .admin import resolve_dataset_for_principal
 
 router = APIRouter()
 
@@ -38,10 +39,14 @@ router = APIRouter()
 async def extract_document(
     document: list[UploadFile] = File(..., description="One or more documents/images to extract"),
     use_ai: bool = Form(False),
+    family_id: Optional[str] = Form(None),
 ):
     uploads = [item for item in document if item and item.filename]
     if not uploads:
         raise HTTPException(400, "At least one document file is required")
+    if not family_id:
+        raise HTTPException(400, "A use case must be selected before document extraction.")
+    selected_dataset = resolve_dataset_for_principal(family_id)
 
     run_id = str(uuid.uuid4())
     work = Path(tempfile.mkdtemp(prefix=f"doc_extract_{run_id}_"))
@@ -64,6 +69,11 @@ async def extract_document(
         "summary": {},
         "ai_usage": empty_usage(),
         "supported_upload_formats": supported_input_extensions(),
+        "family_id": str(family_id or ""),
+        "family_supplier": selected_dataset.get("supplier") if selected_dataset else None,
+        "family_name": selected_dataset.get("family_name") if selected_dataset else None,
+        "prompt_profile": selected_dataset.get("prompt_profile") if selected_dataset else {},
+        "template_profile": selected_dataset.get("template_profile") if selected_dataset else {},
     })
     _sync_job_metadata(run_id)
 
@@ -112,6 +122,7 @@ async def extract_document(
             "sources": [str(s) for s in sources],
             "label": label,
             "use_ai": use_ai,
+            "family_id": str(family_id or ""),
         },
         run_dict=_RUNS[run_id],
     )

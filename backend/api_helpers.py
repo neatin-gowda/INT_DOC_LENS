@@ -542,6 +542,7 @@ def _persist_run_safely(
     family_name: str = "document_comparison",
     enable_embeddings: bool = True,
     usage_callback=None,
+    family_id: Optional[str] = None,
 ) -> tuple[Optional[int], Optional[str]]:
     try:
         from .persistence import persist_run
@@ -570,6 +571,7 @@ def _persist_run_safely(
             target_page_count=target_page_count,
             enable_embeddings=enable_embeddings,
             usage_callback=usage_callback,
+            family_id=family_id,
         )
         return db_run_id, None
     except Exception:
@@ -1501,8 +1503,26 @@ def _process_extract(
     sources: list[Path],
     label: str,
     use_ai: bool,
+    family_id: Optional[str] = None,
 ) -> None:
     try:
+        selected_family_id = str(family_id or _RUNS.get(run_id, {}).get("family_id") or "").strip()
+        if selected_family_id:
+            try:
+                from .routers.admin import resolve_dataset_for_principal
+                selected_dataset = resolve_dataset_for_principal(selected_family_id)
+                _RUNS.setdefault(run_id, {}).update(
+                    {
+                        "family_id": selected_family_id,
+                        "family_supplier": selected_dataset.get("supplier"),
+                        "family_name": selected_dataset.get("family_name"),
+                        "prompt_profile": selected_dataset.get("prompt_profile") or {},
+                        "template_profile": selected_dataset.get("template_profile") or {},
+                    }
+                )
+            except Exception as exc:
+                raise RuntimeError(f"Could not resolve selected family {selected_family_id}: {exc}") from exc
+
         _set_run_status(run_id, "Preparing uploaded document", 12)
 
         converted_dir = work / "converted"
@@ -1643,6 +1663,7 @@ def _process_compare(
     base_label: str,
     target_label: str,
     use_llm: bool,
+    family_id: Optional[str] = None,
 ) -> None:
     try:
         _set_run_status(run_id, "Preparing uploaded documents", 10)
@@ -1729,13 +1750,36 @@ def _process_compare(
             "Preparing AI review summary" if use_llm else "Preparing review summary",
             78,
         )
-        family_supplier, family_name = infer_family_supplier_and_name(base_label, target_label, base_blocks + target_blocks)
-        prompt_profile = load_prompt_profile_for_family(
-            family_supplier,
-            family_name,
-            tenant_id=str(_RUNS.get(run_id, {}).get("tenant_id") or "default"),
-            business_unit_id=str(_RUNS.get(run_id, {}).get("business_unit_id") or "default"),
-        )
+        selected_family_id = str(family_id or _RUNS.get(run_id, {}).get("family_id") or "").strip()
+        selected_dataset = None
+        if selected_family_id:
+            try:
+                from .routers.admin import resolve_dataset_for_principal
+                selected_dataset = resolve_dataset_for_principal(selected_family_id)
+            except Exception as exc:
+                raise RuntimeError(f"Could not resolve selected family {selected_family_id}: {exc}") from exc
+
+        if selected_dataset:
+            family_supplier = str(selected_dataset.get("supplier") or "uploaded")
+            family_name = str(selected_dataset.get("family_name") or "document_comparison")
+            prompt_profile = selected_dataset.get("prompt_profile") or {}
+            _RUNS[run_id].update(
+                {
+                    "family_id": selected_family_id,
+                    "family_supplier": family_supplier,
+                    "family_name": family_name,
+                    "prompt_profile": prompt_profile,
+                    "template_profile": selected_dataset.get("template_profile") or {},
+                }
+            )
+        else:
+            family_supplier, family_name = infer_family_supplier_and_name(base_label, target_label, base_blocks + target_blocks)
+            prompt_profile = load_prompt_profile_for_family(
+                family_supplier,
+                family_name,
+                tenant_id=str(_RUNS.get(run_id, {}).get("tenant_id") or "default"),
+                business_unit_id=str(_RUNS.get(run_id, {}).get("business_unit_id") or "default"),
+            )
 
         summary = summarize(
             diffs,
@@ -1767,6 +1811,7 @@ def _process_compare(
             family_name=family_name,
             enable_embeddings=use_llm,
             usage_callback=lambda usage: add_usage(_RUNS[run_id], usage),
+            family_id=selected_family_id or None,
         )
 
         _RUNS[run_id].update(
@@ -1796,6 +1841,9 @@ def _process_compare(
                 "coverage": coverage,
                 "db_run_id": db_run_id,
                 "db_error": db_error,
+                "family_id": selected_family_id,
+                "family_supplier": family_supplier,
+                "family_name": family_name,
             }
         )
         save_run_payload(run_id, _RUNS[run_id])
