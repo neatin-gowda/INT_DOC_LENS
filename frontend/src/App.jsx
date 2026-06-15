@@ -17,41 +17,12 @@ import {
 
 import { JobsDashboard } from "./components/dashboard.jsx";
 import { UploadPanel, ExtractUploadPanel } from "./components/upload.jsx";
-import { SideBySide } from "./components/viewer.jsx";
+import { KeyChangesSummary, SideBySide } from "./components/viewer.jsx";
 import { ExtractionWorkspace } from "./components/extraction.jsx";
-import { AskDocumentsWorkspace, WorkspaceShell } from "./components/workspaceShell.jsx";
+import { WorkspaceShell } from "./components/workspaceShell.jsx";
 import { AdminWorkspace } from "./components/admin.jsx";
 import { useDocumentTitle } from "./theme/useDocumentTitle.js";
-
-// Import comparison workspaces
-import { ReviewReport, AccuracyImprovementTab } from "./components/feedback.jsx";
 import { QueryPanel } from "./components/chat.jsx";
-import { TablesWorkspace } from "./components/tables.jsx";
-
-function Tabs({ tab, setTab }) {
-  const items = [
-    ["viewer", "Visual review"],
-    ["report", "Review report"],
-    ["query", "Ask agent"],
-    ["accuracy", "Improve accuracy"],
-    ["tables", "Table workspace"],
-  ];
-
-  return (
-    <div className="workspace-tabs">
-      {items.map(([key, label]) => (
-        <button
-          key={key}
-          type="button"
-          className={tab === key ? "active" : ""}
-          onClick={() => setTab(key)}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 
 const getSession = (key, fallback) => {
@@ -76,7 +47,6 @@ const setSession = (key, value) => {
 const workspacePaths = {
   compare: "/compare",
   extract: "/extract",
-  assistant: "/ask",
   jobs: "/work-history",
   agents: "/ai-agents",
   admin: "/admin",
@@ -109,7 +79,6 @@ export default function App() {
   const pageTitle = {
     compare: "Compare",
     extract: "Extract",
-    assistant: "Ask Document",
     jobs: "Work History",
     agents: "AI Agents",
     admin: "Admin Studio",
@@ -434,7 +403,7 @@ export default function App() {
         setExtractRunId(job.run_id);
         setExtractMeta(data);
         setExtractBusy(data.status !== "complete" && data.status !== "failed");
-        setWorkspace("assistant");
+        setWorkspace("extract");
         return;
       }
 
@@ -514,14 +483,36 @@ export default function App() {
             </div>
             <StatsBar meta={meta} />
 
-            <Tabs tab={tab} setTab={setTab} />
+            <main className="comparison-flow">
+              <section className="workspace-surface">
+                <div className="surface-title-row">
+                  <div>
+                    <h3>Quick Summary</h3>
+                    <p>Highest-priority differences detected from the comparison evidence.</p>
+                  </div>
+                </div>
+                <KeyChangesSummary runId={runId} meta={meta} onVerifyPage={setPageNum} />
+              </section>
 
-            <main className="workspace-surface">
-              {tab === "viewer" && <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />}
-              {tab === "report" && <ReviewReport runId={runId} />}
-              {tab === "query" && <QueryPanel runId={runId} onGoBoth={(p) => { setPageNum(p); setTab("viewer"); }} />}
-              {tab === "accuracy" && <AccuracyImprovementTab runId={runId} meta={meta} />}
-              {tab === "tables" && <TablesWorkspace runId={runId} />}
+              <section className="workspace-surface">
+                <div className="surface-title-row">
+                  <div>
+                    <h3>Visual Comparison</h3>
+                    <p>Side-by-side verification with synchronized scroll, zoom, and document overlays.</p>
+                  </div>
+                </div>
+                <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />
+              </section>
+
+              <section className="workspace-surface">
+                <div className="surface-title-row">
+                  <div>
+                    <h3>Ask This Comparison</h3>
+                    <p>Start with natural language search. Switch to an AI model only when reasoning or richer synthesis is needed.</p>
+                  </div>
+                </div>
+                <QueryPanel runId={runId} />
+              </section>
             </main>
           </section>
 
@@ -534,10 +525,6 @@ export default function App() {
             tab={extractTab}
             setTab={setExtractTab}
           />
-        )}
-
-        {workspace === "assistant" && (
-          <AskDocumentsWorkspace initialRunId={extractRunId || ""} initialMeta={extractMeta} />
         )}
 
         {workspace === "agents" && (

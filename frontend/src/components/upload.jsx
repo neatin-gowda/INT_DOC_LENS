@@ -88,7 +88,12 @@ function useDatasets(useCaseType) {
         const resp = await fetch(`${API}/datasets`, {
           headers: { "X-User-Role": role },
         });
-        if (!resp.ok) throw new Error(`Could not load use cases (${resp.status})`);
+        if (!resp.ok) {
+          const message = resp.status === 404
+            ? "Use case service is not available. Confirm the backend admin/datasets routes are deployed, then refresh."
+            : `Could not load use cases (${resp.status})`;
+          throw new Error(message);
+        }
         const payload = await resp.json();
         const allItems = payload.datasets || [];
         const items = allItems.filter((item) => (item.use_case_type || "comparison") === useCaseType);

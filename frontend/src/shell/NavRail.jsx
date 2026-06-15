@@ -2,7 +2,6 @@ import React from "react";
 import {
   Bot,
   FileOutput,
-  FileSearch,
   GitCompare,
   History,
   ShieldCheck,
@@ -14,7 +13,6 @@ const sections = [
     items: [
       { key: "compare", label: "Compare", icon: GitCompare },
       { key: "extract", label: "Extract", icon: FileOutput },
-      { key: "assistant", label: "Ask Document", icon: FileSearch },
       { key: "jobs", label: "Work History", icon: History },
     ],
   },

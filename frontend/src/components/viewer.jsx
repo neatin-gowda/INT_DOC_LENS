@@ -17,6 +17,101 @@ import {
   trim,
 } from "./common.jsx";
 
+export function KeyChangesSummary({ runId, meta, onVerifyPage }) {
+  const basePages = meta.base_format && meta.base_format !== "pdf" ? meta.base_native_pages || meta.n_pages_base || 1 : meta.n_pages_base || 1;
+  const targetPages = meta.target_format && meta.target_format !== "pdf" ? meta.target_native_pages || meta.n_pages_target || 1 : meta.n_pages_target || 1;
+  const maxPages = Math.max(basePages, targetPages);
+  const [summaryRows, setSummaryRows] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSummaryRows(null);
+    Promise.all([
+      fetch(`${API}/runs/${runId}/summary`).then(async (resp) => {
+        if (!resp.ok) throw new Error("Failed to load summary");
+        return resp.json();
+      }),
+      fetch(`${API}/runs/${runId}/diff?limit=500`).then(async (resp) => {
+        if (!resp.ok) return { diffs: [] };
+        return resp.json();
+      }),
+    ])
+      .then(([summaryData, diffData]) => {
+        if (cancelled) return;
+        const rows = Array.isArray(summaryData) ? summaryData : summaryData.rows || summaryData.summary || [];
+        setSummaryRows(mergeReviewRows(rows, diffData.diffs || []));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error("Failed to build quick summary", err);
+          setSummaryRows([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
+
+  const keyInsights = React.useMemo(() => {
+    const rows = Array.isArray(summaryRows) ? summaryRows : [];
+    return rows
+      .filter((row) => row.change || row.description || row.before || row.after)
+      .sort((a, b) => {
+        const ai = impactRank(a.impact) + (needsReview(a) ? 2 : 0) + (normalizeConfidence(a.confidence) || 0);
+        const bi = impactRank(b.impact) + (needsReview(b) ? 2 : 0) + (normalizeConfidence(b.confidence) || 0);
+        return bi - ai;
+      });
+  }, [summaryRows]);
+
+  const pageFromCitation = (citation) => {
+    const text = String(citation || "");
+    const match = text.match(/(?:revised|target|page|p\.)\s*(\d+)/i) || text.match(/\b(\d{1,4})\b/);
+    if (!match) return null;
+    const nextPage = Number.parseInt(match[1], 10);
+    return Number.isFinite(nextPage) && nextPage >= 1 && nextPage <= maxPages ? nextPage : null;
+  };
+
+  if (summaryRows === null) {
+    return <div className="key-audit-empty">Building comparison summary...</div>;
+  }
+
+  if (!keyInsights.length) {
+    return <div className="key-audit-empty">No prioritized summary items were returned for this comparison.</div>;
+  }
+
+  const visibleRows = showAll ? keyInsights.slice(0, 16) : keyInsights.slice(0, 8);
+
+  return (
+    <div className="key-audit-panel compact">
+      <div className="key-audit-list">
+        {visibleRows.map((row, index) => {
+          const verifyPage = pageFromCitation(row.citation);
+          return (
+            <div key={`${row.stable_key || row.feature || row.item || index}`} className="key-audit-item">
+              <ChangeBadge type={rowChangeType(row)} />
+              <div className="key-audit-copy" dir="auto">
+                <strong>{trim(row.feature || row.item || row.area || "Document change", 120)}</strong>
+                <span>{trim(row.change || row.description || row.before || row.after || "Value updated.", 260)}</span>
+                {row.citation ? <small>{friendlyCitation(row.citation)}</small> : null}
+              </div>
+              {verifyPage ? (
+                <button type="button" className="primary-action compact" onClick={() => onVerifyPage(verifyPage)}>
+                  Verify page {verifyPage}
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      {keyInsights.length > 8 && (
+        <button type="button" className="key-audit-more" onClick={() => setShowAll((value) => !value)}>
+          {showAll ? "Show fewer" : `Show ${Math.min(16, keyInsights.length)} items`}
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function SideBySide({ runId, meta, pageNum, setPageNum }) {
   const basePages = meta.base_format && meta.base_format !== "pdf" ? meta.base_native_pages || meta.n_pages_base || 1 : meta.n_pages_base || 1;
@@ -34,56 +129,6 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
     setBasePage(pageNum);
     setTargetPage(pageNum);
   }, [runId, pageNum]);
-
-  const [summaryRows, setSummaryRows] = useState(null);
-  const [showSummaryPanel, setShowSummaryPanel] = useState(true);
-
-  // Fetch summary and diffs for interactive jumps
-  useEffect(() => {
-    setSummaryRows(null);
-    Promise.all([
-      fetch(`${API}/runs/${runId}/summary`).then(async (r) => {
-        if (!r.ok) throw new Error("Failed to load summary");
-        return r.json();
-      }),
-      fetch(`${API}/runs/${runId}/diff?limit=500`).then(async (r) => {
-        if (!r.ok) return { diffs: [] };
-        return r.json();
-      }),
-    ])
-      .then(([summaryData, diffData]) => {
-        const summaryRows = Array.isArray(summaryData) ? summaryData : summaryData.rows || summaryData.summary || [];
-        setSummaryRows(mergeReviewRows(summaryRows, diffData.diffs || []));
-      })
-      .catch((err) => {
-        console.error("Failed to build quick summary in side-by-side viewer", err);
-      });
-  }, [runId]);
-
-  // Extract key changes for 5-minute audit
-  const keyInsights = React.useMemo(() => {
-    if (!summaryRows) return [];
-    const list = (summaryRows || []).filter((row) => row.change || row.description || row.before || row.after);
-    const priority = [...list].sort((a, b) => {
-      const ai = impactRank(a.impact) + (needsReview(a) ? 2 : 0) + (normalizeConfidence(a.confidence) || 0);
-      const bi = impactRank(b.impact) + (needsReview(b) ? 2 : 0) + (normalizeConfidence(b.confidence) || 0);
-      return bi - ai;
-    });
-    return priority.slice(0, 8); // top 8 critical changes
-  }, [summaryRows]);
-
-  const parsePageFromCitation = (citation) => {
-    if (!citation) return null;
-    const match = citation.match(/p\.\s*(\d+)/i) || citation.match(/page\s*(\d+)/i) || citation.match(/(\d+)/);
-    if (match) {
-      const p = parseInt(match[1], 10);
-      if (!isNaN(p) && p >= 1 && p <= maxPages) {
-        return p;
-      }
-    }
-    return null;
-  };
-
 
   useEffect(() => {
     if (!syncScroll) return undefined;
@@ -151,108 +196,6 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
         </label>
         <Legend />
       </div>
-
-      {keyInsights.length > 0 && showSummaryPanel && (
-        <div style={{
-          background: "var(--surface-raised)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-lg)",
-          padding: "14px 16px",
-          marginBottom: 16,
-          boxShadow: "var(--shadow-soft)"
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: 15, display: "flex", alignItems: "center", gap: 6 }}>
-              <span>💡 Key Changes Summary</span>
-              <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", background: "var(--surface-sunken)", padding: "2px 8px", borderRadius: 99 }}>
-                Quick Review Panel
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowSummaryPanel(false)}
-              style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
-            >
-              Hide panel
-            </button>
-          </div>
-
-          <p style={{ margin: "0 0 12px", color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.4 }}>
-            Below are the top <strong>{keyInsights.length} most critical changes</strong> detected between versions. 
-            Click the verification button next to any item to instantly jump both documents to that page for side-by-side confirmation.
-          </p>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
-            {keyInsights.map((row, i) => {
-              const targetPage = parsePageFromCitation(row.citation);
-              return (
-                <div key={i} style={{
-                  display: "flex",
-                  alignItems: "start",
-                  gap: 12,
-                  padding: "8px 10px",
-                  background: "var(--surface-sunken)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-md)",
-                  fontSize: 13
-                }}>
-                  <ChangeBadge type={rowChangeType(row)} />
-                  <div style={{ flex: 1, color: "var(--text-primary)", lineHeight: 1.4 }} dir="auto">
-                    <span style={{ fontWeight: 700, color: "var(--text-primary)" }} dir="auto">
-                      {trim(row.feature || row.item || row.area || "Specification Item", 120)}: 
-                    </span>{" "}
-                    <span dir="auto">{trim(row.change || row.description || row.before || row.after || "Value updated.", 260)}</span>
-                  </div>
-                  {targetPage ? (
-                    <button
-                      type="button"
-                      onClick={() => goBoth(targetPage)}
-                      style={{
-                        alignSelf: "center",
-                        background: "var(--brand-orange)",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "var(--radius-md)",
-                        padding: "4px 8px",
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Verify Page {targetPage} →
-                    </button>
-                  ) : row.citation ? (
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)", alignSelf: "center", background: "var(--surface-sunken)", padding: "2px 6px", borderRadius: 4 }}>
-                      {friendlyCitation(row.citation)}
-                    </span>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {keyInsights.length > 0 && !showSummaryPanel && (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-          <button
-            onClick={() => setShowSummaryPanel(true)}
-            style={{
-              background: "var(--surface-raised)",
-              border: "1px solid var(--border)",
-              color: "var(--text-primary)",
-              borderRadius: "var(--radius-md)",
-              padding: "4px 10px",
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer"
-            }}
-          >
-            💡 Show Key Changes Summary ({keyInsights.length})
-          </button>
-        </div>
-      )}
 
       <div className="viewer-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14 }}>
 

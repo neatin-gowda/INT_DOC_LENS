@@ -29,7 +29,105 @@ export function ExtractionWorkspace({ runId, meta, tab, setTab }) {
         {tab === "text" && <ExtractionBlocks runId={runId} />}
         {tab === "json" && <ExtractionJsonPreview runId={runId} meta={meta} />}
       </main>
+      <section className="workspace-surface extraction-query-surface" style={{ marginTop: 12 }}>
+        <div className="surface-title-row">
+          <div>
+            <h3>Ask This Extraction</h3>
+            <p>Search the extracted text, tables, headings, and page evidence from this document.</p>
+          </div>
+        </div>
+        <ExtractionQueryPanel runId={runId} />
+      </section>
     </>
+  );
+}
+
+export function ExtractionQueryPanel({ runId }) {
+  const [question, setQuestion] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  const ask = async () => {
+    const text = question.trim();
+    if (!text || busy) return;
+    const userId = `extract-user-${Date.now()}`;
+    const answerId = `extract-answer-${Date.now()}`;
+    setMessages((prev) => [...prev, { id: userId, role: "user", text, timestamp: new Date().toLocaleTimeString() }]);
+    setQuestion("");
+    setBusy(true);
+    try {
+      const resp = await fetch(`${API}/extract-runs/${runId}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: text, mode: "fast" }),
+      });
+      if (!resp.ok) throw new Error(await readResponseError(resp));
+      const data = await resp.json();
+      setMessages((prev) => [...prev, {
+        id: answerId,
+        role: "assistant",
+        text: data.answer || `Found ${data.rows?.length || 0} matching passages.`,
+        rows: data.rows || [],
+        columns: data.columns || ["Page", "Type", "Path", "Text", "Score"],
+        timestamp: new Date().toLocaleTimeString(),
+      }]);
+    } catch (err) {
+      setMessages((prev) => [...prev, {
+        id: answerId,
+        role: "assistant",
+        text: friendlyFetchError(err),
+        rows: [],
+        timestamp: new Date().toLocaleTimeString(),
+        isError: true,
+      }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="query-workbench">
+      {messages.length === 0 ? (
+        <EmptyState label="Ask about clauses, tables, fields, dates, page content, or extracted values." />
+      ) : (
+        <div className="query-chat-log">
+          {messages.map((message) => (
+            <article key={message.id} className={`query-message ${message.role}${message.isError ? " error" : ""}`}>
+              <div className="query-message-meta">
+                <span>{message.role === "user" ? "You" : "Extraction query"}</span>
+                <span>{message.timestamp}</span>
+              </div>
+              <div className="query-message-text" dir="auto">{message.text}</div>
+              {message.rows?.length > 0 && (
+                <div className="query-results-shell" style={{ marginTop: 10 }}>
+                  <GenericRowsTable columns={message.columns} rows={message.rows} />
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+      <div className="query-composer">
+        <textarea
+          value={question}
+          onChange={(event) => setQuestion(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              ask();
+            }
+          }}
+          placeholder="Ask about the extracted document..."
+          disabled={busy}
+          rows={3}
+        />
+        <div className="query-composer-actions">
+          <button type="button" className="primary-action compact" onClick={ask} disabled={busy || !question.trim()}>
+            {busy ? "Searching" : "Ask"}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 

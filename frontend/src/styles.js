@@ -685,10 +685,33 @@ export const css = `
   .comparison-workspace {
     padding: 14px;
   }
+  .comparison-flow {
+    display: grid;
+    gap: 14px;
+  }
   .workspace-surface {
     padding: 12px;
     min-width: 0;
     overflow: hidden;
+  }
+  .surface-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .surface-title-row h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .surface-title-row p {
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.4;
   }
   .workflow-card-head,
   .board-head,
@@ -1313,6 +1336,51 @@ export const css = `
   .query-evidence {
     margin-top: 9px;
   }
+  .query-composer {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface-raised);
+    padding: 10px;
+    display: grid;
+    gap: 9px;
+  }
+  .query-composer textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 76px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    padding: 10px 11px;
+    outline: none;
+    font: inherit;
+    line-height: 1.45;
+  }
+  .query-composer-actions {
+    display: flex;
+    align-items: end;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .query-composer-actions label {
+    display: grid;
+    gap: 4px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .query-composer-actions select {
+    min-height: 34px;
+    min-width: 140px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    padding: 0 9px;
+    outline: none;
+  }
   .query-result {
     border-inline-start: 4px solid #b85b16;
     border-radius: 12px;
@@ -1336,6 +1404,18 @@ export const css = `
     padding: 13px;
     margin-bottom: 12px;
     box-shadow: var(--shadow-soft);
+  }
+  .key-audit-panel.compact {
+    margin-bottom: 0;
+    box-shadow: none;
+  }
+  .key-audit-empty {
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    background: var(--surface-sunken);
+    color: var(--text-secondary);
+    padding: 14px;
+    font-size: 13px;
   }
   .key-audit-head h3 {
     margin: 0;
@@ -1386,6 +1466,17 @@ export const css = `
     background: transparent;
     color: var(--brand-orange);
     padding: 0;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .key-audit-more {
+    justify-self: start;
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    padding: 6px 10px;
     font-weight: 700;
     cursor: pointer;
   }

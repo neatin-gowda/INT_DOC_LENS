@@ -87,7 +87,7 @@ def discover(pdf_path: str, supplier: str, family_name: str, use_llm: bool = Fal
     bilingual_indicators = ["descripción", "description", "código", "code", "precio", "price"]
     has_bilingual = any(any(ind in h.lower() for ind in bilingual_indicators) for h in headings)
     table_count = sum(len(tbls) for tbls in tables_by_page.values())
-    
+
     complexity_rating = "low"
     confidence_score = 0.90
     complexity_reasons = []
@@ -99,14 +99,14 @@ def discover(pdf_path: str, supplier: str, family_name: str, use_llm: bool = Fal
         confidence_score = 0.65
         complexity_reasons.append("Bilingual text columns detected")
         enhancement_tips.append("Bilingual layout table detected. Ensure side-by-side cells are parsed independently.")
-    
+
     if table_count > 5:
         complexity_rating = "medium" if complexity_rating == "low" else "high"
         confidence_score = min(confidence_score, 0.75)
         complexity_reasons.append("Multiple tabular structures found across pages")
         enhancement_tips.append("Configure table column mapping rules in Admin Studio to establish stable keys.")
         suggested_data_labels.extend(["pricing", "pcv_code"])
-        
+
     profile.ai_reasoning_profile = {
         "complexity_rating": complexity_rating,
         "confidence_score": confidence_score,
@@ -143,7 +143,7 @@ def _llm_refine(
     try:
         from openai import AzureOpenAI
         client = AzureOpenAI(api_key=api_key, azure_endpoint=endpoint, api_version="2024-08-01-preview")
-        
+
         # Collect sample text and tables for prompt reasoning
         sample_text = "\n".join([ln.text for ln in lines[:150] if getattr(ln, 'text', '')])[:4000]
         sample_tables = []

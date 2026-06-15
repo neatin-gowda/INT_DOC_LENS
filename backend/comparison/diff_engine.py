@@ -431,7 +431,7 @@ def _pair_sorted_candidates(
 
 def _sequence_alignment_score(b: Block, t: Block) -> float:
     score = _semantic_match_score(b, t)
-    
+
     b_norm = _canonical_text(b.text)
     t_norm = _canonical_text(t.text)
     if b_norm == t_norm:
@@ -445,7 +445,7 @@ def _sequence_alignment_score(b: Block, t: Block) -> float:
                 score += 0.05 * ratio
             else:
                 score -= 0.50 * (1.0 - ratio)
-            
+
     if _page_sequence_affinity(b, t) >= 0.75:
         score += 0.06
     return min(1.0, score)

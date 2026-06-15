@@ -10,7 +10,6 @@ const workspaceLabels = {
   jobs: "Work History",
   compare: "Compare",
   extract: "Extract",
-  assistant: "Ask Document",
   agents: "AI Agents",
   admin: "Admin Studio",
 };

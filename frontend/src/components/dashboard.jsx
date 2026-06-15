@@ -185,7 +185,7 @@ function JobCard({ job, deleting, onOpen, onAsk, onDelete }) {
             Open
           </button>
           <button type="button" onClick={onAsk} disabled={!complete || !isExtraction} className="ghost-action compact">
-            Ask
+            Query
           </button>
           <button type="button" onClick={onDelete} disabled={deleting} className="danger-action compact">
             {deleting ? "Deleting" : "Delete"}
