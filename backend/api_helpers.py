@@ -37,6 +37,7 @@ from .extraction.pdf_extractor import coverage_pct, extract_blocks, render_pages
 from .job_store import get_job, now_iso, upsert_job
 from .models import Block, BlockDiff, ChangeType
 from .security import can_access_job, current_principal
+from .schema_discovery import infer_family_supplier_and_name, load_prompt_profile_for_family
 from .summarizer import summarize
 from .services.table_tools import (
     _path_label,
@@ -537,6 +538,8 @@ def _persist_run_safely(
     coverage: dict,
     base_page_count: int,
     target_page_count: int,
+    family_supplier: str = "uploaded",
+    family_name: str = "document_comparison",
     enable_embeddings: bool = True,
     usage_callback=None,
 ) -> tuple[Optional[int], Optional[str]]:
@@ -548,8 +551,8 @@ def _persist_run_safely(
     try:
         db_run_id = persist_run(
             run_id=run_id,
-            family_supplier="uploaded",
-            family_name="document_comparison",
+            family_supplier=family_supplier,
+            family_name=family_name,
             tenant_id=str(_RUNS.get(run_id, {}).get("tenant_id") or "default"),
             business_unit_id=str(_RUNS.get(run_id, {}).get("business_unit_id") or "default"),
             uploaded_by=str(_RUNS.get(run_id, {}).get("created_by") or "anonymous"),
@@ -1726,6 +1729,13 @@ def _process_compare(
             "Preparing AI review summary" if use_llm else "Preparing review summary",
             78,
         )
+        family_supplier, family_name = infer_family_supplier_and_name(base_label, target_label, base_blocks + target_blocks)
+        prompt_profile = load_prompt_profile_for_family(
+            family_supplier,
+            family_name,
+            tenant_id=str(_RUNS.get(run_id, {}).get("tenant_id") or "default"),
+            business_unit_id=str(_RUNS.get(run_id, {}).get("business_unit_id") or "default"),
+        )
 
         summary = summarize(
             diffs,
@@ -1733,6 +1743,7 @@ def _process_compare(
             target_blocks,
             use_llm=use_llm,
             usage_callback=lambda usage: add_usage(_RUNS[run_id], usage),
+            prompt_profile=prompt_profile,
         )
 
         _set_run_status(run_id, "Storing extracted tables and comparison data", 88)
@@ -1752,6 +1763,8 @@ def _process_compare(
             coverage=coverage,
             base_page_count=len(base_imgs),
             target_page_count=len(target_imgs),
+            family_supplier=family_supplier,
+            family_name=family_name,
             enable_embeddings=use_llm,
             usage_callback=lambda usage: add_usage(_RUNS[run_id], usage),
         )

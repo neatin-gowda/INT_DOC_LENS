@@ -41,7 +41,7 @@ function QuickStart({ title, detail, onClick }) {
   );
 }
 
-export function JobsDashboard({ onOpenJob, onAskJob, error }) {
+export function JobsDashboard({ onOpenJob, onAskJob, error, historyKind = "all" }) {
   const [state, setState] = useState({ loading: true, error: "", jobs: [] });
   const [deleteId, setDeleteId] = useState("");
 
@@ -87,15 +87,25 @@ export function JobsDashboard({ onOpenJob, onAskJob, error }) {
     }
   };
 
-  const jobs = state.jobs || [];
+  const jobs = (state.jobs || []).filter((job) => historyKind === "all" || job.kind === historyKind);
   const running = jobs.filter((job) => !["complete", "failed", "error"].includes(job.status)).length;
   const complete = jobs.filter((job) => job.status === "complete").length;
+  const heading = historyKind === "comparison"
+    ? "Comparison History"
+    : historyKind === "extraction"
+      ? "Extraction History"
+      : "Work History";
+  const emptyLabel = historyKind === "comparison"
+    ? "No comparison runs are available yet."
+    : historyKind === "extraction"
+      ? "No extraction runs are available yet."
+      : "No document work is available yet.";
 
   return (
     <section className="session-board">
       <div className="board-head">
         <div>
-          <h2>Work History</h2>
+          <h2>{heading}</h2>
         </div>
         <div className="board-actions">
           <span>{running} running</span>
@@ -110,7 +120,7 @@ export function JobsDashboard({ onOpenJob, onAskJob, error }) {
       {state.loading && !jobs.length ? (
         <SoftLoading label="Loading jobs" />
       ) : jobs.length === 0 ? (
-        <EmptyState label="No document work is available yet." />
+        <EmptyState label={emptyLabel} />
       ) : (
         <div className="job-list">
           {jobs.map((job) => (

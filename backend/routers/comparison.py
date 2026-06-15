@@ -7,6 +7,7 @@ import tempfile
 import uuid
 import threading
 import traceback
+import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
@@ -37,9 +38,26 @@ from ..ingestion import save_upload_to_source, source_kind, supported_input_exte
 from ..job_store import empty_usage, now_iso
 from ..security import job_ownership_fields
 from ..models import Block, ChangeType
+from ..schema_discovery import infer_family_supplier_and_name, load_prompt_profile_for_family
 from ..services.table_tools import _column_names, _table_exposure, _table_rows
 
 router = APIRouter()
+
+
+def _prompt_profile_directives(prompt_profile: dict | None) -> str:
+    if not isinstance(prompt_profile, dict):
+        return ""
+    values = []
+    for key in ("summarization_directives", "extraction_directives"):
+        raw = prompt_profile.get(key)
+        if isinstance(raw, str) and raw.strip():
+            values.append(raw.strip())
+        elif isinstance(raw, list):
+            values.extend(str(item).strip() for item in raw if str(item).strip())
+    if not values:
+        return ""
+    body = " ".join(f"- {item}" for item in values[:12])
+    return f" Family-specific guidance: {body} "
 
 @router.post("/compare", response_model=CompareResponse)
 async def compare(
@@ -235,6 +253,18 @@ def enhance_summary(run_id: str, req: EnhanceSummaryReq):
 
     focus_items = feedback.get("selected_focus") or quality.get("focus_items") or []
     page_hint = feedback.get("page_numbers") or "not specified"
+    supplier, family_name = infer_family_supplier_and_name(
+        r.get("base_label", ""),
+        r.get("target_label", ""),
+        (r.get("base_blocks") or []) + (r.get("target_blocks") or []),
+    )
+    prompt_profile = load_prompt_profile_for_family(
+        supplier,
+        family_name,
+        tenant_id=str(r.get("tenant_id") or "default"),
+        business_unit_id=str(r.get("business_unit_id") or "default"),
+    )
+    directives = _prompt_profile_directives(prompt_profile)
     prompt = (
         "Improve the review summary using only extracted comparison evidence. "
         "Focus on the lower-confidence or user-flagged areas. "
@@ -245,6 +275,7 @@ def enhance_summary(run_id: str, req: EnhanceSummaryReq):
         f"Reviewer flagged areas: {feedback.get('missing_areas')}. "
         f"Reviewer page hints: {page_hint}. "
         f"Reviewer comment: {feedback.get('comments')}. "
+        f"{directives}"
         "Return a business-facing table with columns Feature, Change, Seek Clarification, Evidence. "
         f"Low-confidence focus items: {json.dumps(focus_items[:20], ensure_ascii=False, default=str)}"
     )

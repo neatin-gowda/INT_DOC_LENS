@@ -1,16 +1,13 @@
 import React, { useRef, useState } from "react";
 import { FILE_ACCEPT } from "../config.js";
 
-export function UploadPanel({ onUpload, busy, onBack }) {
+export function UploadPanel({ onUpload, busy }) {
   return (
     <form onSubmit={onUpload} className="doc-workflow-card">
       <div className="workflow-card-head">
         <div>
           <h2>Compare two documents</h2>
         </div>
-        <button type="button" onClick={onBack} disabled={busy} className="ghost-action">
-          Back
-        </button>
       </div>
 
       <div className="upload-grid compare">
@@ -18,27 +15,24 @@ export function UploadPanel({ onUpload, busy, onBack }) {
         <FileInput label="Revised" helper="Latest or proposed file" name="target" disabled={busy} />
 
         <div className="workflow-action-rail">
-          <div className="process-status-card">Semantic review</div>
+          <div className="process-status-card">Review pipeline</div>
           <button disabled={busy} className="primary-action full">
             {busy ? "Processing" : "Compare documents"}
           </button>
-          <div className="workflow-note">Preview, evidence query, tables, and report.</div>
+          <div className="workflow-note">Side-by-side preview, semantic changes, and export.</div>
         </div>
       </div>
     </form>
   );
 }
 
-export function ExtractUploadPanel({ onUpload, busy, onBack }) {
+export function ExtractUploadPanel({ onUpload, busy }) {
   return (
     <form onSubmit={onUpload} className="doc-workflow-card">
       <div className="workflow-card-head">
         <div>
           <h2>Extract documents</h2>
         </div>
-        <button type="button" onClick={onBack} disabled={busy} className="ghost-action">
-          Back
-        </button>
       </div>
 
       <div className="upload-grid extract">

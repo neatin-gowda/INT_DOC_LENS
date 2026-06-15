@@ -14,6 +14,11 @@ const workspaceLabels = {
   agents: "AI Agents",
 };
 
+const historyActions = {
+  compare: { label: "Comparison History", historyKind: "comparison" },
+  extract: { label: "Extraction History", historyKind: "extraction" },
+};
+
 export function WorkspaceShell({
   workspace,
   runId,
@@ -23,6 +28,7 @@ export function WorkspaceShell({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const { theme } = useTheme();
+  const historyAction = historyActions[workspace];
 
   return (
     <div className={`workspace-shell theme-${theme}${collapsed ? " collapsed" : ""}`}>
@@ -57,9 +63,15 @@ export function WorkspaceShell({
                 Export report
               </button>
             )}
-            <button type="button" className="workspace-secondary-action" onClick={() => onNavigate("jobs")}>
-              Work History
-            </button>
+            {historyAction && (
+              <button
+                type="button"
+                className="workspace-secondary-action"
+                onClick={() => onNavigate("jobs", { historyKind: historyAction.historyKind })}
+              >
+                {historyAction.label}
+              </button>
+            )}
           </div>
         </header>
 

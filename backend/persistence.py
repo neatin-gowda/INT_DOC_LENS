@@ -25,6 +25,26 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+def _json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _model_json(value: Any) -> str:
+    if hasattr(value, "model_dump_json"):
+        return value.model_dump_json()
+    if hasattr(value, "json"):
+        return value.json()
+    return _json(value)
+
+
 def _clean(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
@@ -121,7 +141,25 @@ def _value_type(value: Any) -> str:
     return "text"
 
 
-def _semantic_role(column_name: str, column_index: int) -> str:
+def _semantic_role(column_name: str, column_index: int, template_profile: Optional[dict] = None) -> str:
+    if template_profile:
+        rules = template_profile.get("column_rules")
+        if isinstance(rules, list):
+            raw = str(column_name or "").strip()
+            for rule in rules:
+                if not isinstance(rule, dict):
+                    continue
+                pattern = str(rule.get("pattern") or "").strip()
+                role = str(rule.get("role") or "").strip().lower()
+                if not pattern or role not in {"row_label", "value", "pcv", "code", "amount", "status", "date", "unknown"}:
+                    continue
+                try:
+                    if re.search(pattern, raw, flags=re.I):
+                        return role
+                except re.error:
+                    if pattern.lower() in raw.lower():
+                        return role
+
     low = _norm(column_name)
 
     if any(term in low for term in ("feature", "description", "item", "content", "name")):
@@ -130,7 +168,7 @@ def _semantic_role(column_name: str, column_index: int) -> str:
     if any(term in low for term in ("order", "code", "part", "model", "sku", "ref", "reference")):
         return "code"
 
-    if "pcv" in low or "pcb" in low:
+    if "pcv" in low or "pcb" in low or (column_index > 0 and re.search(r"\b\d{3,4}\b", low)):
         return "pcv"
 
     if any(term in low for term in ("price", "cost", "amount", "msrp", "$")):
@@ -309,7 +347,14 @@ def persist_run(
         return None
 
     with get_conn() as conn:
-        family_id = _upsert_family(conn, family_supplier, family_name, tenant_id=tenant_id, business_unit_id=business_unit_id)
+        family_id = _upsert_family(
+            conn,
+            family_supplier,
+            family_name,
+            tenant_id=tenant_id,
+            business_unit_id=business_unit_id,
+            pdf_path_for_discovery=base_pdf,
+        )
 
         base_doc_id = _upsert_document(
             conn,
@@ -354,19 +399,46 @@ def persist_run(
         return str(comparison_id)
 
 
-def _upsert_family(conn, supplier: str, family_name: str, *, tenant_id: str, business_unit_id: str) -> uuid.UUID:
+def _upsert_family(
+    conn,
+    supplier: str,
+    family_name: str,
+    *,
+    tenant_id: str,
+    business_unit_id: str,
+    pdf_path_for_discovery: Optional[Path] = None,
+) -> uuid.UUID:
     row = conn.execute(
         """
         INSERT INTO document_family (tenant_id, business_unit_id, supplier, family_name)
         VALUES (%s, %s, %s, %s)
         ON CONFLICT (tenant_id, business_unit_id, supplier, family_name)
         DO UPDATE SET updated_at = now()
-        RETURNING id
+        RETURNING id, template_profile
         """,
         (tenant_id, business_unit_id, supplier, family_name),
     ).fetchone()
 
-    return row["id"]
+    family_id = row["id"]
+    template_profile = _json_dict(row.get("template_profile") if hasattr(row, "get") else row["template_profile"])
+    if pdf_path_for_discovery and not template_profile:
+        try:
+            from .schema_discovery import discover
+
+            initial_profile = discover(str(pdf_path_for_discovery), supplier, family_name, use_llm=True)
+            conn.execute(
+                """
+                UPDATE document_family
+                SET template_profile = %s::jsonb,
+                    updated_at = now()
+                WHERE id = %s
+                """,
+                (_model_json(initial_profile), family_id),
+            )
+        except Exception as exc:
+            print(f"Error bootstrapping template_profile for {supplier}/{family_name}: {exc}")
+
+    return family_id
 
 
 def _upsert_document(
@@ -486,6 +558,22 @@ def _insert_blocks(conn, document_id, blocks: list[Block], *, enable_embeddings:
 
 
 def _insert_tables(conn, document_id, blocks: list[Block], block_id_map: dict[Any, uuid.UUID]) -> None:
+    template_profile = {}
+    try:
+        row = conn.execute(
+            """
+            SELECT f.template_profile
+            FROM document_family f
+            JOIN spec_document d ON d.family_id = f.id
+            WHERE d.id = %s
+            """,
+            (document_id,),
+        ).fetchone()
+        if row:
+            template_profile = _json_dict(row["template_profile"])
+    except Exception as exc:
+        print(f"Error loading template_profile for document {document_id}: {exc}")
+
     conn.execute(
         """
         DELETE FROM doc_table
@@ -572,14 +660,21 @@ def _insert_tables(conn, document_id, blocks: list[Block], block_id_map: dict[An
             ),
         )
 
-        column_id_map = _insert_table_columns(conn, table_id, columns, rows, payload)
+        column_id_map = _insert_table_columns(conn, table_id, columns, rows, payload, template_profile)
         row_id_map = _insert_table_rows(conn, table_id, rows, block_id_map)
         _insert_table_cells(conn, table_id, rows, columns, row_id_map, column_id_map)
 
         table_index += 1
 
 
-def _insert_table_columns(conn, table_id, columns: list[str], rows: list[Block], payload: dict) -> dict[int, uuid.UUID]:
+def _insert_table_columns(
+    conn,
+    table_id,
+    columns: list[str],
+    rows: list[Block],
+    payload: dict,
+    template_profile: Optional[dict] = None,
+) -> dict[int, uuid.UUID]:
     column_id_map = {}
     col_data = []
 
@@ -614,7 +709,7 @@ def _insert_table_columns(conn, table_id, columns: list[str], rows: list[Block],
             column,
             _norm(column),
             header_source,
-            _semantic_role(column, idx),
+            _semantic_role(column, idx, template_profile),
             value_type_hint,
             _json(samples),
             None,
@@ -950,4 +1045,3 @@ def load_block_diffs(conn, comparison_id: uuid.UUID) -> list[BlockDiff]:
             )
         )
     return diffs
-

@@ -70,6 +70,7 @@ class TemplateProfile(BaseModel):
     join_priority: list[str] = Field(
         default_factory=lambda: ["stable_key", "path", "embedding"]
     )
+    column_rules: list[dict[str, str]] = Field(default_factory=list)
     notes: str = ""
 
 

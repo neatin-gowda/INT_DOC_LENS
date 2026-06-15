@@ -474,14 +474,18 @@ def summarize(
     target_blocks: list[Block],
     use_llm: bool = True,
     usage_callback=None,
+    prompt_profile: Optional[dict] = None,
 ) -> list[SummaryRow]:
     evidence = _select_evidence(diffs, base_blocks, target_blocks)
 
     if use_llm and evidence:
         try:
+            custom_directives = _prompt_profile_directives(prompt_profile)
             prompt = GENERIC_SUMMARY_PROMPT.format(
                 evidence_json=json.dumps(evidence[:120], ensure_ascii=False, indent=2, default=str)
             )
+            if custom_directives:
+                prompt += f"\n\nAdditional guidelines for this document family:\n{custom_directives}\n"
             raw = _call_llm(prompt, usage_callback=usage_callback)
             data = json.loads(raw)
             rows = data.get("rows") if isinstance(data, dict) else data
@@ -494,6 +498,19 @@ def summarize(
             print(f"[summarizer] AI path failed ({exc}); using deterministic summary.")
 
     return _ensure_change_type_coverage(_heuristic_summary(evidence), evidence)
+
+
+def _prompt_profile_directives(prompt_profile: Optional[dict]) -> str:
+    if not isinstance(prompt_profile, dict):
+        return ""
+    directives = []
+    for key in ("summarization_directives", "extraction_directives"):
+        value = prompt_profile.get(key)
+        if isinstance(value, str) and value.strip():
+            directives.append(value.strip())
+        elif isinstance(value, list):
+            directives.extend(str(item).strip() for item in value if str(item).strip())
+    return "\n".join(f"- {item}" for item in directives[:12])
 
 
 def _infer_change_type(row: dict[str, Any]) -> str:

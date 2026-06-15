@@ -72,6 +72,7 @@ export default function App() {
   const [extractError, setExtractError] = useState("");
   const [extractTab, setExtractTab] = useState(() => getSession("extractTab", "overview"));
   const [jobError, setJobError] = useState("");
+  const [historyKind, setHistoryKind] = useState(() => getSession("historyKind", "all"));
   const pageTitle = {
     compare: "Compare",
     extract: "Extract",
@@ -92,6 +93,7 @@ export default function App() {
   useEffect(() => { setSession("extractMeta", extractMeta); }, [extractMeta]);
   useEffect(() => { setSession("extractBusy", extractBusy); }, [extractBusy]);
   useEffect(() => { setSession("extractTab", extractTab); }, [extractTab]);
+  useEffect(() => { setSession("historyKind", historyKind); }, [historyKind]);
 
   useEffect(() => {
     const nextWorkspace = workspaceFromPath(location.pathname);
@@ -115,6 +117,7 @@ export default function App() {
     setExtractBusy(false);
     setExtractError("");
     setExtractTab("overview");
+    setHistoryKind("all");
     if (typeof window !== "undefined") {
       try {
         window.sessionStorage.clear();
@@ -124,8 +127,11 @@ export default function App() {
     }
   };
 
-  const goWorkspace = (nextWorkspace) => {
+  const goWorkspace = (nextWorkspace, options = {}) => {
     setWorkspace(nextWorkspace);
+    if (nextWorkspace === "jobs") {
+      setHistoryKind(options.historyKind || "all");
+    }
     setError("");
     setExtractError("");
     setJobError("");
@@ -392,12 +398,12 @@ export default function App() {
         onDownloadReport={downloadReport}
       >
         {workspace === "jobs" && (
-          <JobsDashboard onOpenJob={openJob} onAskJob={askJob} error={jobError} />
+          <JobsDashboard onOpenJob={openJob} onAskJob={askJob} error={jobError} historyKind={historyKind} />
         )}
 
         {workspace === "compare" && !isComplete && (
           <section className="workflow-panel">
-            <UploadPanel onUpload={onUpload} busy={busy} onBack={() => goWorkspace("compare")} />
+            <UploadPanel onUpload={onUpload} busy={busy} />
             {busy && meta && (
               <ProcessingState
                 progress={meta.progress || 0}
@@ -411,7 +417,7 @@ export default function App() {
 
         {workspace === "extract" && !isExtractComplete && (
           <section className="workflow-panel">
-            <ExtractUploadPanel onUpload={onExtractUpload} busy={extractBusy} onBack={() => goWorkspace("compare")} />
+            <ExtractUploadPanel onUpload={onExtractUpload} busy={extractBusy} />
             {extractBusy && extractMeta && (
               <ProcessingState
                 progress={extractMeta.progress || 0}
