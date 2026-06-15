@@ -169,7 +169,6 @@ export function AdminWorkspace() {
         await uploadSamples(data.id, initialSampleFiles, form.onboarding_notes, form.learning_mode === "ai_assisted_bootstrap");
         sampleMessage = " Sample documents learned and model profile bootstrapped.";
       }
-      setNotice(`Use case created.${sampleMessage}`);
       setCreateRun((prev) => ({
         ...(prev || {}),
         status: "success",
@@ -177,11 +176,16 @@ export function AdminWorkspace() {
         datasetId: data.id,
         finishedAt: new Date().toISOString(),
       }));
+      setNotice(`Use case created.${sampleMessage}`);
       setForm(emptyForm);
       setInitialSampleFiles({ baseline: null, revised: null, variationPairs: [] });
       setAnalysisPreview(null);
-      await loadDatasets();
-      if (data.id) await selectDataset(data.id);
+      try {
+        await loadDatasets();
+        if (data.id) await selectDataset(data.id);
+      } catch {
+        setNotice(`Use case created.${sampleMessage} Refresh the use case list if it does not appear immediately.`);
+      }
     } catch (err) {
       const message = friendlyFetchError(err);
       setError(message);
@@ -772,7 +776,7 @@ function AnalysisRunPanel({ run, elapsedSeconds, useAiAnalysis, selectedModel })
         {steps.map(([key, label], index) => (
           <span
             key={key}
-            className={`${index < activeIndex ? "done" : ""} ${index === activeIndex ? "active" : ""}`}
+            className={`${run.status === "success" || index < activeIndex ? "done" : ""} ${run.status === "running" && index === activeIndex ? "active" : ""}`}
           >
             {label}
           </span>
@@ -1070,6 +1074,11 @@ function AIReasoningSummary({ profile, onAddLabel }) {
 
 async function apiJson(path, options = {}) {
   const resp = await fetch(`${API}${path}`, options);
+  if (resp.status === 404 && path.startsWith("/admin/")) {
+    const fallback = await fetch(`${API}/api${path}`, options);
+    if (!fallback.ok) throw new Error(await readResponseError(fallback));
+    return fallback.json();
+  }
   if (!resp.ok) throw new Error(await readResponseError(resp));
   return resp.json();
 }
