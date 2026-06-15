@@ -24,6 +24,7 @@ from typing import Any
 
 from .extraction.pdf_extractor import _body_font_size, _collect_lines, _is_heading
 from .extraction.table_extractor import extract_tables_robust
+from .ai_usage import usage_from_response
 from .models import TemplateProfile
 
 
@@ -36,7 +37,13 @@ CODE_PATTERNS = [
 ]
 
 
-def discover(pdf_path: str, supplier: str, family_name: str, use_llm: bool = False) -> TemplateProfile:
+def discover(
+    pdf_path: str,
+    supplier: str,
+    family_name: str,
+    use_llm: bool = False,
+    model_name: str | None = None,
+) -> TemplateProfile:
     lines = _collect_lines(pdf_path)
     body = _body_font_size(lines)
 
@@ -117,7 +124,7 @@ def discover(pdf_path: str, supplier: str, family_name: str, use_llm: bool = Fal
     }
 
     if use_llm:
-        profile = _llm_refine(profile, lines, tables_by_page)
+        profile = _llm_refine(profile, lines, tables_by_page, model_name=model_name)
 
     return profile
 
@@ -134,10 +141,17 @@ def _llm_refine(
     profile: TemplateProfile,
     lines: list[Any],
     tables_by_page: dict[int, list[dict]],
+    model_name: str | None = None,
 ) -> TemplateProfile:
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     api_key  = os.getenv("AZURE_OPENAI_API_KEY")
-    deploy   = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+    deploy = (
+        (model_name or "").strip()
+        or os.getenv("AZURE_OPENAI_DEPLOYMENT")
+        or os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
+        or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+        or os.getenv("AZURE_OPENAI_MODEL")
+    )
     if not (endpoint and api_key and deploy):
         return profile
     try:
@@ -201,7 +215,9 @@ def _llm_refine(
             "complexity_reasons": data.get("complexity_reasons", []),
             "suggested_data_labels": data.get("suggested_data_labels", []),
             "enhancement_tips": data.get("enhancement_tips", []),
-            "learned_page_resolutions": {}
+            "learned_page_resolutions": {},
+            "selected_model": deploy,
+            "usage": usage_from_response(resp, operation="admin_schema_discovery", model=deploy),
         }
     except Exception as exc:
         profile.notes += f" (LLM refine failed: {exc})"

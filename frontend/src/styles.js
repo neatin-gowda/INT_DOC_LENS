@@ -2828,11 +2828,103 @@ export const css = `
     font-size: 13px;
     font-weight: 650;
   }
+  .model-select-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto minmax(180px, .8fr);
+    gap: 10px;
+    align-items: end;
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    border-radius: var(--radius-md);
+    padding: 10px;
+  }
+  .model-select-row label {
+    display: grid;
+    gap: 6px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .model-select-row select {
+    width: 100%;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    padding: 9px 10px;
+  }
+  .model-select-row span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.35;
+  }
   .sample-actions {
     display: flex;
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
+  }
+  .analysis-run-panel {
+    display: grid;
+    gap: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    border-radius: var(--radius-md);
+    padding: 12px;
+  }
+  .analysis-run-panel.running {
+    border-color: color-mix(in srgb, var(--brand-orange) 46%, var(--border));
+  }
+  .analysis-run-panel.success {
+    border-color: color-mix(in srgb, #1f7e41 42%, var(--border));
+  }
+  .analysis-run-panel.failed {
+    border-color: color-mix(in srgb, #9f2525 46%, var(--border));
+  }
+  .analysis-run-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .analysis-run-head div {
+    display: grid;
+    gap: 2px;
+  }
+  .analysis-run-head strong {
+    color: var(--text-primary);
+    font-size: 14px;
+  }
+  .analysis-run-head span,
+  .analysis-run-head small {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+  .analysis-run-metrics,
+  .analysis-run-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .analysis-run-metrics span,
+  .analysis-run-steps span {
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .analysis-run-steps span.active {
+    border-color: color-mix(in srgb, var(--brand-orange) 38%, var(--border));
+    color: var(--text-primary);
+  }
+  .analysis-run-error {
+    margin: 0;
+    color: #9f2525;
+    font-size: 13px;
+    font-weight: 600;
   }
   .analysis-card {
     border-color: color-mix(in srgb, var(--brand-orange) 42%, var(--border));
@@ -3020,6 +3112,26 @@ export const css = `
     font-size: 13px;
     align-self: center;
   }
+  .icon-action {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    border: 1px solid var(--brand-orange);
+    background: color-mix(in srgb, var(--brand-orange) 10%, var(--surface-raised));
+    color: var(--brand-orange);
+    font-size: 20px;
+    line-height: 1;
+    font-weight: 700;
+    display: inline-grid;
+    place-items: center;
+    cursor: pointer;
+  }
+  .icon-action:disabled {
+    border-color: var(--border);
+    color: var(--text-secondary);
+    background: var(--surface-sunken);
+    cursor: default;
+  }
   .admin-profile-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3066,6 +3178,7 @@ export const css = `
     .admin-grid,
     .admin-review-grid,
     .analysis-grid,
+    .model-select-row,
     .admin-config-grid,
     .sample-upload-grid,
     .sample-pair-grid,

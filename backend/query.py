@@ -208,12 +208,29 @@ def _openai_config() -> dict[str, Any]:
 
 def ai_health() -> dict[str, Any]:
     status = _openai_config()
+    models = []
+    if status.get("deployment"):
+        models.append({
+            "id": status["deployment"],
+            "label": status["deployment"],
+            "kind": "chat",
+            "configured": status["configured"],
+            "default": True,
+        })
     embedding_status = {
         "embedding_configured": embedding_enabled(),
         "embedding_deployment": embedding_deployment(),
     }
+    if embedding_deployment():
+        models.append({
+            "id": embedding_deployment(),
+            "label": embedding_deployment(),
+            "kind": "embedding",
+            "configured": embedding_enabled(),
+            "default": False,
+        })
     if not status["configured"]:
-        return {**status, **embedding_status, "ok": False, "message": "Azure OpenAI chat is not fully configured."}
+        return {**status, **embedding_status, "models": models, "ok": False, "message": "Azure OpenAI chat is not fully configured."}
 
     try:
         from openai import AzureOpenAI
@@ -234,9 +251,9 @@ def ai_health() -> dict[str, Any]:
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or ""
-        return {**status, **embedding_status, "ok": True, "message": "Azure OpenAI chat call succeeded.", "sample": content[:120]}
+        return {**status, **embedding_status, "models": models, "ok": True, "message": "Azure OpenAI chat call succeeded.", "sample": content[:120]}
     except Exception as exc:
-        return {**status, **embedding_status, "ok": False, "message": f"Azure OpenAI chat call failed: {type(exc).__name__}: {exc}"}
+        return {**status, **embedding_status, "models": models, "ok": False, "message": f"Azure OpenAI chat call failed: {type(exc).__name__}: {exc}"}
 
 
 def _preview(s: Any, limit: int = 360) -> str | None:

@@ -410,6 +410,28 @@ def _suggest_onboarding_notes(merged_profile: dict[str, Any], notes: str) -> str
     return "\n".join(parts)
 
 
+def _aggregate_profile_usage(profiles: list[dict[str, Any]]) -> dict[str, Any]:
+    usage = {
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "operations": [],
+    }
+    for profile in profiles:
+        ai_profile = _json_dict(profile.get("ai_reasoning_profile"))
+        item = _json_dict(ai_profile.get("usage"))
+        if not item:
+            continue
+        usage["calls"] += int(item.get("calls") or 0)
+        usage["prompt_tokens"] += int(item.get("prompt_tokens") or 0)
+        usage["completion_tokens"] += int(item.get("completion_tokens") or 0)
+        usage["total_tokens"] += int(item.get("total_tokens") or 0)
+        for operation in item.get("operations") or []:
+            usage["operations"].append(operation)
+    return usage
+
+
 def _profile_dict(profile: Any) -> dict[str, Any]:
     if hasattr(profile, "model_dump"):
         return profile.model_dump()
@@ -533,6 +555,7 @@ async def _learn_uploaded_sample(
     index: int,
     notes: str,
     use_llm: bool,
+    model_name: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], Path, int]:
     from ..ingestion import normalize_to_pdf
     from ..extraction.pdf_extractor import render_pages
@@ -547,7 +570,7 @@ async def _learn_uploaded_sample(
     converted_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = normalize_to_pdf(source_path, converted_dir / f"{sample_role}_{index}")
     page_imgs = render_pages(str(pdf_path), str(work_dir / f"pages_{sample_role}_{index}"))
-    profile = discover(str(pdf_path), family["supplier"], family["family_name"], use_llm=use_llm)
+    profile = discover(str(pdf_path), family["supplier"], family["family_name"], use_llm=use_llm, model_name=model_name)
     profile_dict = _profile_dict(profile)
 
     document = {
@@ -771,6 +794,7 @@ async def analyze_use_case_samples(
     expected_formats: str = Form(""),
     notes: str = Form(""),
     use_llm: bool = Form(True),
+    model_name: str = Form(""),
 ):
     principal = current_principal()
     _check_admin(principal)
@@ -806,6 +830,7 @@ async def analyze_use_case_samples(
                 index=idx,
                 notes=notes,
                 use_llm=use_llm,
+                model_name=model_name,
             )
             learned_profiles.append(profile_dict)
             sample_documents.append(document)
@@ -843,13 +868,16 @@ async def analyze_use_case_samples(
             "learning_mode": "ai_assisted_bootstrap" if use_llm else "deterministic_first",
             "allowed_roles": [],
         }
+        usage = _aggregate_profile_usage(learned_profiles)
         return {
             "status": "success",
             "suggested_dataset": suggested_dataset,
             "template_profile": merged_profile,
             "documents": sample_documents,
-            "analysis": merged_profile.get("ai_reasoning_profile", {}),
+            "analysis": {**_json_dict(merged_profile.get("ai_reasoning_profile")), "usage": usage},
             "used_ai": bool(use_llm),
+            "selected_model": model_name.strip() if use_llm and model_name.strip() else "",
+            "usage": usage,
         }
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)

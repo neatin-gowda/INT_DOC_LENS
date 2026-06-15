@@ -56,7 +56,11 @@ export function AdminWorkspace() {
   });
   const [initialSampleFiles, setInitialSampleFiles] = useState({ baseline: null, revised: null, variationPairs: [] });
   const [useAiAnalysis, setUseAiAnalysis] = useState(true);
+  const [aiHealth, setAiHealth] = useState(null);
+  const [selectedModel, setSelectedModel] = useState("");
   const [analysisPreview, setAnalysisPreview] = useState(null);
+  const [analysisRun, setAnalysisRun] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sampleFiles, setSampleFiles] = useState({ baseline: null, revised: null, variations: [] });
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -84,7 +88,29 @@ export function AdminWorkspace() {
 
   useEffect(() => {
     loadDatasets();
+    loadAiHealth();
   }, []);
+
+  useEffect(() => {
+    if (busy !== "analyze") return undefined;
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
+
+  const loadAiHealth = async () => {
+    try {
+      const data = await apiJson("/ai-health");
+      setAiHealth(data);
+      const chatModel = (data.models || []).find((model) => model.kind === "chat" && model.configured);
+      if (chatModel?.id) setSelectedModel(chatModel.id);
+    } catch {
+      setAiHealth({ ok: false, models: [], message: "AI model status is unavailable." });
+    }
+  };
 
   const selectDataset = async (id) => {
     setSelectedId(id);
@@ -224,9 +250,22 @@ export function AdminWorkspace() {
 
   const analyzeInitialSamples = async () => {
     if (!hasAnySample(initialSampleFiles)) return;
+    if (useAiAnalysis && !selectedModel) {
+      setError("Select a configured AI model before running AI-assisted sample analysis.");
+      return;
+    }
     setBusy("analyze");
     setError("");
     setNotice("");
+    setAnalysisPreview(null);
+    setAnalysisRun({
+      status: "running",
+      mode: useAiAnalysis ? "ai" : "deterministic",
+      model: useAiAnalysis ? selectedModel : "",
+      submitted: sampleStats(initialSampleFiles),
+      startedAt: new Date().toISOString(),
+      error: "",
+    });
     try {
       const formData = new FormData();
       if (initialSampleFiles.baseline) formData.append("baseline", initialSampleFiles.baseline);
@@ -239,6 +278,7 @@ export function AdminWorkspace() {
       formData.append("expected_formats", (form.expected_formats || []).join(","));
       formData.append("notes", form.onboarding_notes || form.sample_plan || "");
       formData.append("use_llm", String(useAiAnalysis));
+      formData.append("model_name", useAiAnalysis ? selectedModel : "");
 
       const resp = await fetch(`${API}/admin/analyze-use-case-samples`, {
         method: "POST",
@@ -252,6 +292,13 @@ export function AdminWorkspace() {
       const data = await resp.json();
       const suggested = data.suggested_dataset || {};
       setAnalysisPreview(data);
+      setAnalysisRun((prev) => ({
+        ...(prev || {}),
+        status: "success",
+        finishedAt: new Date().toISOString(),
+        backendUsage: collectAnalysisUsage(data),
+        model: data.selected_model || selectedModel,
+      }));
       setForm({
         ...form,
         ...suggested,
@@ -260,7 +307,14 @@ export function AdminWorkspace() {
       });
       setNotice(useAiAnalysis ? "Sample analysis complete. Review the suggested use case model before creating it." : "Deterministic sample scan complete. Review the suggested use case model before creating it.");
     } catch (err) {
-      setError(friendlyFetchError(err));
+      const message = friendlyFetchError(err);
+      setError(message);
+      setAnalysisRun((prev) => ({
+        ...(prev || {}),
+        status: "failed",
+        finishedAt: new Date().toISOString(),
+        error: message,
+      }));
     } finally {
       setBusy("");
     }
@@ -382,9 +436,27 @@ export function AdminWorkspace() {
                 </div>
                 <label className="ai-toggle">
                   <input type="checkbox" checked={useAiAnalysis} onChange={(e) => setUseAiAnalysis(e.target.checked)} />
-                  Analyze with GPT-4o
+                  Analyze with AI model
                 </label>
               </div>
+              {useAiAnalysis ? (
+                <div className="model-select-row">
+                  <label>
+                    Model deployment
+                    <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}>
+                      {availableChatModels(aiHealth).length ? (
+                        availableChatModels(aiHealth).map((model) => (
+                          <option key={model.id} value={model.id}>{model.label || model.id}</option>
+                        ))
+                      ) : (
+                        <option value="">No configured chat model found</option>
+                      )}
+                    </select>
+                  </label>
+                  <button type="button" className="ghost-action compact" onClick={loadAiHealth}>Refresh models</button>
+                  <span>{aiHealth?.ok ? "Model connection verified." : aiHealth?.message || "Checking AI model status."}</span>
+                </div>
+              ) : null}
               <div className="sample-pair-grid">
                 <label>
                   Baseline sample
@@ -397,11 +469,12 @@ export function AdminWorkspace() {
               </div>
               <VariationPairsEditor value={initialSampleFiles.variationPairs} onChange={(variationPairs) => setInitialSampleFiles({ ...initialSampleFiles, variationPairs })} />
               <div className="sample-actions">
-                <button type="button" className="secondary-action" onClick={analyzeInitialSamples} disabled={!hasAnySample(initialSampleFiles) || busy === "analyze"}>
+                <button type="button" className="secondary-action" onClick={analyzeInitialSamples} disabled={!hasAnySample(initialSampleFiles) || busy === "analyze" || (useAiAnalysis && !selectedModel)}>
                   {busy === "analyze" ? "Analyzing samples" : "Analyze samples"}
                 </button>
                 <span>{hasAnySample(initialSampleFiles) ? "Analysis can prefill the fields below. You can still edit everything manually." : "Attach at least one sample to run analysis."}</span>
               </div>
+              <AnalysisRunPanel run={analysisRun} elapsedSeconds={elapsedSeconds} useAiAnalysis={useAiAnalysis} selectedModel={selectedModel} />
             </section>
 
             {analysisPreview ? (
@@ -546,6 +619,99 @@ function flattenVariationFiles(files) {
   return [...direct, ...pairs];
 }
 
+function allSampleFiles(files) {
+  return [files?.baseline, files?.revised, ...flattenVariationFiles(files)].filter(Boolean);
+}
+
+function sampleStats(files) {
+  const list = allSampleFiles(files);
+  const totalBytes = list.reduce((sum, file) => sum + Number(file.size || 0), 0);
+  return {
+    count: list.length,
+    totalBytes,
+    totalMb: totalBytes / (1024 * 1024),
+    estimatedInputTokens: Math.max(1, Math.ceil(totalBytes / 4)),
+    files: list.map((file) => ({ name: file.name, size: file.size || 0 })),
+  };
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat().format(Math.round(Number(value || 0)));
+}
+
+function availableChatModels(aiHealth) {
+  const models = Array.isArray(aiHealth?.models) ? aiHealth.models : [];
+  if (models.length) return models.filter((model) => model.kind === "chat");
+  if (aiHealth?.deployment) return [{ id: aiHealth.deployment, label: aiHealth.deployment, kind: "chat", configured: aiHealth.configured }];
+  return [];
+}
+
+function collectAnalysisUsage(data) {
+  if (data?.usage) {
+    return {
+      prompt_tokens: Number(data.usage.prompt_tokens || 0),
+      completion_tokens: Number(data.usage.completion_tokens || 0),
+      total_tokens: Number(data.usage.total_tokens || 0),
+      calls: Number(data.usage.calls || 0),
+    };
+  }
+  const usageItems = [];
+  const aiUsage = data?.analysis?.usage;
+  if (aiUsage) usageItems.push(aiUsage);
+  if (data?.template_profile?.ai_reasoning_profile?.usage) usageItems.push(data.template_profile.ai_reasoning_profile.usage);
+  return usageItems.reduce((acc, item) => ({
+    prompt_tokens: acc.prompt_tokens + Number(item.prompt_tokens || 0),
+    completion_tokens: acc.completion_tokens + Number(item.completion_tokens || 0),
+    total_tokens: acc.total_tokens + Number(item.total_tokens || 0),
+    calls: acc.calls + Number(item.calls || (item.total_tokens ? 1 : 0)),
+  }), { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, calls: 0 });
+}
+
+function AnalysisRunPanel({ run, elapsedSeconds, useAiAnalysis, selectedModel }) {
+  if (!run) return null;
+  const stats = run.submitted || {};
+  const usage = run.backendUsage || {};
+  const statusLabel = run.status === "running" ? "Running" : run.status === "success" ? "Completed" : "Failed";
+  const steps = [
+    ["prepare", "Preparing upload context"],
+    ["extract", "Extracting sample structure"],
+    ["model", useAiAnalysis ? `Invoking ${selectedModel || "selected model"}` : "Deterministic profile scan"],
+    ["metadata", "Generating metadata suggestions"],
+  ];
+  return (
+    <div className={`analysis-run-panel ${run.status}`}>
+      <div className="analysis-run-head">
+        <div>
+          <strong>{statusLabel}</strong>
+          <span>{run.status === "running" ? `${elapsedSeconds}s elapsed` : run.finishedAt ? "Run finished" : "Waiting"}</span>
+        </div>
+        <small>{run.mode === "ai" ? `AI model: ${run.model || selectedModel || "not selected"}` : "AI disabled"}</small>
+      </div>
+      <div className="analysis-run-metrics">
+        <span>{formatNumber(stats.count)} file(s)</span>
+        <span>{formatBytes(stats.totalBytes)}</span>
+        <span>Est. input {formatNumber(stats.estimatedInputTokens)} tokens</span>
+        {usage.total_tokens ? <span>Actual AI {formatNumber(usage.total_tokens)} tokens</span> : null}
+      </div>
+      <div className="analysis-run-steps">
+        {steps.map(([key, label], index) => (
+          <span key={key} className={run.status === "running" || run.status === "success" || index === 0 ? "active" : ""}>
+            {label}
+          </span>
+        ))}
+      </div>
+      {run.error ? <p className="analysis-run-error">{run.error}</p> : null}
+    </div>
+  );
+}
+
 function VariationPairsEditor({ value, onChange }) {
   const pairs = Array.isArray(value) ? value : [];
   const updatePair = (id, patch) => {
@@ -563,11 +729,12 @@ function VariationPairsEditor({ value, onChange }) {
         </div>
         <button
           type="button"
-          className="secondary-action compact"
+          className="icon-action"
           onClick={() => onChange([...pairs, emptyVariationPair()])}
           disabled={pairs.length >= 5}
+          title="Add variation pair"
         >
-          Add pair
+          +
         </button>
       </div>
       {pairs.length ? (
