@@ -37,6 +37,8 @@ const learningModes = [
   ["manual_profile", "Manual profile"],
 ];
 
+const emptyVariationPair = () => ({ id: crypto.randomUUID(), baseline: null, revised: null });
+
 export function AdminWorkspace() {
   const [datasets, setDatasets] = useState([]);
   const [selectedId, setSelectedId] = useState("");
@@ -52,7 +54,7 @@ export function AdminWorkspace() {
     onboarding_notes: "",
     learning_mode: "ai_assisted_bootstrap",
   });
-  const [initialSampleFiles, setInitialSampleFiles] = useState({ baseline: null, revised: null, variations: [] });
+  const [initialSampleFiles, setInitialSampleFiles] = useState({ baseline: null, revised: null, variationPairs: [] });
   const [useAiAnalysis, setUseAiAnalysis] = useState(true);
   const [analysisPreview, setAnalysisPreview] = useState(null);
   const [sampleFiles, setSampleFiles] = useState({ baseline: null, revised: null, variations: [] });
@@ -134,7 +136,7 @@ export function AdminWorkspace() {
       }
       setNotice(`Use case created.${sampleMessage}`);
       setForm(emptyForm);
-      setInitialSampleFiles({ baseline: null, revised: null, variations: [] });
+      setInitialSampleFiles({ baseline: null, revised: null, variationPairs: [] });
       setAnalysisPreview(null);
       await loadDatasets();
       if (data.id) await selectDataset(data.id);
@@ -188,7 +190,7 @@ export function AdminWorkspace() {
 
   const bootstrapSamples = async (event) => {
     event.preventDefault();
-    if (!selectedId || (!sampleFiles.baseline && !sampleFiles.revised && sampleFiles.variations.length === 0)) return;
+    if (!selectedId || !hasAnySample(sampleFiles)) return;
     setBusy("bootstrap");
     setError("");
     setNotice("");
@@ -208,7 +210,7 @@ export function AdminWorkspace() {
     const formData = new FormData();
     if (files.baseline) formData.append("baseline", files.baseline);
     if (files.revised) formData.append("revised", files.revised);
-    files.variations.forEach((file) => formData.append("variations", file));
+    flattenVariationFiles(files).forEach((file) => formData.append("variations", file));
     formData.append("notes", notes || "");
     formData.append("use_llm", String(useLlm));
     const resp = await fetch(`${API}/admin/datasets/${datasetId}/samples`, {
@@ -229,7 +231,12 @@ export function AdminWorkspace() {
       const formData = new FormData();
       if (initialSampleFiles.baseline) formData.append("baseline", initialSampleFiles.baseline);
       if (initialSampleFiles.revised) formData.append("revised", initialSampleFiles.revised);
-      initialSampleFiles.variations.forEach((file) => formData.append("variations", file));
+      flattenVariationFiles(initialSampleFiles).forEach((file) => formData.append("variations", file));
+      formData.append("supplier", form.supplier || "");
+      formData.append("family_name", form.family_name || "");
+      formData.append("domain", form.domain || "generic");
+      formData.append("use_case_type", form.use_case_type || "comparison");
+      formData.append("expected_formats", (form.expected_formats || []).join(","));
       formData.append("notes", form.onboarding_notes || form.sample_plan || "");
       formData.append("use_llm", String(useAiAnalysis));
 
@@ -238,6 +245,9 @@ export function AdminWorkspace() {
         headers: { "X-User-Role": window.sessionStorage.getItem("simulated_role") || "platform_admin" },
         body: formData,
       });
+      if (resp.status === 404) {
+        throw new Error("Sample analyzer endpoint was not found in the backend. Deploy the latest backend image that includes POST /admin/analyze-use-case-samples.");
+      }
       if (!resp.ok) throw new Error(await readResponseError(resp));
       const data = await resp.json();
       const suggested = data.suggested_dataset || {};
@@ -326,47 +336,10 @@ export function AdminWorkspace() {
             </div>
           </div>
           <form className="admin-form onboarding-flow" onSubmit={createDataset}>
-            <section className="sample-intake-card">
-              <div className="sample-intake-head">
-                <div>
-                  <h4>Representative Samples</h4>
-                  <p>Attach the documents that define this model. For comparison, use baseline and revised examples; add variations for alternate layouts or suppliers.</p>
-                </div>
-                <label className="ai-toggle">
-                  <input type="checkbox" checked={useAiAnalysis} onChange={(e) => setUseAiAnalysis(e.target.checked)} />
-                  Analyze with GPT-4o
-                </label>
-              </div>
-              <div className="sample-upload-grid">
-                <label>
-                  Baseline sample
-                  <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setInitialSampleFiles({ ...initialSampleFiles, baseline: e.target.files?.[0] || null })} />
-                </label>
-                <label>
-                  Revised sample
-                  <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setInitialSampleFiles({ ...initialSampleFiles, revised: e.target.files?.[0] || null })} />
-                </label>
-                <label>
-                  Layout variations
-                  <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setInitialSampleFiles({ ...initialSampleFiles, variations: Array.from(e.target.files || []) })} />
-                </label>
-              </div>
-              <div className="sample-actions">
-                <button type="button" className="secondary-action" onClick={analyzeInitialSamples} disabled={!hasAnySample(initialSampleFiles) || busy === "analyze"}>
-                  {busy === "analyze" ? "Analyzing samples" : "Analyze samples"}
-                </button>
-                <span>{hasAnySample(initialSampleFiles) ? "Analysis can prefill the fields below. You can still edit everything manually." : "Attach at least one sample to run analysis."}</span>
-              </div>
-            </section>
-
-            {analysisPreview ? (
-              <AnalysisPreviewCard data={analysisPreview} />
-            ) : null}
-
             <section className="admin-review-card">
               <div>
-                <h4>Review Model Details</h4>
-                <p>These fields become the dataset and document model used by compare and extract workflows.</p>
+                <h4>Use Case Identity</h4>
+                <p>Define the business model before uploading samples. Analysis will use these values as context instead of guessing from file names.</p>
               </div>
               <div className="admin-review-grid">
                 <label>
@@ -398,6 +371,49 @@ export function AdminWorkspace() {
                 <div className="admin-wide-field">
                   <FormatPicker value={form.expected_formats} onChange={(expected_formats) => setForm({ ...form, expected_formats })} />
                 </div>
+              </div>
+            </section>
+
+            <section className="sample-intake-card">
+              <div className="sample-intake-head">
+                <div>
+                  <h4>Training Samples</h4>
+                  <p>Attach one baseline and one revised document. Add variation pairs only when you have alternate layouts, suppliers, model years, or document structures.</p>
+                </div>
+                <label className="ai-toggle">
+                  <input type="checkbox" checked={useAiAnalysis} onChange={(e) => setUseAiAnalysis(e.target.checked)} />
+                  Analyze with GPT-4o
+                </label>
+              </div>
+              <div className="sample-pair-grid">
+                <label>
+                  Baseline sample
+                  <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setInitialSampleFiles({ ...initialSampleFiles, baseline: e.target.files?.[0] || null })} />
+                </label>
+                <label>
+                  Revised sample
+                  <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => setInitialSampleFiles({ ...initialSampleFiles, revised: e.target.files?.[0] || null })} />
+                </label>
+              </div>
+              <VariationPairsEditor value={initialSampleFiles.variationPairs} onChange={(variationPairs) => setInitialSampleFiles({ ...initialSampleFiles, variationPairs })} />
+              <div className="sample-actions">
+                <button type="button" className="secondary-action" onClick={analyzeInitialSamples} disabled={!hasAnySample(initialSampleFiles) || busy === "analyze"}>
+                  {busy === "analyze" ? "Analyzing samples" : "Analyze samples"}
+                </button>
+                <span>{hasAnySample(initialSampleFiles) ? "Analysis can prefill the fields below. You can still edit everything manually." : "Attach at least one sample to run analysis."}</span>
+              </div>
+            </section>
+
+            {analysisPreview ? (
+              <AnalysisPreviewCard data={analysisPreview} />
+            ) : null}
+
+            <section className="admin-review-card">
+              <div>
+                <h4>Generated Metadata</h4>
+                <p>Analysis fills this section with document understanding, extraction focus, accuracy hints, and reviewer notes. You can also maintain it manually.</p>
+              </div>
+              <div className="admin-review-grid">
                 <label>
                   Content description
                   <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Describe the documents, expected fields, tables, identifiers, and business context." />
@@ -519,7 +535,65 @@ export function AdminWorkspace() {
 }
 
 function hasAnySample(files) {
-  return Boolean(files?.baseline || files?.revised || files?.variations?.length);
+  return Boolean(files?.baseline || files?.revised || files?.variations?.length || flattenVariationFiles(files).length);
+}
+
+function flattenVariationFiles(files) {
+  const direct = Array.isArray(files?.variations) ? files.variations : [];
+  const pairs = Array.isArray(files?.variationPairs)
+    ? files.variationPairs.flatMap((pair) => [pair.baseline, pair.revised].filter(Boolean))
+    : [];
+  return [...direct, ...pairs];
+}
+
+function VariationPairsEditor({ value, onChange }) {
+  const pairs = Array.isArray(value) ? value : [];
+  const updatePair = (id, patch) => {
+    onChange(pairs.map((pair) => (pair.id === id ? { ...pair, ...patch } : pair)));
+  };
+  const removePair = (id) => {
+    onChange(pairs.filter((pair) => pair.id !== id));
+  };
+  return (
+    <div className="variation-pairs">
+      <div className="variation-pairs-head">
+        <div>
+          <h5>Variation pairs</h5>
+          <p>Add only when another baseline/revised pair represents a different layout or document family variation.</p>
+        </div>
+        <button
+          type="button"
+          className="secondary-action compact"
+          onClick={() => onChange([...pairs, emptyVariationPair()])}
+          disabled={pairs.length >= 5}
+        >
+          Add pair
+        </button>
+      </div>
+      {pairs.length ? (
+        <div className="variation-pair-list">
+          {pairs.map((pair, index) => (
+            <div className="variation-pair-row" key={pair.id}>
+              <strong>Variation {index + 1}</strong>
+              <label>
+                Baseline
+                <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => updatePair(pair.id, { baseline: e.target.files?.[0] || null })} />
+              </label>
+              <label>
+                Revised
+                <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.png,.jpg,.jpeg,.tif,.tiff" onChange={(e) => updatePair(pair.id, { revised: e.target.files?.[0] || null })} />
+              </label>
+              <button type="button" className="ghost-action compact" onClick={() => removePair(pair.id)}>
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <span className="variation-empty">No variation pairs added.</span>
+      )}
+    </div>
+  );
 }
 
 function AnalysisPreviewCard({ data }) {

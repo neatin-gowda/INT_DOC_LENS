@@ -2970,6 +2970,56 @@ export const css = `
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
   }
+  .sample-pair-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .variation-pairs {
+    display: grid;
+    gap: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    border-radius: var(--radius-md);
+    padding: 12px;
+  }
+  .variation-pairs-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .variation-pairs-head h5 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 650;
+  }
+  .variation-pairs-head p,
+  .variation-empty {
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+  .variation-pair-list {
+    display: grid;
+    gap: 9px;
+  }
+  .variation-pair-row {
+    display: grid;
+    grid-template-columns: minmax(90px, .45fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: end;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    border-radius: var(--radius-md);
+    padding: 10px;
+  }
+  .variation-pair-row strong {
+    color: var(--text-primary);
+    font-size: 13px;
+    align-self: center;
+  }
   .admin-profile-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3018,6 +3068,8 @@ export const css = `
     .analysis-grid,
     .admin-config-grid,
     .sample-upload-grid,
+    .sample-pair-grid,
+    .variation-pair-row,
     .admin-profile-grid {
       grid-template-columns: 1fr;
     }

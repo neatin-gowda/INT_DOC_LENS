@@ -310,7 +310,14 @@ def _collect_sample_uploads(
     revised: Optional[UploadFile],
     variations: Optional[list[UploadFile]],
 ) -> list[tuple[str, UploadFile]]:
-    uploads = _collect_sample_uploads(baseline, revised, variations)
+    uploads: list[tuple[str, UploadFile]] = []
+    if _upload_has_file(baseline):
+        uploads.append(("baseline", baseline))
+    if _upload_has_file(revised):
+        uploads.append(("revised", revised))
+    for variation in variations or []:
+        if _upload_has_file(variation):
+            uploads.append(("variation", variation))
     return uploads
 
 
@@ -752,10 +759,16 @@ def create_dataset(req: CreateDatasetReq):
 
 
 @router.post("/admin/analyze-use-case-samples")
+@router.post("/admin/datasets/analyze-samples")
 async def analyze_use_case_samples(
     baseline: Optional[UploadFile] = File(None),
     revised: Optional[UploadFile] = File(None),
     variations: Optional[list[UploadFile]] = File(None),
+    supplier: str = Form(""),
+    family_name: str = Form(""),
+    domain: str = Form("generic"),
+    use_case_type: str = Form("comparison"),
+    expected_formats: str = Form(""),
     notes: str = Form(""),
     use_llm: bool = Form(True),
 ):
@@ -765,7 +778,14 @@ async def analyze_use_case_samples(
     if not uploads:
         raise HTTPException(400, "Attach at least one representative sample before running analysis.")
 
-    supplier, family_name = _infer_supplier_family_from_uploads(uploads, notes)
+    inferred_supplier, inferred_family_name = _infer_supplier_family_from_uploads(uploads, notes)
+    supplier = supplier.strip() or inferred_supplier
+    family_name = family_name.strip() or inferred_family_name
+    requested_formats = [
+        item.strip().lower()
+        for item in re.split(r"[,|]", expected_formats or "")
+        if item.strip()
+    ]
     family = {
         "id": "analysis",
         "supplier": supplier,
@@ -799,20 +819,25 @@ async def analyze_use_case_samples(
         )
         filenames = " ".join(str(upload.filename or "") for _role, upload in uploads)
         context = f"{supplier} {family_name} {filenames} {notes}"
-        expected_formats = sorted({_format_from_filename(upload.filename) for _role, upload in uploads})
+        detected_formats = sorted({_format_from_filename(upload.filename) for _role, upload in uploads})
+        final_formats = _clean_list(
+            [*requested_formats, *detected_formats],
+            {"pdf", "docx", "xlsx", "xls", "xlsm", "xlsb", "csv", "tsv", "image"},
+            detected_formats or ["pdf", "docx"],
+        )
         has_pair = any(role == "baseline" for role, _upload in uploads) and any(role == "revised" for role, _upload in uploads)
         suggested_dataset = {
             "supplier": supplier,
             "family_name": family_name,
-            "domain": _infer_domain_from_context(context),
+            "domain": domain.strip() or _infer_domain_from_context(context),
             "description": _suggest_description(
                 supplier=supplier,
                 family_name=family_name,
                 merged_profile=merged_profile,
                 uploads=uploads,
             ),
-            "use_case_type": "comparison" if has_pair else "extraction",
-            "expected_formats": expected_formats or ["pdf", "docx"],
+            "use_case_type": _clean_use_case_type(use_case_type) if use_case_type else ("comparison" if has_pair else "extraction"),
+            "expected_formats": final_formats,
             "sample_plan": _suggest_sample_plan(merged_profile, uploads),
             "onboarding_notes": _suggest_onboarding_notes(merged_profile, notes),
             "learning_mode": "ai_assisted_bootstrap" if use_llm else "deterministic_first",
