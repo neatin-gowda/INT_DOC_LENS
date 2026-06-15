@@ -135,6 +135,21 @@ export function AdminWorkspace() {
     }
   };
 
+  const addLabelToRules = (label) => {
+    try {
+      const current = parseColumnRules(columnRules);
+      if (current.some((r) => r.role === label)) {
+        setNotice(`A rule for label '${label}' already exists.`);
+        return;
+      }
+      const updated = [...current, { pattern: `.*${label.toLowerCase().replace(/_/g, ".*")}.*`, role: label }];
+      setColumnRules(JSON.stringify(updated, null, 2));
+      setNotice(`Added suggested mapping rule for '${label}'. Click 'Save profile settings' to apply.`);
+    } catch {
+      setError("Column rules JSON is malformed. Please fix it before adding labels.");
+    }
+  };
+
   const saveDataset = async () => {
     if (!selectedId) return;
     setBusy("save");
@@ -383,9 +398,15 @@ export function AdminWorkspace() {
 
             <div className="admin-profile-grid">
               <ProfileSummary profile={detail.template_profile?.sample_profile} />
+              <ProfileCard title="Sample Documents" items={documents} labelKey="label" valueKey="page_count" />
+              
+              <AIReasoningSummary 
+                profile={detail.template_profile?.ai_reasoning_profile} 
+                onAddLabel={addLabelToRules} 
+              />
+              
               <ProfileCard title="Stable Keys" items={detail.template_profile?.stable_key_patterns} labelKey="name" valueKey="regex" />
               <ProfileCard title="Column Rules" items={detail.template_profile?.column_rules} labelKey="role" valueKey="pattern" />
-              <ProfileCard title="Sample Documents" items={documents} labelKey="label" valueKey="page_count" />
             </div>
           </div>
         )}
@@ -466,6 +487,91 @@ function ProfileCard({ title, items, labelKey, valueKey }) {
             <small>{String(item?.[valueKey] ?? "")}</small>
           </p>
         ))
+      )}
+    </div>
+  );
+}
+
+function AIReasoningSummary({ profile, onAddLabel }) {
+  const data = profile && typeof profile === "object" ? profile : {};
+  const rating = String(data.complexity_rating || "low").toUpperCase();
+  const conf = data.confidence_score !== undefined ? Math.round(data.confidence_score * 100) : null;
+  const reasons = Array.isArray(data.complexity_reasons) ? data.complexity_reasons : [];
+  const tips = Array.isArray(data.enhancement_tips) ? data.enhancement_tips : [];
+  const labels = Array.isArray(data.suggested_data_labels) ? data.suggested_data_labels : [];
+
+  const badgeColor = rating === "HIGH" ? "#9f2525" : rating === "MEDIUM" ? "#c45510" : "#1f7e41";
+  const badgeBg = rating === "HIGH" ? "#fff7f7" : rating === "MEDIUM" ? "#fffbf7" : "#f7fff9";
+  const badgeBorder = rating === "HIGH" ? "#f1c6c6" : rating === "MEDIUM" ? "#f7d6c1" : "#c1f1d1";
+
+  return (
+    <div className="profile-card" style={{ gridColumn: "span 2" }}>
+      <h4 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>🧠 AI Onboarding Analysis</span>
+        <span style={{
+          fontSize: 11,
+          fontWeight: 700,
+          color: badgeColor,
+          background: badgeBg,
+          border: `1px solid ${badgeBorder}`,
+          padding: "2px 8px",
+          borderRadius: 99
+        }}>
+          {rating} COMPLEXITY
+        </span>
+      </h4>
+      
+      {conf !== null && (
+        <p style={{ marginTop: 8 }}>
+          <strong>Parser Confidence Rating: {conf}%</strong>
+          <small>Estimated baseline accuracy without AI assistance</small>
+        </p>
+      )}
+
+      {reasons.length > 0 && (
+        <p style={{ marginTop: 10 }}>
+          <strong>Structural Complexity Indicators</strong>
+          <small style={{ display: "block", marginTop: 4 }}>
+            {reasons.map((r, i) => <span key={i} style={{ display: "block", color: "var(--text-primary)" }}>• {r}</span>)}
+          </small>
+        </p>
+      )}
+
+      {tips.length > 0 && (
+        <p style={{ marginTop: 10 }}>
+          <strong>Extraction Optimization Recommendations</strong>
+          <small style={{ display: "block", marginTop: 4 }}>
+            {tips.map((t, i) => <span key={i} style={{ display: "block", color: "var(--text-primary)" }}>• {t}</span>)}
+          </small>
+        </p>
+      )}
+
+      {labels.length > 0 && (
+        <p style={{ marginTop: 12 }}>
+          <strong>Suggested Data Labels (Click to map)</strong>
+          <span style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+            {labels.map((l) => (
+              <button
+                key={l}
+                type="button"
+                onClick={() => onAddLabel(l)}
+                style={{
+                  background: "var(--surface-sunken)",
+                  border: "1px solid var(--border)",
+                  color: "var(--text-primary)",
+                  borderRadius: "4px",
+                  padding: "2px 8px",
+                  fontSize: 12,
+                  fontWeight: 650,
+                  cursor: "pointer"
+                }}
+                title="Click to automatically create a mapping rule for this label"
+              >
+                + {l}
+              </button>
+            ))}
+          </span>
+        </p>
       )}
     </div>
   );

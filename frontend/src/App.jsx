@@ -23,6 +23,37 @@ import { AskDocumentsWorkspace, WorkspaceShell } from "./components/workspaceShe
 import { AdminWorkspace } from "./components/admin.jsx";
 import { useDocumentTitle } from "./theme/useDocumentTitle.js";
 
+// Import comparison workspaces
+import { ReviewReport, AccuracyImprovementTab } from "./components/feedback.jsx";
+import { QueryPanel } from "./components/chat.jsx";
+import { TablesWorkspace } from "./components/tables.jsx";
+
+function Tabs({ tab, setTab }) {
+  const items = [
+    ["viewer", "Visual review"],
+    ["report", "Review report"],
+    ["query", "Ask agent"],
+    ["accuracy", "Improve accuracy"],
+    ["tables", "Table workspace"],
+  ];
+
+  return (
+    <div className="workspace-tabs">
+      {items.map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          className={tab === key ? "active" : ""}
+          onClick={() => setTab(key)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+
 const getSession = (key, fallback) => {
   if (typeof window === "undefined") return fallback;
   try {
@@ -483,10 +514,17 @@ export default function App() {
             </div>
             <StatsBar meta={meta} />
 
+            <Tabs tab={tab} setTab={setTab} />
+
             <main className="workspace-surface">
-              <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />
+              {tab === "viewer" && <SideBySide runId={runId} meta={meta} pageNum={pageNum} setPageNum={setPageNum} />}
+              {tab === "report" && <ReviewReport runId={runId} />}
+              {tab === "query" && <QueryPanel runId={runId} />}
+              {tab === "accuracy" && <AccuracyImprovementTab runId={runId} meta={meta} />}
+              {tab === "tables" && <TablesWorkspace runId={runId} />}
             </main>
           </section>
+
         )}
 
         {workspace === "extract" && isExtractComplete && extractRunId && extractMeta && (

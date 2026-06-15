@@ -431,8 +431,21 @@ def _pair_sorted_candidates(
 
 def _sequence_alignment_score(b: Block, t: Block) -> float:
     score = _semantic_match_score(b, t)
-    if _canonical_text(b.text) == _canonical_text(t.text):
+    
+    b_norm = _canonical_text(b.text)
+    t_norm = _canonical_text(t.text)
+    if b_norm == t_norm:
         score += 0.05
+    else:
+        if len(b_norm.split()) <= 3 or len(t_norm.split()) <= 3:
+            score -= 0.50
+        else:
+            ratio = fuzz.ratio(b_norm, t_norm) / 100.0 if (b_norm and t_norm) else 0.0
+            if ratio >= 0.82:
+                score += 0.05 * ratio
+            else:
+                score -= 0.50 * (1.0 - ratio)
+            
     if _page_sequence_affinity(b, t) >= 0.75:
         score += 0.06
     return min(1.0, score)

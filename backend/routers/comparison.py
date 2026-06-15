@@ -472,6 +472,25 @@ def get_native_page(run_id: str, side: str, n: int):
         "items": items,
     }
 
+def _get_content_bbox(side_blocks: list[Any], n: int, page_width: float, page_height: float) -> dict[str, float]:
+    bboxes = [b.bbox for b in side_blocks if b.page_number == n and b.bbox]
+    if not bboxes:
+        return {"x_min": 0.0, "y_min": 0.0, "x_max": page_width, "y_max": page_height}
+    
+    x0s = [box[0] for box in bboxes]
+    y0s = [box[1] for box in bboxes]
+    x1s = [box[2] for box in bboxes]
+    y1s = [box[3] for box in bboxes]
+    
+    padding = 15.0
+    return {
+        "x_min": float(max(0.0, min(x0s) - padding)),
+        "y_min": float(max(0.0, min(y0s) - padding)),
+        "x_max": float(min(page_width, max(x1s) + padding)),
+        "y_max": float(min(page_height, max(y1s) + padding))
+    }
+
+
 @router.get("/runs/{run_id}/overlay/{side}/{n}")
 def get_overlay(run_id: str, side: str, n: int):
     r = _ensure_complete(run_id)
@@ -553,5 +572,6 @@ def get_overlay(run_id: str, side: str, n: int):
         "side": side,
         "page_width": page_width,
         "page_height": page_height,
+        "content_box": _get_content_bbox(side_blocks, n, page_width, page_height),
         "regions": regions,
     }

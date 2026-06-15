@@ -83,8 +83,41 @@ def discover(pdf_path: str, supplier: str, family_name: str, use_llm: bool = Fal
         notes=f"auto-discovered from {pdf_path}",
     )
 
+    # Deterministic base complexity tagging fallback
+    bilingual_indicators = ["descripción", "description", "código", "code", "precio", "price"]
+    has_bilingual = any(any(ind in h.lower() for ind in bilingual_indicators) for h in headings)
+    table_count = sum(len(tbls) for tbls in tables_by_page.values())
+    
+    complexity_rating = "low"
+    confidence_score = 0.90
+    complexity_reasons = []
+    suggested_data_labels = ["supplier_code", "description", "effective_date"]
+    enhancement_tips = []
+
+    if has_bilingual:
+        complexity_rating = "high"
+        confidence_score = 0.65
+        complexity_reasons.append("Bilingual text columns detected")
+        enhancement_tips.append("Bilingual layout table detected. Ensure side-by-side cells are parsed independently.")
+    
+    if table_count > 5:
+        complexity_rating = "medium" if complexity_rating == "low" else "high"
+        confidence_score = min(confidence_score, 0.75)
+        complexity_reasons.append("Multiple tabular structures found across pages")
+        enhancement_tips.append("Configure table column mapping rules in Admin Studio to establish stable keys.")
+        suggested_data_labels.extend(["pricing", "pcv_code"])
+        
+    profile.ai_reasoning_profile = {
+        "complexity_rating": complexity_rating,
+        "confidence_score": confidence_score,
+        "complexity_reasons": complexity_reasons,
+        "suggested_data_labels": sorted(list(set(suggested_data_labels))),
+        "enhancement_tips": enhancement_tips,
+        "learned_page_resolutions": {}
+    }
+
     if use_llm:
-        profile = _llm_refine(profile)
+        profile = _llm_refine(profile, lines, tables_by_page)
 
     return profile
 
@@ -97,7 +130,11 @@ def _to_loose_regex(s: str) -> str:
     return f"^{s}$"
 
 
-def _llm_refine(profile: TemplateProfile) -> TemplateProfile:
+def _llm_refine(
+    profile: TemplateProfile,
+    lines: list[Any],
+    tables_by_page: dict[int, list[dict]],
+) -> TemplateProfile:
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     api_key  = os.getenv("AZURE_OPENAI_API_KEY")
     deploy   = os.getenv("AZURE_OPENAI_DEPLOYMENT")
@@ -106,13 +143,44 @@ def _llm_refine(profile: TemplateProfile) -> TemplateProfile:
     try:
         from openai import AzureOpenAI
         client = AzureOpenAI(api_key=api_key, azure_endpoint=endpoint, api_version="2024-08-01-preview")
+        
+        # Collect sample text and tables for prompt reasoning
+        sample_text = "\n".join([ln.text for ln in lines[:150] if getattr(ln, 'text', '')])[:4000]
+        sample_tables = []
+        for p, tbls in list(tables_by_page.items())[:3]:
+            for tbl in tbls[:2]:
+                sample_tables.append({
+                    "page": p,
+                    "header": tbl.get("header"),
+                    "sample_rows": tbl.get("rows")[:2] if tbl.get("rows") else []
+                })
+        sample_tables_str = json.dumps(sample_tables, indent=2)[:3000]
+
         prompt = (
-            "You are calibrating a structured-document parser for a recurring supplier "
-            "publication. Given the auto-detected patterns below, suggest semantic labels "
-            "and prune any obvious false positives. Output JSON with keys "
-            "{'stable_key_patterns':[...], 'section_heading_patterns':[...], 'notes':str}.\n\n"
-            f"Auto-detected:\n{profile.model_dump_json(indent=2)}"
+            "You are an expert document intelligence engineer analyzing a supplier publication.\n"
+            "Based on the sample text, headings, and tables extracted below, analyze the document structure and provide:\n"
+            "1. Complexity Rating ('low', 'medium', or 'high').\n"
+            "2. Confidence Score (estimated extraction confidence from 0.0 to 1.0 using standard parsing).\n"
+            "3. Complexity Reasons (list of structural challenges found, e.g. bilingual columns, layout tables, nested headers, scanned text).\n"
+            "4. Suggested Data Labels (reusable extraction tags like 'pcv_code', 'base_price', 'effective_date').\n"
+            "5. Enhancement Tips (specific configuration tips to improve deterministic parsing).\n"
+            "6. Stable key patterns and section heading patterns.\n\n"
+            "Output JSON only with keys:\n"
+            "{\n"
+            "  \"complexity_rating\": str,\n"
+            "  \"confidence_score\": float,\n"
+            "  \"complexity_reasons\": list[str],\n"
+            "  \"suggested_data_labels\": list[str],\n"
+            "  \"enhancement_tips\": list[str],\n"
+            "  \"stable_key_patterns\": [{\"name\": str, \"regex\": str, \"scope_path\": str}],\n"
+            "  \"section_heading_patterns\": list[str],\n"
+            "  \"notes\": str\n"
+            "}\n\n"
+            f"--- SAMPLE TEXT ---\n{sample_text}\n\n"
+            f"--- SAMPLE TABLES ---\n{sample_tables_str}\n\n"
+            f"--- AUTO-DETECTED PATTERNS ---\n{profile.model_dump_json()}"
         )
+
         resp = client.chat.completions.create(
             model=deploy,
             messages=[{"role":"system","content":"Output JSON only."},{"role":"user","content":prompt}],
@@ -126,6 +194,15 @@ def _llm_refine(profile: TemplateProfile) -> TemplateProfile:
             profile.section_heading_patterns = data["section_heading_patterns"]
         if "notes" in data:
             profile.notes = data["notes"]
+
+        profile.ai_reasoning_profile = {
+            "complexity_rating": data.get("complexity_rating", "low"),
+            "confidence_score": float(data.get("confidence_score", 0.85)),
+            "complexity_reasons": data.get("complexity_reasons", []),
+            "suggested_data_labels": data.get("suggested_data_labels", []),
+            "enhancement_tips": data.get("enhancement_tips", []),
+            "learned_page_resolutions": {}
+        }
     except Exception as exc:
         profile.notes += f" (LLM refine failed: {exc})"
     return profile

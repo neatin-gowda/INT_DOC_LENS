@@ -7,7 +7,16 @@ import {
   nativeHighlightStyle,
   displayCell,
   isInternalColumn,
+  mergeReviewRows,
+  rowChangeType,
+  ChangeBadge,
+  friendlyCitation,
+  impactRank,
+  needsReview,
+  normalizeConfidence,
+  trim,
 } from "./common.jsx";
+
 
 export function SideBySide({ runId, meta, pageNum, setPageNum }) {
   const basePages = meta.base_format && meta.base_format !== "pdf" ? meta.base_native_pages || meta.n_pages_base || 1 : meta.n_pages_base || 1;
@@ -16,6 +25,7 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
   const [basePage, setBasePage] = useState(pageNum);
   const [targetPage, setTargetPage] = useState(pageNum);
   const [zoom, setZoom] = useState(100);
+  const [cropMargins, setCropMargins] = useState(false);
   const [syncScroll, setSyncScroll] = useState(true);
   const leftScrollRef = useRef(null);
   const rightScrollRef = useRef(null);
@@ -24,6 +34,56 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
     setBasePage(pageNum);
     setTargetPage(pageNum);
   }, [runId, pageNum]);
+
+  const [summaryRows, setSummaryRows] = useState(null);
+  const [showSummaryPanel, setShowSummaryPanel] = useState(true);
+
+  // Fetch summary and diffs for interactive jumps
+  useEffect(() => {
+    setSummaryRows(null);
+    Promise.all([
+      fetch(`${API}/runs/${runId}/summary`).then(async (r) => {
+        if (!r.ok) throw new Error("Failed to load summary");
+        return r.json();
+      }),
+      fetch(`${API}/runs/${runId}/diff?limit=500`).then(async (r) => {
+        if (!r.ok) return { diffs: [] };
+        return r.json();
+      }),
+    ])
+      .then(([summaryData, diffData]) => {
+        const summaryRows = Array.isArray(summaryData) ? summaryData : summaryData.rows || summaryData.summary || [];
+        setSummaryRows(mergeReviewRows(summaryRows, diffData.diffs || []));
+      })
+      .catch((err) => {
+        console.error("Failed to build quick summary in side-by-side viewer", err);
+      });
+  }, [runId]);
+
+  // Extract key changes for 5-minute audit
+  const keyInsights = React.useMemo(() => {
+    if (!summaryRows) return [];
+    const list = (summaryRows || []).filter((row) => row.change || row.description || row.before || row.after);
+    const priority = [...list].sort((a, b) => {
+      const ai = impactRank(a.impact) + (needsReview(a) ? 2 : 0) + (normalizeConfidence(a.confidence) || 0);
+      const bi = impactRank(b.impact) + (needsReview(b) ? 2 : 0) + (normalizeConfidence(b.confidence) || 0);
+      return bi - ai;
+    });
+    return priority.slice(0, 8); // top 8 critical changes
+  }, [summaryRows]);
+
+  const parsePageFromCitation = (citation) => {
+    if (!citation) return null;
+    const match = citation.match(/p\.\s*(\d+)/i) || citation.match(/page\s*(\d+)/i) || citation.match(/(\d+)/);
+    if (match) {
+      const p = parseInt(match[1], 10);
+      if (!isNaN(p) && p >= 1 && p <= maxPages) {
+        return p;
+      }
+    }
+    return null;
+  };
+
 
   useEffect(() => {
     if (!syncScroll) return undefined;
@@ -85,10 +145,117 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
           <input type="checkbox" checked={syncScroll} onChange={(event) => setSyncScroll(event.target.checked)} />
           <span>Sync scroll</span>
         </label>
+        <label className="viewer-sync-toggle" style={{ marginLeft: 8 }}>
+          <input type="checkbox" checked={cropMargins} onChange={(event) => setCropMargins(event.target.checked)} />
+          <span>Smart crop</span>
+        </label>
         <Legend />
       </div>
 
+      {keyInsights.length > 0 && showSummaryPanel && (
+        <div style={{
+          background: "var(--surface-raised)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-lg)",
+          padding: "14px 16px",
+          marginBottom: 16,
+          boxShadow: "var(--shadow-soft)"
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: 15, display: "flex", alignItems: "center", gap: 6 }}>
+              <span>💡 Key Changes Summary</span>
+              <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", background: "var(--surface-sunken)", padding: "2px 8px", borderRadius: 99 }}>
+                Quick Review Panel
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowSummaryPanel(false)}
+              style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
+            >
+              Hide panel
+            </button>
+          </div>
+
+          <p style={{ margin: "0 0 12px", color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.4 }}>
+            Below are the top <strong>{keyInsights.length} most critical changes</strong> detected between versions. 
+            Click the verification button next to any item to instantly jump both documents to that page for side-by-side confirmation.
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+            {keyInsights.map((row, i) => {
+              const targetPage = parsePageFromCitation(row.citation);
+              return (
+                <div key={i} style={{
+                  display: "flex",
+                  alignItems: "start",
+                  gap: 12,
+                  padding: "8px 10px",
+                  background: "var(--surface-sunken)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-md)",
+                  fontSize: 13
+                }}>
+                  <ChangeBadge type={rowChangeType(row)} />
+                  <div style={{ flex: 1, color: "var(--text-primary)", lineHeight: 1.4 }} dir="auto">
+                    <span style={{ fontWeight: 700, color: "var(--text-primary)" }} dir="auto">
+                      {trim(row.feature || row.item || row.area || "Specification Item", 120)}: 
+                    </span>{" "}
+                    <span dir="auto">{trim(row.change || row.description || row.before || row.after || "Value updated.", 260)}</span>
+                  </div>
+                  {targetPage ? (
+                    <button
+                      type="button"
+                      onClick={() => goBoth(targetPage)}
+                      style={{
+                        alignSelf: "center",
+                        background: "var(--brand-orange)",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "var(--radius-md)",
+                        padding: "4px 8px",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Verify Page {targetPage} →
+                    </button>
+                  ) : row.citation ? (
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)", alignSelf: "center", background: "var(--surface-sunken)", padding: "2px 6px", borderRadius: 4 }}>
+                      {friendlyCitation(row.citation)}
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {keyInsights.length > 0 && !showSummaryPanel && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <button
+            onClick={() => setShowSummaryPanel(true)}
+            style={{
+              background: "var(--surface-raised)",
+              border: "1px solid var(--border)",
+              color: "var(--text-primary)",
+              borderRadius: "var(--radius-md)",
+              padding: "4px 10px",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer"
+            }}
+          >
+            💡 Show Key Changes Summary ({keyInsights.length})
+          </button>
+        </div>
+      )}
+
       <div className="viewer-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14 }}>
+
         <PageView
           runId={runId}
           side="base"
@@ -100,6 +267,7 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
           format={meta.base_format}
           zoom={zoom}
           scrollRef={leftScrollRef}
+          cropMargins={cropMargins}
         />
         <PageView
           runId={runId}
@@ -112,6 +280,7 @@ export function SideBySide({ runId, meta, pageNum, setPageNum }) {
           format={meta.target_format}
           zoom={zoom}
           scrollRef={rightScrollRef}
+          cropMargins={cropMargins}
         />
       </div>
     </div>
@@ -136,7 +305,7 @@ export function LegendChip({ label, color, border }) {
   );
 }
 
-export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, docName, format, zoom = 100, scrollRef }) {
+export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, docName, format, zoom = 100, scrollRef, cropMargins }) {
   const [overlay, setOverlay] = useState({ regions: [] });
   const [nativePage, setNativePage] = useState(null);
   const [imageState, setImageState] = useState("idle");
@@ -167,6 +336,35 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
       .then(setOverlay)
       .catch(() => setOverlay({ regions: [] }));
   }, [runId, side, pageNum, pageExists, useNativeViewer]);
+
+  const box = overlay.content_box;
+  const pw = overlay.page_width || 612;
+  const ph = overlay.page_height || 792;
+  const hasCrop = cropMargins && box && (box.x_max > box.x_min) && (box.y_max > box.y_min);
+
+  let containerStyle = { position: "relative", width: "100%" };
+  let stageStyle = { position: "relative", width: `${zoom}%` };
+
+  if (hasCrop) {
+    const c_left = box.x_min / pw;
+    const c_top = box.y_min / ph;
+    const c_width = (box.x_max - box.x_min) / pw;
+    const c_height = (box.y_max - box.y_min) / ph;
+
+    containerStyle = {
+      position: "relative",
+      overflow: "hidden",
+      width: "100%",
+      paddingTop: `${(c_height / c_width) * zoom}%`
+    };
+
+    stageStyle = {
+      position: "absolute",
+      left: `${-(c_left / c_width) * zoom}%`,
+      top: `${-(c_top / c_width) * zoom}%`,
+      width: `${(1.0 / c_width) * zoom}%`,
+    };
+  }
 
   return (
     <div className="doc-viewer-shell">
@@ -213,54 +411,56 @@ export function PageView({ runId, side, pageNum, setPageNum, totalPages, label, 
         ) : useNativeViewer ? (
           <NativePageView page={nativePage} side={side} />
         ) : (
-          <div className="pdf-zoom-stage" style={{ width: `${zoom}%` }}>
-            {imageState === "loading" && (
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", background: "var(--surface-raised)", zIndex: 1, fontWeight: 600 }}>
-                Loading page {pageNum}
-              </div>
-            )}
+          <div style={containerStyle}>
+            <div className="pdf-zoom-stage" style={stageStyle}>
+              {imageState === "loading" && (
+                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", background: "var(--surface-raised)", zIndex: 1, fontWeight: 600 }}>
+                  Loading page {pageNum}
+                </div>
+              )}
 
-            <img
-              key={`${side}-${pageNum}`}
-              src={`${API}/runs/${runId}/pages/${side}/${pageNum}`}
-              onLoad={() => setImageState("ready")}
-              onError={() => setImageState("error")}
-              style={{ display: "block", width: "100%", height: "auto" }}
-              alt={`${side} page ${pageNum}`}
-            />
+              <img
+                key={`${side}-${pageNum}`}
+                src={`${API}/runs/${runId}/pages/${side}/${pageNum}`}
+                onLoad={() => setImageState("ready")}
+                onError={() => setImageState("error")}
+                style={{ display: "block", width: "100%", height: "auto" }}
+                alt={`${side} page ${pageNum}`}
+              />
 
-            {imageState === "error" && (
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.DELETED.text, background: "#fff5f5", zIndex: 2, fontWeight: 600 }}>
-                Could not load page {pageNum}
-              </div>
-            )}
+              {imageState === "error" && (
+                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.DELETED.text, background: "#fff5f5", zIndex: 2, fontWeight: 600 }}>
+                  Could not load page {pageNum}
+                </div>
+              )}
 
-            {(overlay.regions || []).map((r, i) => {
-              const [x0, y0, x1, y1] = r.bbox || [0, 0, 0, 0];
-              const c = COLORS[String(r.change_type || "").toUpperCase()] || COLORS.MODIFIED;
-              const pageWidth = r.page_width || overlay.page_width || 612;
-              const pageHeight = r.page_height || overlay.page_height || 792;
-              const borderColor = r.border_color || c.border;
-              const fillColor = r.color || c.bg;
+              {(overlay.regions || []).map((r, i) => {
+                const [x0, y0, x1, y1] = r.bbox || [0, 0, 0, 0];
+                const c = COLORS[String(r.change_type || "").toUpperCase()] || COLORS.MODIFIED;
+                const pageWidth = r.page_width || overlay.page_width || 612;
+                const pageHeight = r.page_height || overlay.page_height || 792;
+                const borderColor = r.border_color || c.border;
+                const fillColor = r.color || c.bg;
 
-              return (
-                <div
-                  key={i}
-                  title={`${r.change_type || "change"} ${r.stable_key || ""} (${r.block_type || "block"})`}
-                  style={{
-                    position: "absolute",
-                    left: `${(x0 / pageWidth) * 100}%`,
-                    top: `${(y0 / pageHeight) * 100}%`,
-                    width: `${Math.max(0.15, ((x1 - x0) / pageWidth) * 100)}%`,
-                    height: `${Math.max(0.15, ((y1 - y0) / pageHeight) * 100)}%`,
-                    background: fillColor,
-                    border: `1px solid ${borderColor}`,
-                    boxShadow: `inset 0 0 0 1px ${fillColor}`,
-                    pointerEvents: "auto",
-                  }}
-                />
-              );
-            })}
+                return (
+                  <div
+                    key={i}
+                    title={`${r.change_type || "change"} ${r.stable_key || ""} (${r.block_type || "block"})`}
+                    style={{
+                      position: "absolute",
+                      left: `${(x0 / pageWidth) * 100}%`,
+                      top: `${(y0 / pageHeight) * 100}%`,
+                      width: `${Math.max(0.15, ((x1 - x0) / pageWidth) * 100)}%`,
+                      height: `${Math.max(0.15, ((y1 - y0) / pageHeight) * 100)}%`,
+                      background: fillColor,
+                      border: `1px solid ${borderColor}`,
+                      boxShadow: `inset 0 0 0 1px ${fillColor}`,
+                      pointerEvents: "auto",
+                    }}
+                  />
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

@@ -273,11 +273,19 @@ def _merge_learned_profile(
     existing_samples = list(merged.get("sample_documents") or [])
     merged["sample_documents"] = [*existing_samples, *sample_documents]
 
+    # Initialize lists to aggregate AI reasoning profiles
+    ai_reasons = []
+    enhancements = []
+    labels = set()
+    complexity = "low"
+    confidence = 1.0
+    resolutions = {}
+
     for profile in learned_profiles:
         if not isinstance(profile, dict):
             continue
         for key, value in profile.items():
-            if key in {"column_rules", "stable_key_patterns"}:
+            if key in {"column_rules", "stable_key_patterns", "ai_reasoning_profile"}:
                 continue
             if key not in merged or merged.get(key) in (None, "", [], {}):
                 merged[key] = value
@@ -292,6 +300,41 @@ def _merge_learned_profile(
             list(profile.get("stable_key_patterns") or []),
             "regex",
         )
+
+        # Aggregate AI reasoning fields if present
+        ai_res = profile.get("ai_reasoning_profile") or {}
+        if ai_res:
+            ai_reasons.extend(ai_res.get("complexity_reasons") or [])
+            enhancements.extend(ai_res.get("enhancement_tips") or [])
+            labels.update(ai_res.get("suggested_data_labels") or [])
+            
+            comp = str(ai_res.get("complexity_rating") or "low").lower()
+            if comp == "high" or (comp == "medium" and complexity == "low"):
+                complexity = comp
+            
+            try:
+                conf = float(ai_res.get("confidence_score") or 1.0)
+            except (ValueError, TypeError):
+                conf = 1.0
+            confidence = min(confidence, conf)
+            
+            res = ai_res.get("learned_page_resolutions") or {}
+            if res:
+                resolutions.update(res)
+
+    # Clean duplicates
+    ai_reasons = list(dict.fromkeys(ai_reasons))
+    enhancements = list(dict.fromkeys(enhancements))
+    labels = sorted(list(labels))
+
+    merged["ai_reasoning_profile"] = {
+        "complexity_rating": complexity,
+        "confidence_score": round(confidence, 2),
+        "complexity_reasons": ai_reasons,
+        "suggested_data_labels": labels,
+        "enhancement_tips": enhancements,
+        "learned_page_resolutions": resolutions,
+    }
 
     pages = [int(doc.get("page_count") or 0) for doc in merged["sample_documents"] if int(doc.get("page_count") or 0) > 0]
     roles = sorted({str(doc.get("sample_role") or "variation") for doc in merged["sample_documents"]})

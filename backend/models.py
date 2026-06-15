@@ -71,6 +71,7 @@ class TemplateProfile(BaseModel):
         default_factory=lambda: ["stable_key", "path", "embedding"]
     )
     column_rules: list[dict[str, str]] = Field(default_factory=list)
+    ai_reasoning_profile: dict[str, Any] = Field(default_factory=dict)
     notes: str = ""
 
 
