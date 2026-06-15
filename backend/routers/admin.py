@@ -416,6 +416,8 @@ def _aggregate_profile_usage(profiles: list[dict[str, Any]]) -> dict[str, Any]:
         "prompt_tokens": 0,
         "completion_tokens": 0,
         "total_tokens": 0,
+        "estimated_prompt_tokens": 0,
+        "prompt_chars": 0,
         "operations": [],
     }
     for profile in profiles:
@@ -427,6 +429,8 @@ def _aggregate_profile_usage(profiles: list[dict[str, Any]]) -> dict[str, Any]:
         usage["prompt_tokens"] += int(item.get("prompt_tokens") or 0)
         usage["completion_tokens"] += int(item.get("completion_tokens") or 0)
         usage["total_tokens"] += int(item.get("total_tokens") or 0)
+        usage["estimated_prompt_tokens"] += int(item.get("estimated_prompt_tokens") or 0)
+        usage["prompt_chars"] += int(item.get("prompt_chars") or 0)
         for operation in item.get("operations") or []:
             usage["operations"].append(operation)
     return usage
@@ -473,6 +477,15 @@ def _merge_learned_profile(
     complexity = "low"
     confidence = 1.0
     resolutions = {}
+    usage = {
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "estimated_prompt_tokens": 0,
+        "prompt_chars": 0,
+        "operations": [],
+    }
 
     for profile in learned_profiles:
         if not isinstance(profile, dict):
@@ -514,6 +527,15 @@ def _merge_learned_profile(
             res = ai_res.get("learned_page_resolutions") or {}
             if res:
                 resolutions.update(res)
+            item = _json_dict(ai_res.get("usage"))
+            if item:
+                usage["calls"] += int(item.get("calls") or 0)
+                usage["prompt_tokens"] += int(item.get("prompt_tokens") or 0)
+                usage["completion_tokens"] += int(item.get("completion_tokens") or 0)
+                usage["total_tokens"] += int(item.get("total_tokens") or 0)
+                usage["estimated_prompt_tokens"] += int(item.get("estimated_prompt_tokens") or 0)
+                usage["prompt_chars"] += int(item.get("prompt_chars") or 0)
+                usage["operations"].extend(item.get("operations") or [])
 
     # Clean duplicates
     ai_reasons = list(dict.fromkeys(ai_reasons))
@@ -527,6 +549,7 @@ def _merge_learned_profile(
         "suggested_data_labels": labels,
         "enhancement_tips": enhancements,
         "learned_page_resolutions": resolutions,
+        "usage": usage,
     }
 
     pages = [int(doc.get("page_count") or 0) for doc in merged["sample_documents"] if int(doc.get("page_count") or 0) > 0]
@@ -623,6 +646,7 @@ def resolve_dataset_for_principal(family_id: str, principal: Optional[Principal]
 
 
 @router.get("/datasets")
+@router.get("/api/datasets")
 def list_accessible_datasets():
     principal = current_principal()
     if not db_enabled():
@@ -654,6 +678,7 @@ def list_accessible_datasets():
 
 
 @router.get("/admin/datasets")
+@router.get("/api/admin/datasets")
 def list_admin_datasets():
     principal = current_principal()
     _check_admin(principal)
@@ -693,6 +718,7 @@ def list_admin_datasets():
 
 
 @router.post("/admin/datasets")
+@router.post("/api/admin/datasets")
 def create_dataset(req: CreateDatasetReq):
     principal = current_principal()
     _check_admin(principal)
@@ -783,6 +809,8 @@ def create_dataset(req: CreateDatasetReq):
 
 @router.post("/admin/analyze-use-case-samples")
 @router.post("/admin/datasets/analyze-samples")
+@router.post("/api/admin/analyze-use-case-samples")
+@router.post("/api/admin/datasets/analyze-samples")
 async def analyze_use_case_samples(
     baseline: Optional[UploadFile] = File(None),
     revised: Optional[UploadFile] = File(None),
@@ -884,6 +912,7 @@ async def analyze_use_case_samples(
 
 
 @router.get("/admin/datasets/{family_id}")
+@router.get("/api/admin/datasets/{family_id}")
 def get_dataset(family_id: str):
     principal = current_principal()
     _check_admin(principal)
@@ -919,6 +948,7 @@ def get_dataset(family_id: str):
 
 
 @router.put("/admin/datasets/{family_id}")
+@router.put("/api/admin/datasets/{family_id}")
 def update_dataset(family_id: str, req: UpdateDatasetReq):
     principal = current_principal()
     _check_admin(principal)
@@ -1094,6 +1124,7 @@ def update_dataset(family_id: str, req: UpdateDatasetReq):
 
 
 @router.delete("/admin/datasets/{family_id}")
+@router.delete("/api/admin/datasets/{family_id}")
 def delete_dataset(family_id: str):
     principal = current_principal()
     _check_admin(principal)
@@ -1141,6 +1172,7 @@ def delete_dataset(family_id: str):
 
 
 @router.post("/admin/datasets/{family_id}/samples")
+@router.post("/api/admin/datasets/{family_id}/samples")
 async def bootstrap_dataset_samples(
     family_id: str,
     baseline: Optional[UploadFile] = File(None),
@@ -1307,6 +1339,7 @@ async def bootstrap_dataset_samples(
 
 
 @router.post("/admin/datasets/{family_id}/bootstrap")
+@router.post("/api/admin/datasets/{family_id}/bootstrap")
 async def bootstrap_dataset(
     family_id: str,
     file: UploadFile = File(...),
@@ -1444,6 +1477,7 @@ async def bootstrap_dataset(
 
 
 @router.get("/admin/datasets/{family_id}/documents")
+@router.get("/api/admin/datasets/{family_id}/documents")
 def list_dataset_documents(family_id: str):
     principal = current_principal()
     _check_admin(principal)

@@ -195,6 +195,7 @@ def _llm_refine(
             f"--- AUTO-DETECTED PATTERNS ---\n{profile.model_dump_json()}"
         )
 
+        estimated_prompt_tokens = max(1, len(prompt) // 4)
         resp = client.chat.completions.create(
             model=deploy,
             messages=[{"role":"system","content":"Output JSON only."},{"role":"user","content":prompt}],
@@ -209,6 +210,10 @@ def _llm_refine(
         if "notes" in data:
             profile.notes = data["notes"]
 
+        usage = usage_from_response(resp, operation="admin_schema_discovery", model=deploy)
+        usage["estimated_prompt_tokens"] = estimated_prompt_tokens
+        usage["prompt_chars"] = len(prompt)
+
         profile.ai_reasoning_profile = {
             "complexity_rating": data.get("complexity_rating", "low"),
             "confidence_score": float(data.get("confidence_score", 0.85)),
@@ -217,7 +222,7 @@ def _llm_refine(
             "enhancement_tips": data.get("enhancement_tips", []),
             "learned_page_resolutions": {},
             "selected_model": deploy,
-            "usage": usage_from_response(resp, operation="admin_schema_discovery", model=deploy),
+            "usage": usage,
         }
     except Exception as exc:
         profile.notes += f" (LLM refine failed: {exc})"

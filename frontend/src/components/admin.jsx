@@ -60,6 +60,7 @@ export function AdminWorkspace() {
   const [selectedModel, setSelectedModel] = useState("");
   const [analysisPreview, setAnalysisPreview] = useState(null);
   const [analysisRun, setAnalysisRun] = useState(null);
+  const [createRun, setCreateRun] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sampleFiles, setSampleFiles] = useState({ baseline: null, revised: null, variations: [] });
   const [documents, setDocuments] = useState([]);
@@ -92,7 +93,7 @@ export function AdminWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (busy !== "analyze") return undefined;
+    if (busy !== "analyze" && busy !== "create") return undefined;
     const startedAt = Date.now();
     setElapsedSeconds(0);
     const timer = window.setInterval(() => {
@@ -149,25 +150,47 @@ export function AdminWorkspace() {
     setBusy("create");
     setError("");
     setNotice("");
+    setCreateRun({
+      status: "running",
+      stage: "create",
+      submitted: sampleStats(initialSampleFiles),
+      startedAt: new Date().toISOString(),
+      error: "",
+    });
     try {
-      const data = await apiJson("/admin/datasets", {
+      const data = await postDatasetJson("/admin/datasets", {
         method: "POST",
         headers: headers(),
         body: JSON.stringify(form),
       });
       let sampleMessage = "";
       if (data.id && hasAnySample(initialSampleFiles)) {
+        setCreateRun((prev) => ({ ...(prev || {}), stage: "samples" }));
         await uploadSamples(data.id, initialSampleFiles, form.onboarding_notes, form.learning_mode === "ai_assisted_bootstrap");
         sampleMessage = " Sample documents learned and model profile bootstrapped.";
       }
       setNotice(`Use case created.${sampleMessage}`);
+      setCreateRun((prev) => ({
+        ...(prev || {}),
+        status: "success",
+        stage: "done",
+        datasetId: data.id,
+        finishedAt: new Date().toISOString(),
+      }));
       setForm(emptyForm);
       setInitialSampleFiles({ baseline: null, revised: null, variationPairs: [] });
       setAnalysisPreview(null);
       await loadDatasets();
       if (data.id) await selectDataset(data.id);
     } catch (err) {
-      setError(friendlyFetchError(err));
+      const message = friendlyFetchError(err);
+      setError(message);
+      setCreateRun((prev) => ({
+        ...(prev || {}),
+        status: "failed",
+        finishedAt: new Date().toISOString(),
+        error: message,
+      }));
     } finally {
       setBusy("");
     }
@@ -239,13 +262,25 @@ export function AdminWorkspace() {
     flattenVariationFiles(files).forEach((file) => formData.append("variations", file));
     formData.append("notes", notes || "");
     formData.append("use_llm", String(useLlm));
-    const resp = await fetch(`${API}/admin/datasets/${datasetId}/samples`, {
-      method: "POST",
-      headers: { "X-User-Role": window.sessionStorage.getItem("simulated_role") || "platform_admin" },
-      body: formData,
-    });
+    const resp = await postDatasetSamples(datasetId, formData);
     if (!resp.ok) throw new Error(await readResponseError(resp));
     return resp.json();
+  };
+
+  const postDatasetSamples = async (datasetId, formData) => {
+    const makeBody = () => {
+      const clone = new FormData();
+      for (const [key, value] of formData.entries()) clone.append(key, value);
+      return clone;
+    };
+    const request = (path) => fetch(`${API}${path}`, {
+      method: "POST",
+      headers: { "X-User-Role": window.sessionStorage.getItem("simulated_role") || "platform_admin" },
+      body: makeBody(),
+    });
+    const primary = await request(`/admin/datasets/${datasetId}/samples`);
+    if (primary.status !== 404) return primary;
+    return request(`/api/admin/datasets/${datasetId}/samples`);
   };
 
   const analyzeInitialSamples = async () => {
@@ -267,27 +302,12 @@ export function AdminWorkspace() {
       error: "",
     });
     try {
-      const formData = new FormData();
-      if (initialSampleFiles.baseline) formData.append("baseline", initialSampleFiles.baseline);
-      if (initialSampleFiles.revised) formData.append("revised", initialSampleFiles.revised);
-      flattenVariationFiles(initialSampleFiles).forEach((file) => formData.append("variations", file));
-      formData.append("supplier", form.supplier || "");
-      formData.append("family_name", form.family_name || "");
-      formData.append("domain", form.domain || "generic");
-      formData.append("use_case_type", form.use_case_type || "comparison");
-      formData.append("expected_formats", (form.expected_formats || []).join(","));
-      formData.append("notes", form.onboarding_notes || form.sample_plan || "");
-      formData.append("use_llm", String(useAiAnalysis));
-      formData.append("model_name", useAiAnalysis ? selectedModel : "");
-
-      const resp = await fetch(`${API}/admin/analyze-use-case-samples`, {
-        method: "POST",
-        headers: { "X-User-Role": window.sessionStorage.getItem("simulated_role") || "platform_admin" },
-        body: formData,
+      const resp = await postAnalyzeSamples({
+        files: initialSampleFiles,
+        form,
+        useAiAnalysis,
+        selectedModel,
       });
-      if (resp.status === 404) {
-        throw new Error("Sample analyzer endpoint was not found in the backend. Deploy the latest backend image that includes POST /admin/analyze-use-case-samples.");
-      }
       if (!resp.ok) throw new Error(await readResponseError(resp));
       const data = await resp.json();
       const suggested = data.suggested_dataset || {};
@@ -505,14 +525,13 @@ export function AdminWorkspace() {
             <button type="submit" className="primary-action" disabled={busy === "create"}>
               {busy === "create" ? "Creating" : "Create use case"}
             </button>
+            <CreateRunPanel run={createRun} elapsedSeconds={elapsedSeconds} />
           </form>
         </main>
       </div>
 
-      <section className="admin-panel">
-        {!detail ? (
-          <EmptyState label="Select a use case to configure profile learning." />
-        ) : (
+      {detail ? (
+        <section className="admin-panel">
           <div className="admin-detail">
             <div className="admin-detail-head">
               <div>
@@ -601,8 +620,8 @@ export function AdminWorkspace() {
               <ProfileCard title="Column Rules" items={detail.template_profile?.column_rules} labelKey="role" valueKey="pattern" />
             </div>
           </div>
-        )}
-      </section>
+        </section>
+      ) : null}
     </section>
   );
 }
@@ -659,6 +678,8 @@ function collectAnalysisUsage(data) {
       prompt_tokens: Number(data.usage.prompt_tokens || 0),
       completion_tokens: Number(data.usage.completion_tokens || 0),
       total_tokens: Number(data.usage.total_tokens || 0),
+      estimated_prompt_tokens: Number(data.usage.estimated_prompt_tokens || 0),
+      prompt_chars: Number(data.usage.prompt_chars || 0),
       calls: Number(data.usage.calls || 0),
     };
   }
@@ -670,8 +691,44 @@ function collectAnalysisUsage(data) {
     prompt_tokens: acc.prompt_tokens + Number(item.prompt_tokens || 0),
     completion_tokens: acc.completion_tokens + Number(item.completion_tokens || 0),
     total_tokens: acc.total_tokens + Number(item.total_tokens || 0),
+    estimated_prompt_tokens: acc.estimated_prompt_tokens + Number(item.estimated_prompt_tokens || 0),
+    prompt_chars: acc.prompt_chars + Number(item.prompt_chars || 0),
     calls: acc.calls + Number(item.calls || (item.total_tokens ? 1 : 0)),
-  }), { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, calls: 0 });
+  }), { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, estimated_prompt_tokens: 0, prompt_chars: 0, calls: 0 });
+}
+
+function buildAnalyzeSamplesFormData({ files, form, useAiAnalysis, selectedModel }) {
+  const formData = new FormData();
+  if (files.baseline) formData.append("baseline", files.baseline);
+  if (files.revised) formData.append("revised", files.revised);
+  flattenVariationFiles(files).forEach((file) => formData.append("variations", file));
+  formData.append("supplier", form.supplier || "");
+  formData.append("family_name", form.family_name || "");
+  formData.append("domain", form.domain || "generic");
+  formData.append("use_case_type", form.use_case_type || "comparison");
+  formData.append("expected_formats", (form.expected_formats || []).join(","));
+  formData.append("notes", form.onboarding_notes || form.sample_plan || "");
+  formData.append("use_llm", String(useAiAnalysis));
+  formData.append("model_name", useAiAnalysis ? selectedModel : "");
+  return formData;
+}
+
+async function postAnalyzeSamples(payload) {
+  const request = async (path) => fetch(`${API}${path}`, {
+    method: "POST",
+    headers: { "X-User-Role": window.sessionStorage.getItem("simulated_role") || "platform_admin" },
+    body: buildAnalyzeSamplesFormData(payload),
+  });
+
+  const primary = await request("/admin/analyze-use-case-samples");
+  if (primary.status !== 404) return primary;
+
+  const fallback = await request("/admin/datasets/analyze-samples");
+  if (fallback.status !== 404) return fallback;
+
+  throw new Error(
+    "Sample analyzer route is missing in the deployed backend revision. This is not a database schema issue. Rebuild and deploy the backend image that includes backend/routers/admin.py with POST /admin/analyze-use-case-samples."
+  );
 }
 
 function AnalysisRunPanel({ run, elapsedSeconds, useAiAnalysis, selectedModel }) {
@@ -679,6 +736,7 @@ function AnalysisRunPanel({ run, elapsedSeconds, useAiAnalysis, selectedModel })
   const stats = run.submitted || {};
   const usage = run.backendUsage || {};
   const statusLabel = run.status === "running" ? "Running" : run.status === "success" ? "Completed" : "Failed";
+  const activeIndex = run.status === "success" ? 3 : run.status === "failed" ? 1 : Math.min(3, Math.floor(elapsedSeconds / 12));
   const steps = [
     ["prepare", "Preparing upload context"],
     ["extract", "Extracting sample structure"],
@@ -697,12 +755,58 @@ function AnalysisRunPanel({ run, elapsedSeconds, useAiAnalysis, selectedModel })
       <div className="analysis-run-metrics">
         <span>{formatNumber(stats.count)} file(s)</span>
         <span>{formatBytes(stats.totalBytes)}</span>
-        <span>Est. input {formatNumber(stats.estimatedInputTokens)} tokens</span>
-        {usage.total_tokens ? <span>Actual AI {formatNumber(usage.total_tokens)} tokens</span> : null}
+        <span>Upload-size estimate {formatNumber(stats.estimatedInputTokens)} tokens</span>
+        {run.mode === "ai" ? (
+          <>
+            <span>LLM prompt est. {formatNumber(usage.estimated_prompt_tokens || 0)} tokens</span>
+            <span>Prompt {usage.prompt_tokens ? formatNumber(usage.prompt_tokens) : "not reported"}</span>
+            <span>Output {usage.completion_tokens ? formatNumber(usage.completion_tokens) : "not reported"}</span>
+            <span>Total {usage.total_tokens ? formatNumber(usage.total_tokens) : "not reported"}</span>
+            <span>Calls {formatNumber(usage.calls || 0)}</span>
+          </>
+        ) : (
+          <span>No AI tokens used</span>
+        )}
       </div>
       <div className="analysis-run-steps">
         {steps.map(([key, label], index) => (
-          <span key={key} className={run.status === "running" || run.status === "success" || index === 0 ? "active" : ""}>
+          <span
+            key={key}
+            className={`${index < activeIndex ? "done" : ""} ${index === activeIndex ? "active" : ""}`}
+          >
+            {label}
+          </span>
+        ))}
+      </div>
+      {run.error ? <p className="analysis-run-error">{run.error}</p> : null}
+    </div>
+  );
+}
+
+function CreateRunPanel({ run, elapsedSeconds }) {
+  if (!run) return null;
+  const statusLabel = run.status === "running" ? "Creating use case" : run.status === "success" ? "Use case created" : "Create failed";
+  const steps = [
+    ["create", "Saving use case metadata"],
+    ["samples", "Learning attached samples"],
+    ["done", "Opening saved use case"],
+  ];
+  const stageIndex = Math.max(0, steps.findIndex(([stage]) => stage === run.stage));
+  return (
+    <div className={`analysis-run-panel create-run ${run.status}`}>
+      <div className="analysis-run-head">
+        <div>
+          <strong>{statusLabel}</strong>
+          <span>{run.status === "running" ? `${elapsedSeconds}s elapsed` : run.finishedAt ? "Run finished" : "Waiting"}</span>
+        </div>
+        <small>{run.datasetId ? `ID ${String(run.datasetId).slice(0, 8)}` : `${formatNumber(run.submitted?.count || 0)} sample file(s)`}</small>
+      </div>
+      <div className="analysis-run-steps">
+        {steps.map(([stage, label], index) => (
+          <span
+            key={stage}
+            className={`${index < stageIndex || run.status === "success" ? "done" : ""} ${index === stageIndex && run.status === "running" ? "active" : ""}`}
+          >
             {label}
           </span>
         ))}
@@ -968,6 +1072,17 @@ async function apiJson(path, options = {}) {
   const resp = await fetch(`${API}${path}`, options);
   if (!resp.ok) throw new Error(await readResponseError(resp));
   return resp.json();
+}
+
+async function postDatasetJson(path, options = {}) {
+  const primary = await fetch(`${API}${path}`, options);
+  if (primary.status !== 404) {
+    if (!primary.ok) throw new Error(await readResponseError(primary));
+    return primary.json();
+  }
+  const fallback = await fetch(`${API}/api${path}`, options);
+  if (!fallback.ok) throw new Error(await readResponseError(fallback));
+  return fallback.json();
 }
 
 function parseColumnRules(text) {

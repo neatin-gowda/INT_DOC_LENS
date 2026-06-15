@@ -2918,6 +2918,12 @@ export const css = `
   }
   .analysis-run-steps span.active {
     border-color: color-mix(in srgb, var(--brand-orange) 38%, var(--border));
+    background: color-mix(in srgb, var(--brand-orange) 12%, var(--surface-raised));
+    color: var(--text-primary);
+  }
+  .analysis-run-steps span.done {
+    border-color: color-mix(in srgb, #1f7e41 42%, var(--border));
+    background: color-mix(in srgb, #1f7e41 10%, var(--surface-raised));
     color: var(--text-primary);
   }
   .analysis-run-error {

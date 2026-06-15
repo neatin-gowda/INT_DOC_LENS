@@ -13,6 +13,7 @@ from ..query import ai_health, query as nl_query
 router = APIRouter()
 
 @router.get("/ai-health")
+@router.get("/api/ai-health")
 def get_ai_health():
     return ai_health()
 
