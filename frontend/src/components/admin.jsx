@@ -44,6 +44,12 @@ export function AdminWorkspace() {
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [editMeta, setEditMeta] = useState({
+    supplier: "",
+    family_name: "",
+    domain: "generic",
+    description: "",
+  });
   const [guidelines, setGuidelines] = useState("");
   const [roles, setRoles] = useState([]);
   const [columnRules, setColumnRules] = useState("");
@@ -120,6 +126,12 @@ export function AdminWorkspace() {
     try {
       const data = await apiJson(`/admin/datasets/${id}`, { headers: headers() });
       setDetail(data);
+      setEditMeta({
+        supplier: data.supplier || "",
+        family_name: data.family_name || "",
+        domain: data.domain || "generic",
+        description: data.description || "",
+      });
       setGuidelines(data.prompt_guidelines || "");
       setRoles(data.allowed_roles || []);
       setProfileMeta({
@@ -235,6 +247,7 @@ export function AdminWorkspace() {
           prompt_guidelines: guidelines,
           allowed_roles: roles,
           column_rules: parseColumnRules(columnRules),
+          ...editMeta,
           ...profileMeta,
         }),
       });
@@ -353,6 +366,8 @@ export function AdminWorkspace() {
 
   const deleteDataset = async () => {
     if (!selectedId || !detail) return;
+    const confirmed = window.confirm(`Delete use case "${detail.supplier} · ${detail.family_name}"? This removes the saved model profile from Admin Studio.`);
+    if (!confirmed) return;
     setBusy("delete");
     setError("");
     setNotice("");
@@ -578,53 +593,111 @@ export function AdminWorkspace() {
           <div className="admin-detail">
             <div className="admin-detail-head">
               <div>
-                <h3>{detail.supplier} · {detail.family_name}</h3>
-                <p>{detail.description || "No description yet."}</p>
+                <h3>Refine Use Case</h3>
+                <p>Edit the saved document model, access policy, and extraction guidance without creating a duplicate use case.</p>
                 <span className="admin-model-badge">{profileMeta.use_case_type} model · {(profileMeta.expected_formats || []).join(", ")}</span>
               </div>
-              <button type="button" className="danger-action compact" onClick={deleteDataset} disabled={busy === "delete"}>
-                {busy === "delete" ? "Deleting" : "Delete"}
-              </button>
+              <div className="admin-detail-actions">
+                <button type="button" className="primary-action compact" onClick={saveDataset} disabled={busy === "save"}>
+                  {busy === "save" ? "Saving" : "Save changes"}
+                </button>
+                <button type="button" className="danger-action compact" onClick={deleteDataset} disabled={busy === "delete"}>
+                  {busy === "delete" ? "Deleting" : "Delete"}
+                </button>
+              </div>
             </div>
 
-            <div className="admin-config-grid">
-              <label>
-                Use case type
-                <select value={profileMeta.use_case_type} onChange={(e) => setProfileMeta({ ...profileMeta, use_case_type: e.target.value })}>
-                  <option value="comparison">Comparison</option>
-                  <option value="extraction">Extraction</option>
-                </select>
-              </label>
-              <label>
-                Learning mode
-                <select value={profileMeta.learning_mode} onChange={(e) => setProfileMeta({ ...profileMeta, learning_mode: e.target.value })}>
-                  {learningModes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </label>
-              <div className="admin-wide-field">
-                <FormatPicker value={profileMeta.expected_formats} onChange={(expected_formats) => setProfileMeta({ ...profileMeta, expected_formats })} />
-              </div>
-              <label>
-                Sample strategy
-                <textarea value={profileMeta.sample_plan} onChange={(e) => setProfileMeta({ ...profileMeta, sample_plan: e.target.value })} placeholder="How many samples or variations should represent this model?" />
-              </label>
-              <label>
-                Onboarding notes
-                <textarea value={profileMeta.onboarding_notes} onChange={(e) => setProfileMeta({ ...profileMeta, onboarding_notes: e.target.value })} placeholder="Business context, known table layouts, accuracy targets, and reviewer comments." />
-              </label>
-              <label>
-                Prompt and extraction guidelines
-                <textarea value={guidelines} onChange={(e) => setGuidelines(e.target.value)} placeholder="Example: prioritize PCB thickness, PCV code changes, nested pricing rows, or legal obligations." />
-              </label>
-              <label>
-                Column rules JSON
-                <textarea className="mono" value={columnRules} onChange={(e) => setColumnRules(e.target.value)} />
-              </label>
+            <div className="admin-edit-shell">
+              <section className="admin-review-card">
+                <div>
+                  <h4>Model Identity</h4>
+                  <p>These fields control how the use case appears in Compare, Extract, and Work History.</p>
+                </div>
+                <div className="admin-review-grid">
+                  <label>
+                    Supplier or entity
+                    <input value={editMeta.supplier} required onChange={(e) => setEditMeta({ ...editMeta, supplier: e.target.value })} />
+                  </label>
+                  <label>
+                    Use case or family
+                    <input value={editMeta.family_name} required onChange={(e) => setEditMeta({ ...editMeta, family_name: e.target.value })} />
+                  </label>
+                  <label>
+                    Domain
+                    <select value={editMeta.domain} onChange={(e) => setEditMeta({ ...editMeta, domain: e.target.value })}>
+                      <option value="generic">Generic</option>
+                      <option value="automotive">Automotive</option>
+                      <option value="legal">Legal</option>
+                      <option value="financial">Financial</option>
+                      <option value="hr">HR</option>
+                      <option value="engineering">Engineering</option>
+                    </select>
+                  </label>
+                  <label>
+                    Use case type
+                    <select value={profileMeta.use_case_type} onChange={(e) => setProfileMeta({ ...profileMeta, use_case_type: e.target.value })}>
+                      <option value="comparison">Comparison</option>
+                      <option value="extraction">Extraction</option>
+                    </select>
+                  </label>
+                  <label className="admin-wide-field">
+                    Description
+                    <textarea value={editMeta.description} onChange={(e) => setEditMeta({ ...editMeta, description: e.target.value })} placeholder="Describe the document family, business purpose, and expected reviewer outcome." />
+                  </label>
+                </div>
+              </section>
+
+              <section className="admin-review-card">
+                <div>
+                  <h4>Learning Profile</h4>
+                  <p>Refine how this model should learn from samples and which formats it should accept.</p>
+                </div>
+                <div className="admin-config-grid">
+                  <label>
+                    Learning mode
+                    <select value={profileMeta.learning_mode} onChange={(e) => setProfileMeta({ ...profileMeta, learning_mode: e.target.value })}>
+                      {learningModes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </label>
+                  <div className="admin-wide-field">
+                    <FormatPicker value={profileMeta.expected_formats} onChange={(expected_formats) => setProfileMeta({ ...profileMeta, expected_formats })} />
+                  </div>
+                  <label>
+                    Sample strategy
+                    <textarea value={profileMeta.sample_plan} onChange={(e) => setProfileMeta({ ...profileMeta, sample_plan: e.target.value })} placeholder="How many samples or variations should represent this model?" />
+                  </label>
+                  <label>
+                    Onboarding notes
+                    <textarea value={profileMeta.onboarding_notes} onChange={(e) => setProfileMeta({ ...profileMeta, onboarding_notes: e.target.value })} placeholder="Business context, known table layouts, accuracy targets, and reviewer comments." />
+                  </label>
+                </div>
+              </section>
+
+              <section className="admin-review-card">
+                <div>
+                  <h4>Extraction Guidance</h4>
+                  <p>Optional instructions and column mappings used by deterministic extraction and AI-assisted bootstrapping.</p>
+                </div>
+                <div className="admin-config-grid">
+                  <label>
+                    Prompt and extraction guidelines
+                    <textarea value={guidelines} onChange={(e) => setGuidelines(e.target.value)} placeholder="Example: prioritize PCB thickness, PCV code changes, nested pricing rows, or legal obligations." />
+                  </label>
+                  <label>
+                    Column rules JSON
+                    <textarea className="mono" value={columnRules} onChange={(e) => setColumnRules(e.target.value)} />
+                  </label>
+                </div>
+              </section>
+
+              <section className="admin-review-card">
+                <div>
+                  <h4>Access</h4>
+                  <p>Choose the roles allowed to see and use this model. Leave empty for all configured users.</p>
+                </div>
+                <RolePicker value={roles} onChange={setRoles} />
+              </section>
             </div>
-            <RolePicker value={roles} onChange={setRoles} />
-            <button type="button" className="primary-action" onClick={saveDataset} disabled={busy === "save"}>
-              {busy === "save" ? "Saving" : "Save profile settings"}
-            </button>
 
             <form className="seed-form" onSubmit={bootstrapSamples}>
               <div>

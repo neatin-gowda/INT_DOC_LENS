@@ -2743,10 +2743,18 @@ export const css = `
     align-items: flex-start;
     margin-bottom: 14px;
   }
+  .admin-detail-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
   .dataset-list,
   .admin-form,
   .onboarding-flow,
   .admin-detail,
+  .admin-edit-shell,
   .admin-config-grid,
   .seed-form {
     display: grid;
