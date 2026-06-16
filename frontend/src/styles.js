@@ -2864,6 +2864,83 @@ export const css = `
     gap: 10px;
     flex-wrap: wrap;
   }
+  .analysis-action-row {
+    align-items: stretch;
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    border-radius: var(--radius-md);
+    padding: 10px;
+  }
+  .analyze-action-button {
+    min-width: 230px;
+    border: 1px solid color-mix(in srgb, var(--brand-orange) 74%, var(--border));
+    background: linear-gradient(135deg, var(--brand-orange), color-mix(in srgb, var(--brand-orange) 76%, #7a3d10));
+    color: #fff;
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    display: grid;
+    gap: 2px;
+    justify-items: start;
+    cursor: pointer;
+    box-shadow: 0 10px 26px color-mix(in srgb, var(--brand-orange) 18%, transparent);
+  }
+  .analyze-action-button span {
+    color: inherit;
+    font-size: 14px;
+    font-weight: 750;
+  }
+  .analyze-action-button small {
+    color: rgba(255, 255, 255, .82);
+    font-size: 12px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .analyze-action-button:disabled {
+    border-color: var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-secondary);
+    box-shadow: none;
+    cursor: default;
+  }
+  .analyze-action-button:disabled small {
+    color: var(--text-secondary);
+  }
+  .analysis-readiness {
+    flex: 1 1 320px;
+    min-width: 240px;
+    display: flex;
+    align-content: center;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    color: var(--text-secondary);
+  }
+  .analysis-readiness span {
+    margin: 0;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .analysis-readiness span.ready {
+    border-color: color-mix(in srgb, #1f7e41 42%, var(--border));
+    background: color-mix(in srgb, #1f7e41 10%, var(--surface-raised));
+    color: var(--text-primary);
+  }
+  .analysis-readiness span.blocked {
+    border-color: color-mix(in srgb, var(--brand-orange) 38%, var(--border));
+    background: color-mix(in srgb, var(--brand-orange) 10%, var(--surface-raised));
+    color: var(--text-primary);
+  }
+  .analysis-readiness small {
+    flex-basis: 100%;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.35;
+  }
   .analysis-run-panel {
     display: grid;
     gap: 10px;
@@ -2925,6 +3002,24 @@ export const css = `
     border-color: color-mix(in srgb, #1f7e41 42%, var(--border));
     background: color-mix(in srgb, #1f7e41 10%, var(--surface-raised));
     color: var(--text-primary);
+  }
+  .analysis-run-steps span.skipped {
+    border-style: dashed;
+    border-color: var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-secondary);
+  }
+  .analysis-run-steps span.skipped.done {
+    border-color: var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-secondary);
+  }
+  .analysis-run-warning {
+    margin: 0;
+    color: var(--brand-orange);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
   }
   .analysis-run-error {
     margin: 0;

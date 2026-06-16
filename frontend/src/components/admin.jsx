@@ -150,10 +150,11 @@ export function AdminWorkspace() {
     setBusy("create");
     setError("");
     setNotice("");
+    const submittedSamples = sampleStats(initialSampleFiles);
     setCreateRun({
       status: "running",
       stage: "create",
-      submitted: sampleStats(initialSampleFiles),
+      submitted: submittedSamples,
       startedAt: new Date().toISOString(),
       error: "",
     });
@@ -164,19 +165,25 @@ export function AdminWorkspace() {
         body: JSON.stringify(form),
       });
       let sampleMessage = "";
+      let sampleWarning = "";
       if (data.id && hasAnySample(initialSampleFiles)) {
         setCreateRun((prev) => ({ ...(prev || {}), stage: "samples" }));
-        await uploadSamples(data.id, initialSampleFiles, form.onboarding_notes, form.learning_mode === "ai_assisted_bootstrap");
-        sampleMessage = " Sample documents learned and model profile bootstrapped.";
+        try {
+          await uploadSamples(data.id, initialSampleFiles, form.onboarding_notes, form.learning_mode === "ai_assisted_bootstrap");
+          sampleMessage = " Sample documents learned and model profile bootstrapped.";
+        } catch (sampleErr) {
+          sampleWarning = ` Sample learning did not finish: ${friendlyFetchError(sampleErr)}`;
+        }
       }
       setCreateRun((prev) => ({
         ...(prev || {}),
         status: "success",
         stage: "done",
         datasetId: data.id,
+        sampleWarning,
         finishedAt: new Date().toISOString(),
       }));
-      setNotice(`Use case created.${sampleMessage}`);
+      setNotice(`Use case created.${sampleMessage || sampleWarning || " You can attach or relearn samples from the saved use case."}`);
       setForm(emptyForm);
       setInitialSampleFiles({ baseline: null, revised: null, variationPairs: [] });
       setAnalysisPreview(null);
@@ -184,7 +191,7 @@ export function AdminWorkspace() {
         await loadDatasets();
         if (data.id) await selectDataset(data.id);
       } catch {
-        setNotice(`Use case created.${sampleMessage} Refresh the use case list if it does not appear immediately.`);
+        setNotice(`Use case created.${sampleMessage || sampleWarning || ""} Refresh the use case list if it does not appear immediately.`);
       }
     } catch (err) {
       const message = friendlyFetchError(err);
@@ -366,6 +373,23 @@ export function AdminWorkspace() {
     }
   };
 
+  const intakeStats = sampleStats(initialSampleFiles);
+  const intakeHasSamples = hasAnySample(initialSampleFiles);
+  const analysisNeedsModel = useAiAnalysis && !selectedModel;
+  const analysisDisabled = !intakeHasSamples || busy === "analyze" || analysisNeedsModel;
+  const analysisButtonLabel = busy === "analyze"
+    ? "Analyzing samples"
+    : useAiAnalysis
+      ? "Analyze samples with AI"
+      : "Scan samples without AI";
+  const analysisReadiness = !intakeHasSamples
+    ? "Attach a baseline, revised, or variation sample to start."
+    : analysisNeedsModel
+      ? "Select an available chat model before AI analysis."
+      : useAiAnalysis
+        ? "Ready to send selected samples and context to the model."
+        : "Ready for deterministic structure scan. No AI tokens will be used.";
+
   return (
     <section className="admin-studio">
       <div className="admin-intro">
@@ -492,11 +516,26 @@ export function AdminWorkspace() {
                 </label>
               </div>
               <VariationPairsEditor value={initialSampleFiles.variationPairs} onChange={(variationPairs) => setInitialSampleFiles({ ...initialSampleFiles, variationPairs })} />
-              <div className="sample-actions">
-                <button type="button" className="secondary-action" onClick={analyzeInitialSamples} disabled={!hasAnySample(initialSampleFiles) || busy === "analyze" || (useAiAnalysis && !selectedModel)}>
-                  {busy === "analyze" ? "Analyzing samples" : "Analyze samples"}
+              <div className="sample-actions analysis-action-row">
+                <button
+                  type="button"
+                  className="analyze-action-button"
+                  onClick={analyzeInitialSamples}
+                  disabled={analysisDisabled}
+                  aria-busy={busy === "analyze"}
+                >
+                  <span>{analysisButtonLabel}</span>
+                  <small>{useAiAnalysis ? selectedModel || "No model selected" : "Deterministic mode"}</small>
                 </button>
-                <span>{hasAnySample(initialSampleFiles) ? "Analysis can prefill the fields below. You can still edit everything manually." : "Attach at least one sample to run analysis."}</span>
+                <div className="analysis-readiness">
+                  <span className={intakeHasSamples ? "ready" : "blocked"}>
+                    {intakeHasSamples ? "Samples ready" : "Waiting for samples"}
+                  </span>
+                  <span>{formatNumber(intakeStats.count)} file(s)</span>
+                  <span>{formatBytes(intakeStats.totalBytes)}</span>
+                  <span>{useAiAnalysis ? "AI-assisted metadata" : "No AI tokens"}</span>
+                  <small>{analysisReadiness}</small>
+                </div>
               </div>
               <AnalysisRunPanel run={analysisRun} elapsedSeconds={elapsedSeconds} useAiAnalysis={useAiAnalysis} selectedModel={selectedModel} />
             </section>
@@ -790,9 +829,10 @@ function AnalysisRunPanel({ run, elapsedSeconds, useAiAnalysis, selectedModel })
 function CreateRunPanel({ run, elapsedSeconds }) {
   if (!run) return null;
   const statusLabel = run.status === "running" ? "Creating use case" : run.status === "success" ? "Use case created" : "Create failed";
+  const hasSamples = Number(run.submitted?.count || 0) > 0;
   const steps = [
     ["create", "Saving use case metadata"],
-    ["samples", "Learning attached samples"],
+    ["samples", hasSamples ? "Learning attached samples" : "No samples attached"],
     ["done", "Opening saved use case"],
   ];
   const stageIndex = Math.max(0, steps.findIndex(([stage]) => stage === run.stage));
@@ -809,12 +849,13 @@ function CreateRunPanel({ run, elapsedSeconds }) {
         {steps.map(([stage, label], index) => (
           <span
             key={stage}
-            className={`${index < stageIndex || run.status === "success" ? "done" : ""} ${index === stageIndex && run.status === "running" ? "active" : ""}`}
+            className={`${(!hasSamples && stage === "samples") ? "skipped" : ""} ${index < stageIndex || run.status === "success" ? "done" : ""} ${index === stageIndex && run.status === "running" ? "active" : ""}`}
           >
             {label}
           </span>
         ))}
       </div>
+      {run.sampleWarning ? <p className="analysis-run-warning">{run.sampleWarning}</p> : null}
       {run.error ? <p className="analysis-run-error">{run.error}</p> : null}
     </div>
   );
