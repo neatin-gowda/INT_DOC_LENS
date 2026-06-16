@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { API } from "../config.js";
 import {
   ChangeBadge,
@@ -24,12 +24,53 @@ function estimateCost(modelName, promptTokens, completionTokens) {
 export function QueryPanel({ runId }) {
   const [question, setQuestion] = useState("");
   const [mode, setMode] = useState("fast");
-  const [modelName, setModelName] = useState("gpt-4o");
+  const [modelName, setModelName] = useState("");
+  const [aiHealth, setAiHealth] = useState(null);
   const [messages, setMessages] = useState([]);
   const [expandedEvidence, setExpandedEvidence] = useState({});
   const [busy, setBusy] = useState(false);
+  const [workingStep, setWorkingStep] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadModels = async () => {
+      try {
+        const resp = await fetch(`${API}/ai-health`);
+        if (!resp.ok) throw new Error(await readResponseError(resp));
+        const data = await resp.json();
+        if (cancelled) return;
+        setAiHealth(data);
+        const first = availableChatModels(data)[0];
+        if (first?.id) setModelName((current) => current || first.id);
+      } catch {
+        if (!cancelled) setAiHealth({ ok: false, models: [], message: "AI model status is unavailable." });
+      }
+    };
+    loadModels();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!busy) {
+      setWorkingStep("");
+      return undefined;
+    }
+    const steps = mode === "ai"
+      ? ["Retrieving comparison evidence", "Building grounded context", `Generating AI answer${modelName ? ` with ${modelName}` : ""}`]
+      : ["Retrieving comparison evidence", "Ranking matching changes", "Preparing deterministic answer"];
+    let index = 0;
+    setWorkingStep(steps[index]);
+    const timer = window.setInterval(() => {
+      index = Math.min(index + 1, steps.length - 1);
+      setWorkingStep(steps[index]);
+    }, 1600);
+    return () => window.clearInterval(timer);
+  }, [busy, mode, modelName]);
 
   const sessionStats = useMemo(() => messages.reduce((acc, message) => {
+    if (message.mode !== "ai") return acc;
     const usage = message.usage;
     if (!usage) return acc;
     acc.prompt += Number(usage.prompt_tokens || 0);
@@ -77,7 +118,7 @@ export function QueryPanel({ runId }) {
         columns: data.columns || inferColumns(data.rows || []),
         mode: data.mode || mode,
         model: mode === "ai" ? modelName : null,
-        usage: data.usage,
+        usage: (data.mode || mode) === "ai" ? data.usage : null,
         confidence: data.confidence,
         warning: data.ai_error || (data.ai_unavailable ? "AI response was unavailable; showing grounded evidence results." : ""),
         timestamp: new Date().toLocaleTimeString(),
@@ -138,6 +179,18 @@ export function QueryPanel({ runId }) {
               )}
             </article>
           ))}
+          {busy && (
+            <article className="query-message assistant streaming">
+              <div className="query-message-meta">
+                <span>{mode === "ai" ? `AI answer${modelName ? ` - ${modelName}` : ""}` : "Natural language query"}</span>
+                <span>Working</span>
+              </div>
+              <div className="query-stream-line">
+                <span />
+                {workingStep || "Retrieving evidence"}
+              </div>
+            </article>
+          )}
         </div>
       )}
 
@@ -174,19 +227,30 @@ export function QueryPanel({ runId }) {
             <label>
               <span>Model</span>
               <select value={modelName} onChange={(event) => setModelName(event.target.value)} disabled={busy}>
-                <option value="gpt-4o">gpt-4o</option>
-                <option value="gpt-4o-mini">gpt-4o-mini</option>
-                <option value="phi-4-mini">phi-4-mini</option>
+                {availableChatModels(aiHealth).length ? (
+                  availableChatModels(aiHealth).map((model) => (
+                    <option key={model.id} value={model.id}>{model.label || model.id}</option>
+                  ))
+                ) : (
+                  <option value="">No configured chat model found</option>
+                )}
               </select>
             </label>
           )}
-          <button type="button" className="primary-action compact" onClick={ask} disabled={busy || !question.trim()}>
+          <button type="button" className="primary-action compact" onClick={ask} disabled={busy || !question.trim() || (mode === "ai" && !modelName)}>
             {busy ? "Working" : mode === "ai" ? "Ask AI" : "Ask"}
           </button>
         </div>
       </div>
     </section>
   );
+}
+
+function availableChatModels(aiHealth) {
+  const models = Array.isArray(aiHealth?.models) ? aiHealth.models : [];
+  if (models.length) return models.filter((model) => model.kind === "chat" && model.configured !== false);
+  if (aiHealth?.deployment) return [{ id: aiHealth.deployment, label: aiHealth.deployment, kind: "chat", configured: aiHealth.configured }];
+  return [];
 }
 
 export function QueryResult({ row }) {

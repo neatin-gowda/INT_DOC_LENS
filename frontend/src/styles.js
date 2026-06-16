@@ -27,7 +27,12 @@ export const css = `
   }
   .theme-light .altrai-wordmark,
   [data-theme="light"] .altrai-wordmark {
-    color: var(--brand-navy, #0a1f4d);
+    color: #f8fbff;
+    text-shadow: 0 1px 1px rgba(7, 13, 24, .22);
+  }
+  .theme-light .altrai-wordmark .accent,
+  [data-theme="light"] .altrai-wordmark .accent {
+    color: #df7a2f;
   }
   .workspace-shell.theme-light {
     color: #0f172a;
@@ -1267,6 +1272,9 @@ export const css = `
   .query-chat-log {
     display: grid;
     gap: 10px;
+    max-height: min(58vh, 620px);
+    overflow: auto;
+    padding-right: 3px;
   }
   .query-message {
     max-width: min(860px, 92%);
@@ -1287,6 +1295,9 @@ export const css = `
   }
   .query-message.error {
     border-color: rgba(239,68,68,.38);
+  }
+  .query-message.streaming {
+    border-style: dashed;
   }
   .query-message-meta,
   .query-usage {
@@ -1311,6 +1322,26 @@ export const css = `
     color: var(--diff-deleted-text);
     font-size: 12px;
     font-weight: 650;
+  }
+  .query-stream-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 650;
+  }
+  .query-stream-line span {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--brand-orange);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-orange) 16%, transparent);
+    animation: stream-pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes stream-pulse {
+    0%, 100% { opacity: .45; transform: scale(.82); }
+    50% { opacity: 1; transform: scale(1); }
   }
   .query-usage {
     justify-content: flex-start;

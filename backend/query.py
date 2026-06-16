@@ -2037,7 +2037,6 @@ def query(
     if is_summary:
         response = _summary_response(nl, rows, plan, semantic_rows, allow_llm=False)
         response["mode"] = "fast"
-        response["usage"] = usage_accum
         return response
 
     answer = _build_answer(nl, rows, plan)
@@ -2049,5 +2048,4 @@ def query(
         "plan": plan,
         "semantic_matches": len(semantic_rows),
         "mode": "fast",
-        "usage": usage_accum,
     }

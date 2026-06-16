@@ -33,6 +33,11 @@ def post_query(run_id: str, req: QueryReq):
     )
 
     if isinstance(result, dict):
+        requested_ai = str(req.mode or "").strip().lower() in {"ai", "openai", "llm", "agent"}
+        if not requested_ai:
+            result.pop("usage", None)
+            result["mode"] = result.get("mode") or "fast"
+            return result
         add_usage(r, result.get("usage"))
         _sync_job_metadata(run_id)
         result["job_ai_usage"] = r.get("ai_usage", empty_usage())
