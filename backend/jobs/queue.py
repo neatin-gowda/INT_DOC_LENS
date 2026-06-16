@@ -78,6 +78,7 @@ def worker_loop() -> None:
     Daemon worker loop picking up tasks from doculens_job table.
     """
     print("Altrai Job Queue Worker loop started.")
+    job_to_run = None
     while True:
         if not db_enabled():
             time.sleep(5)
@@ -129,6 +130,15 @@ def worker_loop() -> None:
                     "work": Path(args["work"]) if "work" in args else None,
                 })
 
+                required_keys = ["work"]
+                if kind == "comparison":
+                    required_keys.extend(["base_source", "target_source", "base_label", "target_label"])
+                elif kind == "extraction":
+                    required_keys.extend(["sources", "label"])
+                missing_keys = [key for key in required_keys if key not in args]
+                if missing_keys:
+                    raise RuntimeError(f"Queued job payload is missing: {', '.join(missing_keys)}")
+
                 # Run processing
                 if kind == "comparison":
                     _process_compare(
@@ -155,6 +165,15 @@ def worker_loop() -> None:
         except Exception as exc:
             print(f"Error in job worker loop: {exc}")
             traceback.print_exc()
+            if job_to_run and job_to_run.get("run_id"):
+                run_id = job_to_run["run_id"]
+                _RUNS.setdefault(run_id, {}).update({
+                    "status": "failed",
+                    "status_message": "Queued job could not start",
+                    "progress": _RUNS.get(run_id, {}).get("progress", 0),
+                    "error": str(exc),
+                })
+                _sync_job_metadata(run_id)
             time.sleep(3)
 
 def start_worker() -> None:

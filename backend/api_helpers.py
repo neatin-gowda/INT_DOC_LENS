@@ -322,6 +322,7 @@ def _ensure_run(run_id: str) -> dict:
     return r
 
 def _job_patch_from_run(run_id: str, run: dict) -> dict[str, Any]:
+    existing_result_ref = run.get("result_ref") if isinstance(run.get("result_ref"), dict) else {}
     return {
         "run_id": run_id,
         "kind": run.get("kind", "comparison"),
@@ -347,6 +348,7 @@ def _job_patch_from_run(run_id: str, run: dict) -> dict[str, Any]:
         "updated_at": run.get("updated_at"),
         "finished_at": run.get("finished_at"),
         "result_ref": {
+            **existing_result_ref,
             "db_run_id": run.get("db_run_id"),
             "work": str(run.get("work")) if run.get("work") else None,
             "base_pdf": str(run.get("base_pdf")) if run.get("base_pdf") else None,

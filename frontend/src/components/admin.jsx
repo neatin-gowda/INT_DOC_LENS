@@ -74,6 +74,11 @@ export function AdminWorkspace() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [useCaseQuery, setUseCaseQuery] = useState("");
+  const [createOpen, setCreateOpen] = useState(true);
+  const [refineOpen, setRefineOpen] = useState(true);
+  const [sampleLearningOpen, setSampleLearningOpen] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
 
   const headers = () => ({
     "Content-Type": "application/json",
@@ -168,6 +173,7 @@ export function AdminWorkspace() {
       stage: "create",
       submitted: submittedSamples,
       startedAt: new Date().toISOString(),
+      events: ["Saving use case metadata"],
       error: "",
     });
     try {
@@ -178,13 +184,40 @@ export function AdminWorkspace() {
       });
       let sampleMessage = "";
       let sampleWarning = "";
+      setCreateRun((prev) => ({
+        ...(prev || {}),
+        status: "success",
+        stage: "saved",
+        datasetId: data.id,
+        events: [...(prev?.events || []), "Use case metadata saved"],
+      }));
+      setNotice("Use case created. Opening saved profile.");
+      try {
+        await loadDatasets();
+        if (data.id) await selectDataset(data.id);
+      } catch {
+        setNotice("Use case created. Refresh the use case list if it does not appear immediately.");
+      }
       if (data.id && hasAnySample(initialSampleFiles)) {
-        setCreateRun((prev) => ({ ...(prev || {}), stage: "samples" }));
+        setCreateRun((prev) => ({
+          ...(prev || {}),
+          stage: "samples",
+          events: [...(prev?.events || []), "Learning attached samples"],
+        }));
         try {
           await uploadSamples(data.id, initialSampleFiles, form.onboarding_notes, form.learning_mode === "ai_assisted_bootstrap");
           sampleMessage = " Sample documents learned and model profile bootstrapped.";
+          setCreateRun((prev) => ({
+            ...(prev || {}),
+            events: [...(prev?.events || []), "Sample learning completed"],
+          }));
         } catch (sampleErr) {
           sampleWarning = ` Sample learning did not finish: ${friendlyFetchError(sampleErr)}`;
+          setCreateRun((prev) => ({
+            ...(prev || {}),
+            sampleWarning,
+            events: [...(prev?.events || []), "Sample learning needs attention"],
+          }));
         }
       }
       setCreateRun((prev) => ({
@@ -193,18 +226,13 @@ export function AdminWorkspace() {
         stage: "done",
         datasetId: data.id,
         sampleWarning,
+        events: [...(prev?.events || []), "Ready for refinement"],
         finishedAt: new Date().toISOString(),
       }));
       setNotice(`Use case created.${sampleMessage || sampleWarning || " You can attach or relearn samples from the saved use case."}`);
       setForm(emptyForm);
       setInitialSampleFiles({ baseline: null, revised: null, variationPairs: [] });
       setAnalysisPreview(null);
-      try {
-        await loadDatasets();
-        if (data.id) await selectDataset(data.id);
-      } catch {
-        setNotice(`Use case created.${sampleMessage || sampleWarning || ""} Refresh the use case list if it does not appear immediately.`);
-      }
     } catch (err) {
       const message = friendlyFetchError(err);
       setError(message);
@@ -212,6 +240,7 @@ export function AdminWorkspace() {
         ...(prev || {}),
         status: "failed",
         finishedAt: new Date().toISOString(),
+        events: [...(prev?.events || []), "Create failed"],
         error: message,
       }));
     } finally {
@@ -323,6 +352,7 @@ export function AdminWorkspace() {
       model: useAiAnalysis ? selectedModel : "",
       submitted: sampleStats(initialSampleFiles),
       startedAt: new Date().toISOString(),
+      events: ["Preparing upload context"],
       error: "",
     });
     try {
@@ -342,6 +372,7 @@ export function AdminWorkspace() {
         finishedAt: new Date().toISOString(),
         backendUsage: collectAnalysisUsage(data),
         model: data.selected_model || selectedModel,
+        events: [...(prev?.events || []), "Sample structure analyzed", "Metadata suggestions generated"],
       }));
       setForm({
         ...form,
@@ -357,6 +388,7 @@ export function AdminWorkspace() {
         ...(prev || {}),
         status: "failed",
         finishedAt: new Date().toISOString(),
+        events: [...(prev?.events || []), "Analysis failed"],
         error: message,
       }));
     } finally {
@@ -404,6 +436,15 @@ export function AdminWorkspace() {
       : useAiAnalysis
         ? "Ready to send selected samples and context to the model."
         : "Ready for deterministic structure scan. No AI tokens will be used.";
+  const filteredDatasets = datasets.filter((item) => {
+    const query = useCaseQuery.trim().toLowerCase();
+    if (!query) return true;
+    return [item.supplier, item.family_name, item.domain, item.use_case_type]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+  });
 
   return (
     <section className="admin-studio">
@@ -420,16 +461,27 @@ export function AdminWorkspace() {
       <div className="admin-grid">
         <aside className="admin-panel">
           <div className="admin-panel-head">
-            <h3>Use Cases</h3>
+            <div>
+              <h3>Use Cases</h3>
+              <p>{datasets.length} saved model{datasets.length === 1 ? "" : "s"}</p>
+            </div>
             <button type="button" className="ghost-action compact" onClick={loadDatasets}>Refresh</button>
           </div>
+          <input
+            className="admin-search"
+            value={useCaseQuery}
+            onChange={(event) => setUseCaseQuery(event.target.value)}
+            placeholder="Search supplier, family, domain"
+          />
           {loading ? (
             <SoftLoading label="Loading use cases" />
           ) : datasets.length === 0 ? (
             <EmptyState label="No use cases onboarded yet." />
+          ) : filteredDatasets.length === 0 ? (
+            <EmptyState label="No matching use cases." />
           ) : (
             <div className="dataset-list">
-              {datasets.map((item) => (
+              {filteredDatasets.map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -446,13 +498,14 @@ export function AdminWorkspace() {
         </aside>
 
         <main className="admin-panel">
-          <div className="admin-panel-head">
-            <div>
-              <h3>Onboard Document Model</h3>
-              <p>Start with baseline, revised, or layout samples. The platform learns the structure and suggests the use-case metadata.</p>
-            </div>
-          </div>
-          <form className="admin-form onboarding-flow" onSubmit={createDataset}>
+          <CollapsibleHeader
+            title="Onboard Document Model"
+            description="Create a new model from identity, representative samples, and generated metadata."
+            open={createOpen}
+            onToggle={() => setCreateOpen((value) => !value)}
+          />
+          {createOpen ? (
+          <form className="admin-form onboarding-flow compact-flow" onSubmit={createDataset}>
             <section className="admin-review-card">
               <div>
                 <h4>Use Case Identity</h4>
@@ -585,18 +638,25 @@ export function AdminWorkspace() {
             </button>
             <CreateRunPanel run={createRun} elapsedSeconds={elapsedSeconds} />
           </form>
+          ) : (
+            <div className="admin-collapsed-summary">
+              <span>New use-case onboarding is collapsed.</span>
+              <button type="button" className="ghost-action compact" onClick={() => setCreateOpen(true)}>Open</button>
+            </div>
+          )}
         </main>
       </div>
 
       {detail ? (
         <section className="admin-panel">
           <div className="admin-detail">
-            <div className="admin-detail-head">
-              <div>
-                <h3>Refine Use Case</h3>
-                <p>Edit the saved document model, access policy, and extraction guidance without creating a duplicate use case.</p>
-                <span className="admin-model-badge">{profileMeta.use_case_type} model · {(profileMeta.expected_formats || []).join(", ")}</span>
-              </div>
+            <CollapsibleHeader
+              title={`Refine ${detail.supplier} · ${detail.family_name}`}
+              description="Edit the saved model profile, then save changes without creating a duplicate."
+              open={refineOpen}
+              onToggle={() => setRefineOpen((value) => !value)}
+              meta={`${profileMeta.use_case_type} model · ${(profileMeta.expected_formats || []).join(", ")}`}
+              actions={(
               <div className="admin-detail-actions">
                 <button type="button" className="primary-action compact" onClick={saveDataset} disabled={busy === "save"}>
                   {busy === "save" ? "Saving" : "Save changes"}
@@ -605,8 +665,10 @@ export function AdminWorkspace() {
                   {busy === "delete" ? "Deleting" : "Delete"}
                 </button>
               </div>
-            </div>
+              )}
+            />
 
+            {refineOpen ? (
             <div className="admin-edit-shell">
               <section className="admin-review-card">
                 <div>
@@ -698,7 +760,16 @@ export function AdminWorkspace() {
                 <RolePicker value={roles} onChange={setRoles} />
               </section>
             </div>
+            ) : null}
 
+            <CollapsibleHeader
+              title="Sample Learning"
+              description="Attach or relearn representative samples after the model has been created."
+              open={sampleLearningOpen}
+              onToggle={() => setSampleLearningOpen((value) => !value)}
+              meta={`${documents.length} learned document${documents.length === 1 ? "" : "s"}`}
+            />
+            {sampleLearningOpen ? (
             <form className="seed-form" onSubmit={bootstrapSamples}>
               <div>
                 <h4>Sample Document Learning</h4>
@@ -722,7 +793,15 @@ export function AdminWorkspace() {
                 {busy === "bootstrap" ? "Learning" : "Learn from samples"}
               </button>
             </form>
+            ) : null}
 
+            <CollapsibleHeader
+              title="Profile Insights"
+              description="Review learned samples, stable keys, column rules, and AI onboarding notes."
+              open={insightsOpen}
+              onToggle={() => setInsightsOpen((value) => !value)}
+            />
+            {insightsOpen ? (
             <div className="admin-profile-grid">
               <ProfileSummary profile={detail.template_profile?.sample_profile} />
               <ProfileCard title="Sample Documents" items={documents} labelKey="label" valueKey="page_count" />
@@ -735,6 +814,7 @@ export function AdminWorkspace() {
               <ProfileCard title="Stable Keys" items={detail.template_profile?.stable_key_patterns} labelKey="name" valueKey="regex" />
               <ProfileCard title="Column Rules" items={detail.template_profile?.column_rules} labelKey="role" valueKey="pattern" />
             </div>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -847,6 +927,22 @@ async function postAnalyzeSamples(payload) {
   );
 }
 
+function CollapsibleHeader({ title, description, open, onToggle, meta = "", actions = null }) {
+  return (
+    <div className="admin-collapse-head">
+      <button type="button" className="admin-collapse-toggle" onClick={onToggle} aria-expanded={open}>
+        <span>{open ? "-" : "+"}</span>
+      </button>
+      <div>
+        <h3>{title}</h3>
+        {description ? <p>{description}</p> : null}
+        {meta ? <span className="admin-model-badge">{meta}</span> : null}
+      </div>
+      {actions ? <div className="admin-collapse-actions">{actions}</div> : null}
+    </div>
+  );
+}
+
 function AnalysisRunPanel({ run, elapsedSeconds, useAiAnalysis, selectedModel }) {
   if (!run) return null;
   const stats = run.submitted || {};
@@ -859,40 +955,19 @@ function AnalysisRunPanel({ run, elapsedSeconds, useAiAnalysis, selectedModel })
     ["model", useAiAnalysis ? `Invoking ${selectedModel || "selected model"}` : "Deterministic profile scan"],
     ["metadata", "Generating metadata suggestions"],
   ];
+  const events = run.events?.length ? run.events : steps.slice(0, activeIndex + 1).map(([, label]) => label);
   return (
-    <div className={`analysis-run-panel ${run.status}`}>
-      <div className="analysis-run-head">
-        <div>
-          <strong>{statusLabel}</strong>
-          <span>{run.status === "running" ? `${elapsedSeconds}s elapsed` : run.finishedAt ? "Run finished" : "Waiting"}</span>
-        </div>
-        <small>{run.mode === "ai" ? `AI model: ${run.model || selectedModel || "not selected"}` : "AI disabled"}</small>
+    <div className={`activity-stream ${run.status}`}>
+      <div className="activity-head">
+        <strong>{statusLabel}</strong>
+        <span>{run.status === "running" ? `${elapsedSeconds}s elapsed` : "Run finished"}</span>
+        <small>{run.mode === "ai" ? `Model: ${run.model || selectedModel || "not selected"}` : "Deterministic scan"}</small>
       </div>
-      <div className="analysis-run-metrics">
+      <ActivityLines events={events} status={run.status} activeText={steps[activeIndex]?.[1]} />
+      <div className="activity-foot">
         <span>{formatNumber(stats.count)} file(s)</span>
         <span>{formatBytes(stats.totalBytes)}</span>
-        <span>Upload-size estimate {formatNumber(stats.estimatedInputTokens)} tokens</span>
-        {run.mode === "ai" ? (
-          <>
-            <span>LLM prompt est. {formatNumber(usage.estimated_prompt_tokens || 0)} tokens</span>
-            <span>Prompt {usage.prompt_tokens ? formatNumber(usage.prompt_tokens) : "not reported"}</span>
-            <span>Output {usage.completion_tokens ? formatNumber(usage.completion_tokens) : "not reported"}</span>
-            <span>Total {usage.total_tokens ? formatNumber(usage.total_tokens) : "not reported"}</span>
-            <span>Calls {formatNumber(usage.calls || 0)}</span>
-          </>
-        ) : (
-          <span>No AI tokens used</span>
-        )}
-      </div>
-      <div className="analysis-run-steps">
-        {steps.map(([key, label], index) => (
-          <span
-            key={key}
-            className={`${run.status === "success" || index < activeIndex ? "done" : ""} ${run.status === "running" && index === activeIndex ? "active" : ""}`}
-          >
-            {label}
-          </span>
-        ))}
+        <span>{run.mode === "ai" ? `Tokens ${usage.total_tokens ? formatNumber(usage.total_tokens) : "pending"}` : "No AI tokens"}</span>
       </div>
       {run.error ? <p className="analysis-run-error">{run.error}</p> : null}
     </div>
@@ -903,34 +978,33 @@ function CreateRunPanel({ run, elapsedSeconds }) {
   if (!run) return null;
   const statusLabel = run.status === "running" ? "Creating use case" : run.status === "success" ? "Use case created" : "Create failed";
   const hasSamples = Number(run.submitted?.count || 0) > 0;
-  const steps = [
-    ["create", "Saving use case metadata"],
-    ["samples", hasSamples ? "Learning attached samples" : "No samples attached"],
-    ["done", "Opening saved use case"],
-  ];
-  const stageIndex = Math.max(0, steps.findIndex(([stage]) => stage === run.stage));
+  const events = run.events?.length ? run.events : ["Saving use case metadata"];
   return (
-    <div className={`analysis-run-panel create-run ${run.status}`}>
-      <div className="analysis-run-head">
-        <div>
-          <strong>{statusLabel}</strong>
-          <span>{run.status === "running" ? `${elapsedSeconds}s elapsed` : run.finishedAt ? "Run finished" : "Waiting"}</span>
-        </div>
+    <div className={`activity-stream create-run ${run.status}`}>
+      <div className="activity-head">
+        <strong>{statusLabel}</strong>
+        <span>{run.status === "running" ? `${elapsedSeconds}s elapsed` : "Run finished"}</span>
         <small>{run.datasetId ? `ID ${String(run.datasetId).slice(0, 8)}` : `${formatNumber(run.submitted?.count || 0)} sample file(s)`}</small>
       </div>
-      <div className="analysis-run-steps">
-        {steps.map(([stage, label], index) => (
-          <span
-            key={stage}
-            className={`${(!hasSamples && stage === "samples") ? "skipped" : ""} ${index < stageIndex || run.status === "success" ? "done" : ""} ${index === stageIndex && run.status === "running" ? "active" : ""}`}
-          >
-            {label}
-          </span>
-        ))}
-      </div>
+      <ActivityLines events={events} status={run.status} activeText={hasSamples && run.stage === "samples" ? "Learning attached samples" : ""} />
+      {!hasSamples ? <div className="activity-foot"><span>No samples attached</span><span>Metadata-only create</span></div> : null}
       {run.sampleWarning ? <p className="analysis-run-warning">{run.sampleWarning}</p> : null}
       {run.error ? <p className="analysis-run-error">{run.error}</p> : null}
     </div>
+  );
+}
+
+function ActivityLines({ events, status, activeText = "" }) {
+  const lines = [...events];
+  if (status === "running" && activeText && !lines.includes(activeText)) lines.push(activeText);
+  return (
+    <ol className="activity-lines">
+      {lines.map((event, index) => {
+        const isLast = index === lines.length - 1;
+        const state = status === "failed" && isLast ? "failed" : status === "running" && isLast ? "active" : "done";
+        return <li key={`${event}-${index}`} className={state}>{event}</li>;
+      })}
+    </ol>
   );
 }
 

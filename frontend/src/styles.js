@@ -2735,6 +2735,18 @@ export const css = `
     gap: 16px;
     align-items: start;
   }
+  .admin-search {
+    width: 100%;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    padding: 9px 10px;
+    margin-bottom: 12px;
+  }
+  .admin-search::placeholder {
+    color: var(--text-secondary);
+  }
   .admin-panel-head,
   .admin-detail-head {
     display: flex;
@@ -2750,6 +2762,59 @@ export const css = `
     gap: 8px;
     flex-wrap: wrap;
   }
+  .admin-collapse-head {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    border-radius: var(--radius-md);
+    padding: 11px;
+    margin-bottom: 12px;
+  }
+  .admin-collapse-toggle {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-weight: 750;
+    cursor: pointer;
+  }
+  .admin-collapse-head h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .admin-collapse-head p {
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .admin-collapse-actions {
+    display: inline-flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .admin-collapsed-summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    border: 1px dashed var(--border);
+    background: var(--surface-sunken);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
   .dataset-list,
   .admin-form,
   .onboarding-flow,
@@ -2759,6 +2824,11 @@ export const css = `
   .seed-form {
     display: grid;
     gap: 12px;
+  }
+  .dataset-list {
+    max-height: 62vh;
+    overflow: auto;
+    padding-right: 2px;
   }
   .dataset-item {
     width: 100%;
@@ -3033,6 +3103,88 @@ export const css = `
     margin: 0;
     color: #9f2525;
     font-size: 13px;
+    font-weight: 600;
+  }
+  .activity-stream {
+    display: grid;
+    gap: 9px;
+    border-inline-start: 3px solid color-mix(in srgb, var(--brand-orange) 56%, var(--border));
+    background: transparent;
+    padding: 4px 0 4px 12px;
+  }
+  .activity-stream.success {
+    border-inline-start-color: color-mix(in srgb, #1f7e41 56%, var(--border));
+  }
+  .activity-stream.failed {
+    border-inline-start-color: color-mix(in srgb, #9f2525 56%, var(--border));
+  }
+  .activity-head {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  .activity-head strong {
+    color: var(--text-primary);
+    font-size: 14px;
+  }
+  .activity-head span,
+  .activity-head small {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+  .activity-lines {
+    list-style: none;
+    display: grid;
+    gap: 5px;
+    margin: 0;
+    padding: 0;
+  }
+  .activity-lines li {
+    position: relative;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.35;
+    padding-inline-start: 18px;
+  }
+  .activity-lines li::before {
+    content: "";
+    position: absolute;
+    inset-inline-start: 0;
+    top: .45em;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--border);
+  }
+  .activity-lines li.done {
+    color: var(--text-primary);
+  }
+  .activity-lines li.done::before {
+    background: #1f7e41;
+  }
+  .activity-lines li.active::before {
+    background: var(--brand-orange);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-orange) 16%, transparent);
+  }
+  .activity-lines li.failed {
+    color: #9f2525;
+  }
+  .activity-lines li.failed::before {
+    background: #9f2525;
+  }
+  .activity-foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .activity-foot span {
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 4px 7px;
+    font-size: 12px;
     font-weight: 600;
   }
   .analysis-card {
