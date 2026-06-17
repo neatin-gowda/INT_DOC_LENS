@@ -28,6 +28,7 @@ class QueryReq(BaseModel):
     mode: str = "fast"
     response_language: str = "source"
     model_name: Optional[str] = None
+    history: list[dict[str, str]] = Field(default_factory=list)
 
 
 class FeedbackReq(BaseModel):

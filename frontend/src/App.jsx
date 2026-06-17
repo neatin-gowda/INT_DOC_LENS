@@ -62,18 +62,18 @@ const workspaceFromPath = (pathname) => pathWorkspaces[pathname] || "compare";
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [workspace, setWorkspace] = useState(() => workspaceFromPath(window.location.pathname) || getSession("workspace", "compare"));
-  const [runId, setRunId] = useState(() => getSession("runId", null));
-  const [meta, setMeta] = useState(() => getSession("meta", null));
-  const [tab, setTab] = useState(() => getSession("tab", "viewer"));
-  const [pageNum, setPageNum] = useState(() => getSession("pageNum", 1));
-  const [busy, setBusy] = useState(() => getSession("busy", false));
+  const [workspace, setWorkspace] = useState(() => workspaceFromPath(window.location.pathname));
+  const [runId, setRunId] = useState(null);
+  const [meta, setMeta] = useState(null);
+  const [tab, setTab] = useState("viewer");
+  const [pageNum, setPageNum] = useState(1);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [extractRunId, setExtractRunId] = useState(() => getSession("extractRunId", null));
-  const [extractMeta, setExtractMeta] = useState(() => getSession("extractMeta", null));
-  const [extractBusy, setExtractBusy] = useState(() => getSession("extractBusy", false));
+  const [extractRunId, setExtractRunId] = useState(null);
+  const [extractMeta, setExtractMeta] = useState(null);
+  const [extractBusy, setExtractBusy] = useState(false);
   const [extractError, setExtractError] = useState("");
-  const [extractTab, setExtractTab] = useState(() => getSession("extractTab", "overview"));
+  const [extractTab, setExtractTab] = useState("overview");
   const [jobError, setJobError] = useState("");
   const [historyKind, setHistoryKind] = useState(() => getSession("historyKind", "all"));
   const pageTitle = {
@@ -86,16 +86,6 @@ export default function App() {
 
   useDocumentTitle(pageTitle);
 
-  useEffect(() => { setSession("workspace", workspace); }, [workspace]);
-  useEffect(() => { setSession("runId", runId); }, [runId]);
-  useEffect(() => { setSession("meta", meta); }, [meta]);
-  useEffect(() => { setSession("tab", tab); }, [tab]);
-  useEffect(() => { setSession("pageNum", pageNum); }, [pageNum]);
-  useEffect(() => { setSession("busy", busy); }, [busy]);
-  useEffect(() => { setSession("extractRunId", extractRunId); }, [extractRunId]);
-  useEffect(() => { setSession("extractMeta", extractMeta); }, [extractMeta]);
-  useEffect(() => { setSession("extractBusy", extractBusy); }, [extractBusy]);
-  useEffect(() => { setSession("extractTab", extractTab); }, [extractTab]);
   useEffect(() => { setSession("historyKind", historyKind); }, [historyKind]);
 
   useEffect(() => {
@@ -123,7 +113,7 @@ export default function App() {
     setHistoryKind("all");
     if (typeof window !== "undefined") {
       try {
-        window.sessionStorage.clear();
+        window.sessionStorage.removeItem("doculens_historyKind");
       } catch (e) {
         console.error(e);
       }

@@ -99,7 +99,7 @@ function useDatasets(useCaseType) {
         const items = allItems.filter((item) => (item.use_case_type || "comparison") === useCaseType);
         if (!active) return;
         setDatasets(items);
-        setSelectedId((current) => current || items[0]?.id || "");
+        setSelectedId((current) => (current && items.some((item) => item.id === current) ? current : ""));
       } catch (err) {
         if (!active) return;
         setDatasets([]);
@@ -130,7 +130,7 @@ function UseCaseSelector({ datasets, selectedId, setSelectedId, loading, error, 
           required
           disabled={busy || loading || datasets.length === 0}
         >
-          <option value="" disabled>{loading ? "Loading use cases" : "Select a use case"}</option>
+          <option value="">{loading ? "Loading use cases" : "Select a use case"}</option>
           {datasets.map((item) => (
             <option key={item.id} value={item.id}>
               {item.supplier} - {item.family_name} ({item.domain || "generic"})

@@ -11,6 +11,8 @@ import {
 } from "./common.jsx";
 import { FieldDiffTable, GenericRowsTable } from "./tables.jsx";
 
+const MAX_STORED_MESSAGES = 30;
+
 const formatInt = (value) => Number(value || 0).toLocaleString();
 
 function estimateCost(modelName, promptTokens, completionTokens) {
@@ -21,6 +23,61 @@ function estimateCost(modelName, promptTokens, completionTokens) {
   return ((Number(promptTokens || 0) * inputRate) + (Number(completionTokens || 0) * outputRate)) / 1000000;
 }
 
+function chatStorageKey(runId) {
+  return `doculens_compare_chat_${runId}`;
+}
+
+function readStoredMessages(runId) {
+  if (typeof window === "undefined" || !runId) return [];
+  try {
+    const raw = window.sessionStorage.getItem(chatStorageKey(runId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredMessages(runId, messages) {
+  if (typeof window === "undefined" || !runId) return;
+  try {
+    const trimmedMessages = messages.slice(-MAX_STORED_MESSAGES).map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      rows: Array.isArray(message.rows) ? message.rows.slice(0, 20) : [],
+      columns: Array.isArray(message.columns) ? message.columns.slice(0, 8) : [],
+      mode: message.mode || "fast",
+      model: message.model || null,
+      usage: message.usage || null,
+      confidence: message.confidence ?? null,
+      warning: message.warning || "",
+      timestamp: message.timestamp || "",
+      isError: Boolean(message.isError),
+    }));
+    window.sessionStorage.setItem(chatStorageKey(runId), JSON.stringify(trimmedMessages));
+  } catch {
+    // Best-effort persistence only.
+  }
+}
+
+function availableChatModels(aiHealth) {
+  const models = Array.isArray(aiHealth?.models) ? aiHealth.models : [];
+  if (models.length) return models.filter((model) => model.kind === "chat" && model.configured !== false);
+  if (aiHealth?.deployment) return [{ id: aiHealth.deployment, label: aiHealth.deployment, kind: "chat", configured: aiHealth.configured }];
+  return [];
+}
+
+function rowsLookLikeDiffEvidence(rows) {
+  return rows.some((row) => row && typeof row === "object" && (
+    "before" in row
+    || "after" in row
+    || "citation" in row
+    || "field_changes" in row
+    || "change_type" in row
+  ));
+}
+
 export function QueryPanel({ runId }) {
   const [question, setQuestion] = useState("");
   const [mode, setMode] = useState("fast");
@@ -28,8 +85,10 @@ export function QueryPanel({ runId }) {
   const [aiHealth, setAiHealth] = useState(null);
   const [messages, setMessages] = useState([]);
   const [expandedEvidence, setExpandedEvidence] = useState({});
+  const [rawEvidence, setRawEvidence] = useState({});
   const [busy, setBusy] = useState(false);
   const [workingStep, setWorkingStep] = useState("");
+  const availableModels = useMemo(() => availableChatModels(aiHealth), [aiHealth]);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,6 +110,16 @@ export function QueryPanel({ runId }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    setMessages(readStoredMessages(runId));
+    setExpandedEvidence({});
+    setRawEvidence({});
+  }, [runId]);
+
+  useEffect(() => {
+    writeStoredMessages(runId, messages);
+  }, [runId, messages]);
 
   useEffect(() => {
     if (!busy) {
@@ -105,6 +174,10 @@ export function QueryPanel({ runId }) {
           mode,
           response_language: "source",
           model_name: mode === "ai" ? modelName : null,
+          history: messages
+            .filter((message) => message.role === "user" || message.role === "assistant")
+            .slice(-8)
+            .map((message) => ({ role: message.role, text: message.text })),
         }),
       });
       if (!resp.ok) throw new Error(await readResponseError(resp));
@@ -117,10 +190,11 @@ export function QueryPanel({ runId }) {
         rows: data.rows || [],
         columns: data.columns || inferColumns(data.rows || []),
         mode: data.mode || mode,
-        model: mode === "ai" ? modelName : null,
+        model: data.ai_deployment || (mode === "ai" ? modelName : null),
         usage: (data.mode || mode) === "ai" ? data.usage : null,
         confidence: data.confidence,
         warning: data.ai_error || (data.ai_unavailable ? "AI response was unavailable; showing grounded evidence results." : ""),
+        aiCalled: data.ai_called !== false,
         timestamp: new Date().toLocaleTimeString(),
       }]);
     } catch (err) {
@@ -137,10 +211,40 @@ export function QueryPanel({ runId }) {
     }
   };
 
+  const clearConversation = () => {
+    setMessages([]);
+    setExpandedEvidence({});
+    setRawEvidence({});
+    if (typeof window !== "undefined" && runId) {
+      try {
+        window.sessionStorage.removeItem(chatStorageKey(runId));
+      } catch {
+        // ignore
+      }
+    }
+  };
+
   return (
     <section className="query-workbench">
+      <div className="query-thread-head">
+        <div>
+          <strong>Comparison conversation</strong>
+          <p>This thread stays with this comparison so users can reopen it from Work History and continue from the same context.</p>
+        </div>
+        {messages.length > 0 && (
+          <button type="button" className="ghost-action compact" onClick={clearConversation} disabled={busy}>
+            Clear thread
+          </button>
+        )}
+      </div>
+
+      <div className="query-status-strip">
+        <span>{messages.length ? `${messages.filter((message) => message.role === "user").length} question${messages.filter((message) => message.role === "user").length === 1 ? "" : "s"} in this thread` : "Start a new comparison conversation"}</span>
+        <span>{mode === "ai" ? (aiHealth?.ok ? `AI ready: ${modelName || "configured model"}` : "AI unavailable - grounded fallback may be used") : "Natural language evidence mode"}</span>
+      </div>
+
       {messages.length === 0 ? (
-        <EmptyState label="Ask what changed, why it matters, or where the evidence appears in the compared documents." />
+        <EmptyState label="Ask what changed, why it matters, what was added or removed, or where the evidence appears in the compared documents." />
       ) : (
         <div className="query-chat-log">
           {messages.map((message) => (
@@ -159,19 +263,36 @@ export function QueryPanel({ runId }) {
               )}
               {message.rows?.length > 0 && (
                 <div className="query-evidence">
-                  <button
-                    type="button"
-                    className="key-audit-toggle"
-                    onClick={() => setExpandedEvidence((prev) => ({ ...prev, [message.id]: !prev[message.id] }))}
-                  >
-                    {expandedEvidence[message.id] ? "Hide evidence" : `Show evidence (${message.rows.length})`}
-                  </button>
+                  <div className="query-evidence-actions">
+                    <button
+                      type="button"
+                      className="key-audit-toggle"
+                      onClick={() => setExpandedEvidence((prev) => ({ ...prev, [message.id]: !prev[message.id] }))}
+                    >
+                      {expandedEvidence[message.id] ? "Hide evidence" : `Show evidence (${message.rows.length})`}
+                    </button>
+                    {!rowsLookLikeDiffEvidence(message.rows) && expandedEvidence[message.id] && (
+                      <button
+                        type="button"
+                        className="ghost-action compact"
+                        onClick={() => setRawEvidence((prev) => ({ ...prev, [message.id]: !prev[message.id] }))}
+                      >
+                        {rawEvidence[message.id] ? "Show cards" : "Show raw rows"}
+                      </button>
+                    )}
+                  </div>
                   {expandedEvidence[message.id] && (
                     <div className="query-results-shell">
-                      {message.columns?.length ? (
+                      {rawEvidence[message.id] && message.columns?.length ? (
                         <GenericRowsTable columns={message.columns} rows={message.rows} />
                       ) : (
-                        message.rows.slice(0, 50).map((row, index) => <QueryResult key={index} row={row} />)
+                        message.rows
+                          .slice(0, rawEvidence[message.id] ? 50 : 6)
+                          .map((row, index) => (
+                            rowsLookLikeDiffEvidence([row])
+                              ? <QueryResult key={index} row={row} />
+                              : <CompactEvidenceCard key={index} row={row} />
+                          ))
                       )}
                     </div>
                   )}
@@ -188,6 +309,11 @@ export function QueryPanel({ runId }) {
               <div className="query-stream-line">
                 <span />
                 {workingStep || "Retrieving evidence"}
+              </div>
+              <div className="query-stream-subline">
+                {mode === "ai"
+                  ? "Grounding the answer in comparison evidence before responding."
+                  : "Searching extracted changes, citations, and structured comparison rows."}
               </div>
             </article>
           )}
@@ -227,8 +353,8 @@ export function QueryPanel({ runId }) {
             <label>
               <span>Model</span>
               <select value={modelName} onChange={(event) => setModelName(event.target.value)} disabled={busy}>
-                {availableChatModels(aiHealth).length ? (
-                  availableChatModels(aiHealth).map((model) => (
+                {availableModels.length ? (
+                  availableModels.map((model) => (
                     <option key={model.id} value={model.id}>{model.label || model.id}</option>
                   ))
                 ) : (
@@ -246,11 +372,21 @@ export function QueryPanel({ runId }) {
   );
 }
 
-function availableChatModels(aiHealth) {
-  const models = Array.isArray(aiHealth?.models) ? aiHealth.models : [];
-  if (models.length) return models.filter((model) => model.kind === "chat" && model.configured !== false);
-  if (aiHealth?.deployment) return [{ id: aiHealth.deployment, label: aiHealth.deployment, kind: "chat", configured: aiHealth.configured }];
-  return [];
+function CompactEvidenceCard({ row }) {
+  const entries = Object.entries(row || {})
+    .filter(([key, value]) => !["id", "uuid"].includes(key) && value !== null && value !== undefined && value !== "")
+    .slice(0, 6);
+
+  return (
+    <article className="query-evidence-card">
+      {entries.map(([key, value]) => (
+        <div key={key} className="query-evidence-row" dir="auto">
+          <strong>{key.replace(/_/g, " ")}</strong>
+          <span>{trim(typeof value === "string" ? value : JSON.stringify(value), 260)}</span>
+        </div>
+      ))}
+    </article>
+  );
 }
 
 export function QueryResult({ row }) {

@@ -30,6 +30,7 @@ def post_query(run_id: str, req: QueryReq):
         mode=req.mode,
         response_language=req.response_language,
         model_name=req.model_name,
+        history=req.history,
     )
 
     if isinstance(result, dict):

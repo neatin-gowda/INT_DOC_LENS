@@ -1686,6 +1686,7 @@ def llm_freeform_answer(
     response_language: str = "source",
     model_name: Optional[str] = None,
     prompt_profile: Optional[dict] = None,
+    history: Optional[list[dict[str, str]]] = None,
 ) -> tuple[Optional[dict], Optional[str]]:
     config = _openai_config()
     endpoint = _env_first(AI_ENV_NAMES["endpoint"])
@@ -1726,10 +1727,12 @@ def llm_freeform_answer(
             profile_context = _prompt_profile_context(prompt_profile)
             if profile_context:
                 user_content = f"{profile_context}\n\n{user_content}"
+            prior_messages = _conversation_history(history)
             return client.chat.completions.create(
                 model=deploy,
                 messages=[
                     {"role": "system", "content": "Return strict JSON only. Do not include markdown fences."},
+                    *prior_messages,
                     {"role": "user", "content": user_content},
                 ],
                 temperature=0.15,
@@ -1890,6 +1893,25 @@ def _prompt_profile_context(prompt_profile: Optional[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def _conversation_history(history: Optional[list[dict[str, str]]], limit: int = 8) -> list[dict[str, str]]:
+    cleaned: list[dict[str, str]] = []
+    if not isinstance(history, list):
+        return cleaned
+
+    for item in history[-limit:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        cleaned.append({"role": role, "content": text[:4000]})
+
+    return cleaned
+
+
 def _prompt_profile_for_run(db_run_id: Optional[str]) -> dict:
     if not db_run_id or not db_enabled():
         return {}
@@ -1931,6 +1953,7 @@ def query(
     mode: str = "fast",
     response_language: str = "source",
     model_name: Optional[str] = None,
+    history: Optional[list[dict[str, str]]] = None,
 ) -> dict:
     usage_accum = merge_usage()
     prompt_profile = _prompt_profile_for_run(db_run_id)
@@ -1996,6 +2019,7 @@ def query(
             response_language=response_language,
             model_name=model_name,
             prompt_profile=prompt_profile,
+            history=history,
         )
         if ai_result:
             usage_accum = merge_usage(usage_accum, ai_result.get("usage"))

@@ -120,7 +120,7 @@ export const css = `
     margin-bottom: 16px;
   }
   .workspace-nav-label {
-    color: #7d8da3;
+    color: #a9b8cc;
     font-size: 11px;
     font-weight: 600;
             padding: 0 10px 7px;
@@ -129,7 +129,7 @@ export const css = `
     width: 100%;
     border: 1px solid transparent;
     background: transparent;
-    color: #c7d2df;
+    color: #d9e4f1;
     border-radius: 10px;
     padding: 9px 10px;
     display: flex;
@@ -156,7 +156,7 @@ export const css = `
   .workspace-nav-icon {
     width: 16px;
     height: 16px;
-    color: var(--text-secondary);
+    color: #b8c7d9;
     stroke-width: 1.5;
     flex: 0 0 auto;
   }
@@ -1164,6 +1164,39 @@ export const css = `
     display: grid;
     gap: 12px;
   }
+  .query-thread-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .query-thread-head strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .query-thread-head p {
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+    max-width: 760px;
+  }
+  .query-status-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--surface-sunken) 82%, transparent);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+  }
   .query-panel,
   .query-answer,
   .query-results-shell {
@@ -1269,6 +1302,15 @@ export const css = `
   .theme-light .query-answer {
     color: #132033;
   }
+  .theme-light .query-thread-head strong,
+  .theme-light .query-evidence-row span {
+    color: #0b1f3a;
+  }
+  .theme-light .query-thread-head p,
+  .theme-light .query-status-strip,
+  .theme-light .query-evidence-row strong {
+    color: #64748b;
+  }
   .query-chat-log {
     display: grid;
     gap: 10px;
@@ -1343,6 +1385,12 @@ export const css = `
     0%, 100% { opacity: .45; transform: scale(.82); }
     50% { opacity: 1; transform: scale(1); }
   }
+  .query-stream-subline {
+    margin-top: 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.4;
+  }
   .query-usage {
     justify-content: flex-start;
     margin: 8px 0 0;
@@ -1366,6 +1414,12 @@ export const css = `
   }
   .query-evidence {
     margin-top: 9px;
+  }
+  .query-evidence-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
   }
   .query-composer {
     border: 1px solid var(--border);
@@ -1427,6 +1481,31 @@ export const css = `
     align-items: center;
     margin-bottom: 6px;
     color: #aebacc;
+  }
+  .query-evidence-card {
+    display: grid;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface-sunken);
+    padding: 11px 12px;
+    color: var(--text-primary);
+  }
+  .query-evidence-row {
+    display: grid;
+    gap: 2px;
+  }
+  .query-evidence-row strong {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+  }
+  .query-evidence-row span {
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.45;
   }
   .key-audit-panel {
     border: 1px solid var(--border);
@@ -2441,13 +2520,13 @@ export const css = `
     color: var(--brand-orange);
   }
   .workspace-nav-label {
-    color: var(--text-secondary);
+    color: #a9b8cc;
     font-size: 11px;
     font-weight: 600;
   }
   .workspace-nav-item {
     border-radius: var(--radius-md);
-    color: var(--text-secondary);
+    color: #d9e4f1;
     font-weight: 500;
   }
   .workspace-nav-item:hover:not(:disabled) {
