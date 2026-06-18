@@ -86,7 +86,7 @@ async def compare(
 
     _RUNS[run_id].update({
         "kind": "comparison",
-        "status": "queued",
+        "status": "preparing",
         "status_message": "Uploading documents",
         "progress": 5,
         "created_at": now_iso(),

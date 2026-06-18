@@ -58,7 +58,7 @@ async def extract_document(
 
     _RUNS[run_id].update({
         "kind": "extraction",
-        "status": "queued",
+        "status": "preparing",
         "status_message": "Uploading document",
         "progress": 5,
         "created_at": now_iso(),
