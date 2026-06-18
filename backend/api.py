@@ -113,6 +113,8 @@ def root():
             "GET /runs/{id}/report.pdf",
             "POST /runs/{id}/ai-summary.pdf",
             "POST /runs/{id}/query",
+            "GET /runs/{id}/conversation",
+            "DELETE /runs/{id}/conversation",
             "GET /runs/{id}/pages/{side}/{n}",
             "GET /runs/{id}/native-page/{side}/{n}",
             "GET /runs/{id}/overlay/{side}/{n}",

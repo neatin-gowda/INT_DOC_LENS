@@ -407,6 +407,15 @@ export default function App() {
     if (runId) window.location.href = `${API}/runs/${runId}/report.pdf`;
   };
 
+  const openComparisonCitation = (page) => {
+    const nextPage = Number(page);
+    if (!Number.isFinite(nextPage) || nextPage < 1) return;
+    setPageNum(nextPage);
+    window.requestAnimationFrame(() => {
+      document.getElementById("visual-comparison")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
   const isComplete = meta?.status === "complete";
   const isExtractComplete = extractMeta?.status === "complete";
 
@@ -484,7 +493,7 @@ export default function App() {
                 <KeyChangesSummary runId={runId} meta={meta} onVerifyPage={setPageNum} />
               </section>
 
-              <section className="workspace-surface">
+              <section className="workspace-surface" id="visual-comparison">
                 <div className="surface-title-row">
                   <div>
                     <h3>Visual Comparison</h3>
@@ -501,7 +510,7 @@ export default function App() {
                     <p>Start with natural language search. Switch to an AI model only when reasoning or richer synthesis is needed.</p>
                   </div>
                 </div>
-                <QueryPanel runId={runId} />
+                <QueryPanel runId={runId} onOpenCitation={openComparisonCitation} />
               </section>
             </main>
           </section>

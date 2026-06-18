@@ -9,7 +9,7 @@ import {
   rowChangeType,
   trim,
 } from "./common.jsx";
-import { FieldDiffTable } from "./tables.jsx";
+import { FieldDiffTable, GenericRowsTable } from "./tables.jsx";
 
 const MAX_STORED_MESSAGES = 30;
 const ANSWER_PREVIEW_LIMIT = 1200;
@@ -48,6 +48,8 @@ function writeStoredMessages(runId, messages) {
       text: message.text,
       rows: Array.isArray(message.rows) ? message.rows.slice(0, 20) : [],
       columns: Array.isArray(message.columns) ? message.columns.slice(0, 8) : [],
+      sources: Array.isArray(message.sources) ? message.sources.slice(0, 20) : [],
+      presentation: message.presentation || "text",
       mode: message.mode || "fast",
       model: message.model || null,
       usage: message.usage || null,
@@ -76,7 +78,7 @@ function availableChatModels(aiHealth) {
   return [];
 }
 
-export function QueryPanel({ runId }) {
+export function QueryPanel({ runId, onOpenCitation }) {
   const [question, setQuestion] = useState("");
   const [mode, setMode] = useState("fast");
   const [modelName, setModelName] = useState("");
@@ -111,9 +113,28 @@ export function QueryPanel({ runId }) {
   }, []);
 
   useEffect(() => {
-    skipNextPersistRef.current = true;
-    setMessages(readStoredMessages(runId));
-    setExpandedSources({});
+    let cancelled = false;
+    const loadConversation = async () => {
+      skipNextPersistRef.current = true;
+      setExpandedSources({});
+      try {
+        const resp = await fetch(`${API}/runs/${runId}/conversation`);
+        if (!resp.ok) throw new Error(await readResponseError(resp));
+        const data = await resp.json();
+        if (cancelled) return;
+        const stored = data.durable
+          ? (Array.isArray(data.messages) ? data.messages : [])
+          : readStoredMessages(runId);
+        setMessages(stored);
+        writeStoredMessages(runId, stored);
+      } catch {
+        if (!cancelled) setMessages(readStoredMessages(runId));
+      }
+    };
+    loadConversation();
+    return () => {
+      cancelled = true;
+    };
   }, [runId]);
 
   useEffect(() => {
@@ -184,6 +205,8 @@ export function QueryPanel({ runId }) {
         text: data.answer || `I found ${data.rows?.length || 0} relevant changes.`,
         rows: data.rows || [],
         columns: data.columns || inferColumns(data.rows || []),
+        sources: data.sources || data.rows || [],
+        presentation: data.presentation || "text",
         mode: data.mode || mode,
         model: data.ai_deployment || (mode === "ai" ? modelName : null),
         usage: (data.mode || mode) === "ai" ? data.usage : null,
@@ -205,11 +228,16 @@ export function QueryPanel({ runId }) {
     }
   };
 
-  const clearConversation = () => {
+  const clearConversation = async () => {
     setMessages([]);
     setExpandedSources({});
     if (typeof window !== "undefined" && runId) {
       window.sessionStorage.removeItem(chatStorageKey(runId));
+    }
+    try {
+      await fetch(`${API}/runs/${runId}/conversation`, { method: "DELETE" });
+    } catch {
+      // The local thread is still cleared when the backend is unavailable.
     }
   };
 
@@ -238,6 +266,7 @@ export function QueryPanel({ runId }) {
             key={message.id}
             message={message}
             sourcesOpen={Boolean(expandedSources[message.id])}
+            onOpenCitation={onOpenCitation}
             onToggleSources={() => setExpandedSources((previous) => ({
               ...previous,
               [message.id]: !previous[message.id],
@@ -305,9 +334,16 @@ export function QueryPanel({ runId }) {
   );
 }
 
-function ChatMessage({ message, sourcesOpen, onToggleSources }) {
+function ChatMessage({ message, sourcesOpen, onToggleSources, onOpenCitation }) {
   const isUser = message.role === "user";
-  const sourceRows = Array.isArray(message.rows) ? message.rows : [];
+  const sourceRows = Array.isArray(message.sources) && message.sources.length
+    ? message.sources
+    : Array.isArray(message.rows) ? message.rows : [];
+  const showTable = String(message.presentation || "").includes("table")
+    && Array.isArray(message.columns)
+    && message.columns.length > 0
+    && Array.isArray(message.rows)
+    && message.rows.length > 0;
   const usage = message.usage;
   const [fullAnswer, setFullAnswer] = useState(false);
   const estimatedCost = usage
@@ -330,8 +366,21 @@ function ChatMessage({ message, sourcesOpen, onToggleSources }) {
     <div className={`comparison-chat-message assistant${message.isError ? " error" : ""}`}>
       <div className="comparison-chat-avatar"><Sparkles aria-hidden="true" /></div>
       <div className="comparison-chat-response">
-        <div className="comparison-chat-answer" dir="auto">{visibleAnswer}</div>
+        <div className="comparison-chat-answer" dir="auto">
+          {renderAnswerWithCitations(
+            visibleAnswer,
+            sourceRows,
+            sourcesOpen,
+            onToggleSources,
+            onOpenCitation,
+          )}
+        </div>
         {message.warning && <p className="comparison-chat-warning">{message.warning}</p>}
+        {showTable && (
+          <div className="comparison-chat-table">
+            <GenericRowsTable columns={message.columns} rows={message.rows.slice(0, 30)} />
+          </div>
+        )}
 
         <div className="comparison-chat-actions">
           {answerIsLong && (
@@ -362,7 +411,12 @@ function ChatMessage({ message, sourcesOpen, onToggleSources }) {
         {sourcesOpen && (
           <div className="comparison-chat-sources">
             {sourceRows.slice(0, 8).map((row, index) => (
-              <SourceCard key={`${row.stable_key || row.citation || index}`} row={row} index={index} />
+              <SourceCard
+                key={`${row.stable_key || row.citation || index}`}
+                row={row}
+                index={index}
+                onOpenCitation={onOpenCitation}
+              />
             ))}
           </div>
         )}
@@ -371,15 +425,56 @@ function ChatMessage({ message, sourcesOpen, onToggleSources }) {
   );
 }
 
-function SourceCard({ row, index }) {
-  const title = row.feature || row.item || row.area || row.stable_key || `Source ${index + 1}`;
+function renderAnswerWithCitations(answer, sourceRows, sourcesOpen, onToggleSources, onOpenCitation) {
+  const text = String(answer || "");
+  const parts = text.split(/(\[\d+\])/g);
+  return parts.map((part, index) => {
+    const match = part.match(/^\[(\d+)\]$/);
+    if (!match) return <React.Fragment key={`${index}-${part.slice(0, 12)}`}>{part}</React.Fragment>;
+
+    const sourceNumber = Number(match[1]);
+    const source = sourceRows.find((row, rowIndex) => Number(row?.source_id || rowIndex + 1) === sourceNumber);
+    if (!source) return <React.Fragment key={`${index}-${part}`}>{part}</React.Fragment>;
+
+    return (
+      <button
+        key={`${index}-${part}`}
+        type="button"
+        className="comparison-chat-inline-citation"
+        onClick={() => {
+          if (!sourcesOpen) onToggleSources();
+          const page = citationPage(source.citation, source);
+          if (page) onOpenCitation?.(page, source);
+        }}
+        title={source.citation || `Open source ${sourceNumber}`}
+      >
+        {part}
+      </button>
+    );
+  });
+}
+
+function SourceCard({ row, index, onOpenCitation }) {
+  const sourceNumber = Number(row?.source_id || index + 1);
+  const title = row.feature || row.item || row.area || row.stable_key || row.path || `Source ${sourceNumber}`;
   const text = row.change || row.description || row.after || row.before || row.definition || "";
+  const citation = row.citation || "";
+  const page = citationPage(citation, row);
 
   return (
     <article className="comparison-chat-source">
       <div>
-        <strong dir="auto">{trim(title, 100)}</strong>
-        {row.citation && <span>{row.citation}</span>}
+        <strong dir="auto">[{sourceNumber}] {trim(title, 100)}</strong>
+        {citation && (
+          <button
+            type="button"
+            className="comparison-chat-citation"
+            onClick={() => page && onOpenCitation?.(page, row)}
+            disabled={!page}
+          >
+            {citation}
+          </button>
+        )}
       </div>
       {text && <p dir="auto">{trim(typeof text === "string" ? text : JSON.stringify(text), 260)}</p>}
       {(row.before || row.after || row.field_changes?.length > 0) && (
@@ -395,4 +490,14 @@ function SourceCard({ row, index }) {
       )}
     </article>
   );
+}
+
+function citationPage(citation, row) {
+  const direct = Number(row?.page_target || row?.page || row?.page_base || 0);
+  if (direct > 0) return direct;
+  const text = String(citation || "");
+  const target = text.match(/(?:target|revised)\s+p\.?\s*(\d+)/i);
+  if (target) return Number(target[1]);
+  const page = text.match(/(?:page|p\.)\s*(\d+)/i);
+  return page ? Number(page[1]) : null;
 }

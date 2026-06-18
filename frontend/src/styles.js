@@ -3531,10 +3531,12 @@ export const css = `
 
   .comparison-chat {
     width: min(920px, 100%);
-    min-height: 560px;
+    height: clamp(520px, calc(100dvh - 150px), 760px);
+    min-height: 0;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
   .comparison-chat-toolbar {
     min-height: 34px;
@@ -3562,10 +3564,26 @@ export const css = `
   }
   .comparison-chat-thread {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 26px;
     padding: 28px 8px 34px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--text-secondary) 34%, transparent) transparent;
+  }
+  .comparison-chat-thread::-webkit-scrollbar {
+    width: 7px;
+  }
+  .comparison-chat-thread::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .comparison-chat-thread::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-secondary) 30%, transparent);
   }
   .comparison-chat-empty {
     min-height: 280px;
@@ -3639,6 +3657,23 @@ export const css = `
     line-height: 1.65;
     white-space: pre-wrap;
   }
+  .comparison-chat-inline-citation {
+    display: inline;
+    border: 0;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--brand-orange) 10%, transparent);
+    color: var(--brand-orange);
+    padding: 1px 4px;
+    margin-inline: 1px;
+    cursor: pointer;
+    font: inherit;
+    font-size: .78em;
+    font-weight: 700;
+    vertical-align: .12em;
+  }
+  .comparison-chat-inline-citation:hover {
+    background: color-mix(in srgb, var(--brand-orange) 18%, transparent);
+  }
   .comparison-chat-message.error .comparison-chat-answer,
   .comparison-chat-warning {
     color: var(--diff-deleted-text);
@@ -3654,6 +3689,13 @@ export const css = `
     align-items: center;
     gap: 14px;
     margin-top: 8px;
+  }
+  .comparison-chat-table {
+    max-width: 100%;
+    margin-top: 14px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
   }
   .comparison-chat-details {
     position: relative;
@@ -3703,6 +3745,26 @@ export const css = `
     color: var(--text-secondary);
     font-size: 11px;
     white-space: nowrap;
+  }
+  .comparison-chat-citation {
+    max-width: 52%;
+    border: 0;
+    background: transparent;
+    color: var(--brand-orange);
+    padding: 0;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.35;
+    text-align: end;
+    white-space: normal;
+  }
+  .comparison-chat-citation:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+  .comparison-chat-citation:disabled {
+    color: var(--text-secondary);
+    cursor: default;
   }
   .comparison-chat-source p {
     margin: 5px 0 0;
@@ -3756,9 +3818,8 @@ export const css = `
     35% { opacity: 1; transform: translateY(-3px); }
   }
   .comparison-chat-composer {
-    position: sticky;
-    bottom: 12px;
-    z-index: 4;
+    position: relative;
+    z-index: 2;
     border: 1px solid var(--border);
     border-radius: 18px;
     background: var(--surface-raised);
@@ -3859,7 +3920,8 @@ export const css = `
       justify-items: start;
     }
     .comparison-chat {
-      min-height: 480px;
+      height: min(680px, calc(100dvh - 72px));
+      min-height: 440px;
     }
     .comparison-chat-thread {
       padding-inline: 0;
@@ -3877,6 +3939,10 @@ export const css = `
     }
     .comparison-chat-source span {
       white-space: normal;
+    }
+    .comparison-chat-citation {
+      max-width: 100%;
+      text-align: start;
     }
     .comparison-chat-mode {
       flex-wrap: wrap;

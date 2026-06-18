@@ -1402,20 +1402,19 @@ def _summary_answer(question: str, rows: list[dict], selected: list[dict]) -> st
         parts.append("The main themes are " + ", ".join(main_themes) + ".")
 
     examples = []
-    for idx, row in enumerate(selected[:4], start=1):
+    for row in selected[:3]:
         feature = _feature_label(row)
         change = _human_change(row, 150)
-        citation = row.get("citation") or ""
-        examples.append(f"{idx}. {feature}: {change}" + (f" ({citation})" if citation else ""))
+        examples.append(f"- {feature}: {change}")
 
     if examples:
-        parts.append("Top review items: " + " ".join(examples))
+        parts.append("The highest-priority items are:\n" + "\n".join(examples))
 
     if "short" in _norm(question) or "brief" in _norm(question):
         return " ".join(parts[:2])
 
-    parts.append("The table below lists the highest-priority items with citations and clarification prompts.")
-    return " ".join(parts)
+    parts.append("Open the sources below to review the exact pages and before/after evidence.")
+    return "\n\n".join(parts)
 
 
 def _summary_response(question: str, rows: list[dict], plan: dict, semantic_rows: list[dict], allow_llm: bool = False) -> dict:
@@ -1432,10 +1431,17 @@ def _summary_response(question: str, rows: list[dict], plan: dict, semantic_rows
         "answer": (llm_answer(question, selected) if allow_llm else None) or _summary_answer(question, rows, selected),
         "columns": columns,
         "rows": business_rows,
+        "sources": selected,
         "count": len(rows),
         "plan": plan,
         "semantic_matches": len(semantic_rows),
-        "presentation": "feature_review_table" if feature_mode else "business_summary",
+        "presentation": (
+            "feature_review_table"
+            if feature_mode
+            else "business_summary_table"
+            if _wants_table_output(question)
+            else "business_summary"
+        ),
     }
 
 
@@ -1560,6 +1566,7 @@ def _compact_field_changes(field_changes: Any, limit: int = 8) -> list[dict]:
 
 def _compact_evidence_row(row: dict, detail_limit: int = 420) -> dict:
     out = {
+        "source_id": row.get("source_id"),
         "area": _preview(row.get("area") or _path_label(row.get("path")), 180),
         "change_type": row.get("change_type"),
         "category": row.get("category"),
@@ -1625,8 +1632,11 @@ def _curated_ai_evidence(nl: str, rows: list[dict], semantic_rows: list[dict], l
     merged = _merge_many_rows(focused, selected, semantic_rows, limit=limit)
 
     evidence = []
-    for row in merged:
-        evidence.append(_compact_evidence_row(row, detail_limit=520))
+    for source_id, row in enumerate(merged, start=1):
+        evidence.append({
+            "source_id": source_id,
+            **_compact_evidence_row(row, detail_limit=520),
+        })
 
     return _fit_evidence_budget(evidence, AI_EVIDENCE_BUDGET_CHARS)
 
@@ -1641,13 +1651,15 @@ Hard rules:
 - Do not mention internal paths, UUIDs, block IDs, model behavior, or implementation details.
 - If the evidence is not enough, say exactly what cannot be confirmed and what the user should review.
 - Prefer concise business language with specific before/after changes.
+- Cite factual claims with compact source markers such as [1] and [2], using source_id from the evidence.
 - Work across languages. If the source evidence or user question is Arabic or another language, preserve the meaning and answer in the user's language when clear; otherwise use clear English.
 - For right-to-left text, preserve the original terms, numbers, units, dates, and names exactly as evidence shows them.
 - Response language preference: {response_language}. If this is "source", keep the answer in the dominant language of the source evidence/question. If it is a specific language, answer in that language while preserving source names, numbers, codes, legal terms, and table values exactly.
 - If the evidence contains multiple languages, do not discard either language. Keep original terms where they matter and explain the mismatch semantically.
 
 Answer style:
-- For the standard key-changes request, return a compact table only.
+- Default to a natural conversational answer with short paragraphs or bullets.
+- Use a table only when the user explicitly asks for a table, rows, columns, or a tabular comparison.
 - If the user asks for "Feature, Change, Seek Clarification", return exactly three columns:
   ["Feature", "Change", "Seek Clarification"]
 - Do not add citation/confidence columns unless the user explicitly asks for them.
@@ -1774,9 +1786,10 @@ def llm_freeform_answer(
         "answer": answer,
         "columns": [str(c) for c in columns],
         "rows": llm_rows[:80],
+        "sources": evidence_rows[:12],
         "count": len(llm_rows),
         "confidence": data.get("confidence"),
-        "presentation": "ai_table" if llm_rows or _wants_table_output(nl) else "ai_answer",
+        "presentation": "ai_table" if _wants_table_output(nl) else "ai_answer",
         "evidence_count": len(evidence_rows),
         "ai_deployment": deploy,
         "usage": usage,
@@ -1978,6 +1991,8 @@ def query(
 
     if table_result is not None and not use_ai:
         table_result["mode"] = "fast"
+        table_result["sources"] = table_result.get("rows") or []
+        table_result["presentation"] = "evidence_table" if _wants_table_output(nl) else "text"
         return table_result
 
     plan = _broad_summary_plan(nl) if is_summary else parse_query(nl)
@@ -2040,6 +2055,7 @@ def query(
         fallback = _summary_response(nl, rows, plan, semantic_rows, allow_llm=False) if (is_summary or _wants_table_output(nl)) else {
             "answer": _build_answer(nl, rows, plan),
             "rows": rows[:80],
+            "sources": _priority_rows(rows, limit=12),
             "count": len(rows),
             "plan": plan,
             "semantic_matches": len(semantic_rows),
@@ -2068,8 +2084,10 @@ def query(
     return {
         "answer": answer,
         "rows": rows[:200],
+        "sources": _priority_rows(rows, limit=12),
         "count": len(rows),
         "plan": plan,
         "semantic_matches": len(semantic_rows),
         "mode": "fast",
+        "presentation": "evidence_table" if _wants_table_output(nl) else "text",
     }
