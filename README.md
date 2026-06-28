@@ -107,6 +107,20 @@ export AZURE_OPENAI_DEPLOYMENT="gpt-4o"
 
 Without those, the system falls back to a deterministic summary (functional but less polished).
 
+## Quickstart — Azure sandbox
+
+```bash
+az login
+export APP_NAME=doculens
+export RESOURCE_GROUP=rg-doculens-sandbox
+export LOCATION=eastus2
+./scripts/deploy-azure.sh
+```
+
+The script provisions Azure resources, builds the backend in ACR, starts the
+Container App, initializes the database schema, builds the frontend, and deploys
+Static Web Apps. See [`docs/AZURE_DEPLOYMENT.md`](docs/AZURE_DEPLOYMENT.md).
+
 ## Validation on the supplied PDFs (v2)
 
 Running on the attached `2024_MPF_Model_Spec.pdf` vs `2025_MPF_Model_Spec.pdf` produces:

@@ -18,7 +18,16 @@
       "value": "demo"
     },
     "corsOrigins": {
-      "value": "*"
+      "value": ""
+    },
+    "maxUploadMb": {
+      "value": 100
+    },
+    "postgresFirewallStartIp": {
+      "value": ""
+    },
+    "postgresFirewallEndIp": {
+      "value": ""
     },
     "azureOpenAIEndpoint": {
       "value": "https://YOUR-AZURE-OPENAI.openai.azure.com"

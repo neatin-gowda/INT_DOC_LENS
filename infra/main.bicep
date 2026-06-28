@@ -16,11 +16,20 @@ param postgresAdminPassword string
 @description('Container image deployed initially. The GitHub workflow updates this after building.')
 param containerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
-@description('Altrai auth mode. Use demo for MVP, header when fronted by an auth gateway.')
+@description('Altrai auth mode. Use demo for a private sandbox, header when fronted by an auth gateway.')
 param authMode string = 'demo'
 
-@description('Comma-separated allowed CORS origins. Use your Static Web App URL for production.')
-param corsOrigins string = '*'
+@description('Comma-separated allowed CORS origins. Leave empty to use the generated Static Web App URL.')
+param corsOrigins string = ''
+
+@description('Maximum upload size in MB.')
+param maxUploadMb int = 100
+
+@description('Optional PostgreSQL firewall start IP. Leave empty to skip public client firewall creation.')
+param postgresFirewallStartIp string = ''
+
+@description('Optional PostgreSQL firewall end IP. Leave empty to skip public client firewall creation.')
+param postgresFirewallEndIp string = ''
 
 @description('Optional Azure OpenAI endpoint.')
 param azureOpenAIEndpoint string = ''
@@ -49,8 +58,11 @@ module app './modules/doculens-app.bicep' = {
     postgresAdminLogin: postgresAdminLogin
     postgresAdminPassword: postgresAdminPassword
     containerImage: containerImage
-    authMode: authMode
-    corsOrigins: corsOrigins
+      authMode: authMode
+      corsOrigins: corsOrigins
+      maxUploadMb: maxUploadMb
+      postgresFirewallStartIp: postgresFirewallStartIp
+      postgresFirewallEndIp: postgresFirewallEndIp
     azureOpenAIEndpoint: azureOpenAIEndpoint
     azureOpenAIKey: azureOpenAIKey
     azureOpenAIDeployment: azureOpenAIDeployment

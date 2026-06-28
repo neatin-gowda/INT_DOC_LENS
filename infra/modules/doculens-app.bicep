@@ -9,7 +9,10 @@ param postgresAdminPassword string
 
 param containerImage string
 param authMode string = 'demo'
-param corsOrigins string = '*'
+param corsOrigins string = ''
+param maxUploadMb int = 100
+param postgresFirewallStartIp string = ''
+param postgresFirewallEndIp string = ''
 param azureOpenAIEndpoint string = ''
 
 @secure()
@@ -29,11 +32,9 @@ var postgresServerName = take(toLower('${appName}-pg-${suffix}'), 63)
 var storageAccountName = take('st${normalizedAppName}${suffix}', 24)
 var staticWebAppName = take('${appName}-web-${suffix}', 40)
 var databaseName = 'postgres'
+var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+var effectiveCorsOrigins = empty(corsOrigins) ? 'https://${staticWebApp.properties.defaultHostname}' : corsOrigins
 var containerSecrets = concat([
-  {
-    name: 'acr-password'
-    value: acr.listCredentials().passwords[0].value
-  }
   {
     name: 'pgpassword'
     value: postgresAdminPassword
@@ -55,7 +56,19 @@ var containerEnvVars = concat([
   }
   {
     name: 'DOCULENS_CORS_ORIGINS'
-    value: corsOrigins
+    value: effectiveCorsOrigins
+  }
+  {
+    name: 'DOCULENS_TRUST_USER_HEADERS'
+    value: authMode == 'header' ? 'true' : 'false'
+  }
+  {
+    name: 'DOCULENS_AUTO_INIT_DB'
+    value: 'true'
+  }
+  {
+    name: 'DOCULENS_MAX_UPLOAD_MB'
+    value: string(maxUploadMb)
   }
   {
     name: 'PGHOST'
@@ -108,7 +121,7 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   }
   tags: tags
   properties: {
-    adminUserEnabled: true
+    adminUserEnabled: false
   }
 }
 
@@ -176,12 +189,21 @@ resource allowAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallR
   }
 }
 
-resource allowCloudShellAndAdmin 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-12-01-preview' = {
+resource allowClientIp 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-12-01-preview' = if (!empty(postgresFirewallStartIp) && !empty(postgresFirewallEndIp)) {
   parent: postgres
-  name: 'AllowAllForMvpSetup'
+  name: 'AllowClientIp'
   properties: {
-    startIpAddress: '0.0.0.0'
-    endIpAddress: '255.255.255.255'
+    startIpAddress: postgresFirewallStartIp
+    endIpAddress: postgresFirewallEndIp
+  }
+}
+
+resource pgExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2023-12-01-preview' = {
+  parent: postgres
+  name: 'azure.extensions'
+  properties: {
+    value: 'VECTOR,PG_TRGM,UUID-OSSP'
+    source: 'user-override'
   }
 }
 
@@ -232,8 +254,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       registries: [
         {
           server: acr.properties.loginServer
-          username: acrName
-          passwordSecretRef: 'acr-password'
+          identity: 'system'
         }
       ]
       secrets: containerSecrets
@@ -265,6 +286,16 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         ]
       }
     }
+  }
+}
+
+resource acrPullAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(acr.id, containerApp.id, 'acrpull')
+  scope: acr
+  properties: {
+    roleDefinitionId: acrPullRoleDefinitionId
+    principalId: containerApp.identity.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 
