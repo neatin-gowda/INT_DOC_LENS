@@ -580,14 +580,11 @@ async def _learn_uploaded_sample(
     use_llm: bool,
     model_name: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], Path, int]:
-    from ..ingestion import normalize_to_pdf
+    from ..ingestion import normalize_to_pdf, save_upload_to_source
     from ..extraction.pdf_extractor import render_pages
     from ..schema_discovery import discover
 
-    safe_name = Path(upload.filename or f"sample_{index}").name
-    source_path = work_dir / f"{index}_{sample_role}_{safe_name}"
-    with source_path.open("wb") as buffer:
-        shutil.copyfileobj(upload.file, buffer)
+    source_path = save_upload_to_source(upload, work_dir, f"{index}_{sample_role}")
 
     converted_dir = work_dir / "converted"
     converted_dir.mkdir(parents=True, exist_ok=True)
@@ -1358,13 +1355,10 @@ async def bootstrap_dataset(
 
         work_dir = Path(tempfile.mkdtemp(prefix=f"dataset_bootstrap_{family_id}_"))
         try:
-            source_path = work_dir / (file.filename or "seed_document")
-            with source_path.open("wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-
-            from ..ingestion import normalize_to_pdf
+            from ..ingestion import normalize_to_pdf, save_upload_to_source
             from ..extraction.pdf_extractor import render_pages
             from ..schema_discovery import discover
+            source_path = save_upload_to_source(file, work_dir, "seed_document")
 
             converted_dir = work_dir / "converted"
             converted_dir.mkdir(parents=True, exist_ok=True)
@@ -1424,17 +1418,14 @@ async def bootstrap_dataset(
 
     work_dir = Path(tempfile.mkdtemp(prefix=f"dataset_bootstrap_{family_id}_"))
     try:
-        source_path = work_dir / (file.filename or "seed_document")
-        with source_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
         converted_dir = work_dir / "converted"
         converted_dir.mkdir(parents=True, exist_ok=True)
 
-        from ..ingestion import normalize_to_pdf
+        from ..ingestion import normalize_to_pdf, save_upload_to_source
         from ..extraction.pdf_extractor import render_pages
         from ..persistence import _upsert_document
         from ..schema_discovery import discover
+        source_path = save_upload_to_source(file, work_dir, "seed_document")
 
         pdf_path = normalize_to_pdf(source_path, converted_dir / "bootstrap_doc")
         page_imgs = render_pages(str(pdf_path), str(work_dir / "pages"))

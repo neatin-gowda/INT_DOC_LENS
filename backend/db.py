@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterator, Optional
 
 import psycopg
@@ -111,3 +112,15 @@ def ping_db() -> dict:
             "status": "error",
             "error": str(exc),
         }
+
+
+def init_schema_if_requested() -> None:
+    if os.getenv("DOCULENS_AUTO_INIT_DB", "").strip().lower() not in {"1", "true", "yes"}:
+        return
+    if not db_enabled():
+        return
+
+    schema_path = Path(__file__).resolve().parent.parent / "sql" / "schema.sql"
+    sql = schema_path.read_text(encoding="utf-8")
+    with get_conn() as conn:
+        conn.execute(sql)

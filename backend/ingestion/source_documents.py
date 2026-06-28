@@ -5,7 +5,7 @@ Restructured to delegate to individual parser modules under backend/ingestion/pa
 from __future__ import annotations
 
 import re
-import shutil
+import os
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -40,6 +40,7 @@ SUPPORTED_INPUT_EXTENSIONS = {
 
 WORD_EXTENSIONS = {".docx", ".doc"}
 SPREADSHEET_EXTENSIONS = {".xlsx", ".xlsm", ".xlsb", ".xls", ".csv", ".tsv"}
+MAX_UPLOAD_BYTES = int(os.getenv("DOCULENS_MAX_UPLOAD_MB", "100")) * 1024 * 1024
 
 def supported_input_extensions() -> list[str]:
     return sorted(SUPPORTED_INPUT_EXTENSIONS)
@@ -75,7 +76,16 @@ def save_upload_to_source(upload_file, work_dir: Path, side: str) -> Path:
     ensure_supported(path)
 
     with path.open("wb") as f:
-        shutil.copyfileobj(upload_file.file, f)
+        copied = 0
+        while True:
+            chunk = upload_file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            copied += len(chunk)
+            if copied > MAX_UPLOAD_BYTES:
+                path.unlink(missing_ok=True)
+                raise ValueError(f"Upload exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.")
+            f.write(chunk)
 
     return path
 

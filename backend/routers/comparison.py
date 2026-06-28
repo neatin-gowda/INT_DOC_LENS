@@ -37,7 +37,7 @@ from ..api_helpers import (
 from ..ingestion import save_upload_to_source, source_kind, supported_input_extensions
 from ..ai_usage import empty_usage
 from ..job_store import now_iso
-from ..security import job_ownership_fields
+from ..security import diagnostics_enabled, job_ownership_fields
 from ..models import Block, ChangeType
 from ..schema_discovery import infer_family_supplier_and_name, load_prompt_profile_for_family
 from ..services.table_tools import _column_names, _table_exposure, _table_rows
@@ -167,7 +167,7 @@ def run_meta(run_id: str):
         "status_message": r.get("status_message", "Working"),
         "progress": r.get("progress", 0),
         "error": r.get("error"),
-        "traceback": r.get("traceback"),
+        "traceback": r.get("traceback") if diagnostics_enabled() else None,
         "base_label": r.get("base_label"),
         "target_label": r.get("target_label"),
         "base_format": r.get("base_format"),
@@ -176,7 +176,7 @@ def run_meta(run_id: str):
         "stats": r.get("stats", {}),
         "coverage": r.get("coverage", {}),
         "db_run_id": r.get("db_run_id"),
-        "db_error": r.get("db_error"),
+        "db_error": r.get("db_error") if diagnostics_enabled() else None,
         "ai_usage": r.get("ai_usage", empty_usage()),
         "n_pages_base": len(r.get("base_imgs", [])),
         "n_pages_target": len(r.get("target_imgs", [])),

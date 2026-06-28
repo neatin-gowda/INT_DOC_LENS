@@ -30,7 +30,7 @@ from ..api_helpers import (
 from ..ai_usage import empty_usage
 from ..ingestion import save_upload_to_source, source_kind, supported_input_extensions
 from ..job_store import now_iso
-from ..security import job_ownership_fields
+from ..security import diagnostics_enabled, job_ownership_fields
 from ..services.table_tools import _table_matrix
 from .admin import resolve_dataset_for_principal
 
@@ -149,7 +149,7 @@ def extract_run_meta(run_id: str):
         "status_message": r.get("status_message", "Working"),
         "progress": r.get("progress", 0),
         "error": r.get("error"),
-        "traceback": r.get("traceback"),
+        "traceback": r.get("traceback") if diagnostics_enabled() else None,
         "label": r.get("label"),
         "source_format": r.get("source_format"),
         "documents": r.get("documents", []),

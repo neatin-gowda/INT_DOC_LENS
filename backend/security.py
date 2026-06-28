@@ -61,6 +61,10 @@ def auth_mode() -> str:
     return os.getenv("DOCULENS_AUTH_MODE", "demo").strip().lower() or "demo"
 
 
+def diagnostics_enabled() -> bool:
+    return os.getenv("DOCULENS_EXPOSE_DIAGNOSTICS", "").strip().lower() in {"1", "true", "yes"}
+
+
 def current_principal() -> Principal:
     return _CURRENT_PRINCIPAL.get()
 
@@ -85,11 +89,16 @@ def principal_from_headers(headers: Any) -> Principal:
     mode = auth_mode()
     default_role = ROLE_PLATFORM_ADMIN if mode == "demo" else ROLE_VIEWER
 
-    user_id = _header(headers, "x-user-id") or ("demo-user" if mode == "demo" else "anonymous")
-    role = (_header(headers, "x-user-role") or default_role).strip().lower()
-    tenant_id = _header(headers, "x-tenant-id") or "default"
-    business_unit_id = _header(headers, "x-business-unit-id") or _header(headers, "x-business-unit") or "default"
-    display_name = _header(headers, "x-user-name") or user_id
+    trust_headers = mode == "demo" or os.getenv("DOCULENS_TRUST_USER_HEADERS", "").strip().lower() in {"1", "true", "yes"}
+
+    user_id = (_header(headers, "x-user-id") if trust_headers else "") or ("demo-user" if mode == "demo" else "anonymous")
+    role = ((_header(headers, "x-user-role") if trust_headers else "") or default_role).strip().lower()
+    tenant_id = (_header(headers, "x-tenant-id") if trust_headers else "") or "default"
+    business_unit_id = (
+        (_header(headers, "x-business-unit-id") or _header(headers, "x-business-unit"))
+        if trust_headers else ""
+    ) or "default"
+    display_name = (_header(headers, "x-user-name") if trust_headers else "") or user_id
 
     if role not in ALL_ROLES:
         role = ROLE_VIEWER

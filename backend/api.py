@@ -49,6 +49,12 @@ def shutdown_event():
     except Exception:
         pass
 
+try:
+    from .db import init_schema_if_requested
+    init_schema_if_requested()
+except Exception as exc:
+    print(f"Database schema initialization skipped or failed: {exc}")
+
 init_job_store()
 
 from .jobs.queue import start_worker

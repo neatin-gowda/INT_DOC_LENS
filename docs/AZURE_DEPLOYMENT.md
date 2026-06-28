@@ -1,165 +1,107 @@
-# Azure deployment runbook
+# Azure Deployment
 
-This is a manual deploy reference for the Altrai stack. The preferred
-production path is the GitHub Actions workflow described in
-[`AZURE_GITHUB_DEPLOYMENT.md`](AZURE_GITHUB_DEPLOYMENT.md), which deploys the
-Bicep infrastructure, builds the backend container, applies `sql/schema.sql`,
-and deploys the Static Web App.
+This repo deploys with Azure Bicep plus one Bash wrapper. It creates:
 
-## Resources you'll provision
+- Azure Container Registry
+- Log Analytics
+- Container Apps environment
+- Backend Container App
+- PostgreSQL Flexible Server with `vector`, `pg_trgm`, and `uuid-ossp`
+- Storage account
+- Static Web App frontend
 
-| Logical name | Azure service | Purpose |
-|---|---|---|
-| `rg-specdiff-prod` | Resource group | Parent for everything |
-| `stspecdiffprod` | Storage account (Blob) | Raw PDFs + rendered page images |
-| `pg-specdiff-prod` | Postgres Flexible Server | Structured store + pgvector |
-| `acr-specdiff` | Azure Container Registry | Backend image |
-| `cae-specdiff` | Container Apps Environment | Compute |
-| `ca-specdiff-api` | Container App | FastAPI service |
-| `oai-specdiff` | Azure OpenAI | LLM for summary + NL query plans |
-| `kv-specdiff` | Key Vault | Connection strings, OpenAI key |
+The backend initializes `sql/schema.sql` on startup when
+`DOCULENS_AUTO_INIT_DB=true`, so there is no separate schema command.
 
-## 0. One-time setup
+## Fast Sandbox Deploy
 
-```bash
-RG=rg-specdiff-prod
-LOC=eastus
-az group create -n $RG -l $LOC
+Prerequisites:
 
-# Storage
-az storage account create -n stspecdiffprod -g $RG -l $LOC --sku Standard_LRS --kind StorageV2
-az storage container create --account-name stspecdiffprod -n raw-pdfs --auth-mode login
-az storage container create --account-name stspecdiffprod -n page-images --auth-mode login
+- Azure CLI logged in with `az login`
+- `jq`
+- Node.js/npm
+- `npx`
+- `openssl`
 
-# Postgres flexible
-az postgres flexible-server create \
-  --name pg-specdiff-prod -g $RG -l $LOC \
-  --tier Burstable --sku-name Standard_B2s --version 16 \
-  --admin-user pgadmin --admin-password "<strong-pw>" \
-  --storage-size 64 --high-availability Disabled --public-access 0.0.0.0
-# Enable pgvector
-az postgres flexible-server parameter set --name azure.extensions \
-  -g $RG -s pg-specdiff-prod --value "vector,pg_trgm,uuid-ossp"
-
-# Apply schema
-psql "host=pg-specdiff-prod.postgres.database.azure.com user=pgadmin dbname=postgres sslmode=require" \
-  -f sql/schema.sql
-
-# OpenAI
-az cognitiveservices account create -n oai-specdiff -g $RG -l eastus \
-  --kind OpenAI --sku S0
-az cognitiveservices account deployment create -n oai-specdiff -g $RG \
-  --deployment-name gpt-4o --model-name gpt-4o --model-version "2024-08-06" \
-  --model-format OpenAI --sku-capacity 30 --sku-name "Standard"
-az cognitiveservices account deployment create -n oai-specdiff -g $RG \
-  --deployment-name gpt-4o-vision --model-name gpt-4o --model-version "2024-08-06" \
-  --model-format OpenAI --sku-capacity 20 --sku-name "Standard"
-az cognitiveservices account deployment create -n oai-specdiff -g $RG \
-  --deployment-name embed --model-name text-embedding-3-small --model-version "1" \
-  --model-format OpenAI --sku-capacity 50 --sku-name "Standard"
-
-# ACR
-az acr create -n acrspecdiff -g $RG --sku Basic --admin-enabled true
-
-# Key Vault
-az keyvault create -n kv-specdiff -g $RG -l $LOC
-az keyvault secret set --vault-name kv-specdiff -n PG-CONN \
-  --value "host=pg-specdiff-prod.postgres.database.azure.com user=pgadmin password=<pw> dbname=postgres sslmode=require"
-az keyvault secret set --vault-name kv-specdiff -n OPENAI-KEY \
-  --value "$(az cognitiveservices account keys list -n oai-specdiff -g $RG --query key1 -o tsv)"
-```
-
-## 1. Backend image
-
-The repository root `Dockerfile` is the backend image definition for
-`backend.api:app`.
+Commands:
 
 ```bash
-az acr build -r acrspecdiff -t specdiff-api:latest .
+export APP_NAME=doculens
+export RESOURCE_GROUP=rg-doculens-sandbox
+export LOCATION=eastus2
+
+./scripts/deploy-azure.sh
 ```
 
-## 2. Container Apps
+Optional AI settings:
 
 ```bash
-az containerapp env create -n cae-specdiff -g $RG -l $LOC
-az containerapp create \
-  -n ca-specdiff-api -g $RG --environment cae-specdiff \
-  --image acrspecdiff.azurecr.io/specdiff-api:latest \
-  --target-port 8000 --ingress external \
-  --secrets pg-conn=keyvaultref:https://kv-specdiff.vault.azure.net/secrets/PG-CONN \
-            openai-key=keyvaultref:https://kv-specdiff.vault.azure.net/secrets/OPENAI-KEY \
-  --env-vars PG_DSN=secretref:pg-conn \
-             AZURE_OPENAI_ENDPOINT=https://oai-specdiff.openai.azure.com \
-             AZURE_OPENAI_API_KEY=secretref:openai-key \
-             AZURE_OPENAI_DEPLOYMENT=gpt-4o \
-             AZURE_OPENAI_VISION_DEPLOYMENT=gpt-4o-vision \
-             AZURE_OPENAI_EMBED_DEPLOYMENT=embed \
-             BLOB_ACCOUNT=stspecdiffprod \
-  --min-replicas 1 --max-replicas 5 --cpu 1.0 --memory 2.0Gi
+export AZURE_OPENAI_ENDPOINT="https://<resource>.openai.azure.com"
+export AZURE_OPENAI_API_KEY="<key>"
+export AZURE_OPENAI_DEPLOYMENT="gpt-4o"
+export AZURE_OPENAI_EMBED_DEPLOYMENT="text-embedding-3-small"
 ```
 
-For Container Apps to pull the secrets from Key Vault, give its managed
-identity the `Key Vault Secrets User` role on `kv-specdiff`.
-
-### Optional AI extraction settings
-
-The document pipeline remains deterministic unless Azure OpenAI settings are
-provided. For low-confidence scanned or layout-heavy tables, configure:
-
-| Variable | Purpose |
-|---|---|
-| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint, for example `https://<resource>.openai.azure.com`. |
-| `AZURE_OPENAI_API_KEY` | API key or Key Vault secret reference. |
-| `AZURE_OPENAI_API_VERSION` | Optional API version override. |
-| `AZURE_OPENAI_VISION_DEPLOYMENT` | Recommended deployment for page/table vision fallback. |
-| `AZURE_OPENAI_DEPLOYMENT` | General chat/summarization deployment. |
-| `AZURE_OPENAI_EMBED_DEPLOYMENT` | Embedding deployment for retrieval and semantic search. |
-
-Use a vision-capable Azure OpenAI chat model for
-`AZURE_OPENAI_VISION_DEPLOYMENT`. The code records AI table confidence and token
-usage on extracted table metadata so job-level cost tracking can aggregate it
-later.
-
-## 3. Frontend
-
-The frontend is a Vite React app under `frontend/`. Build it with:
+Optional Postgres client firewall rule:
 
 ```bash
-cd frontend
-VITE_API_BASE=https://<container-app-fqdn> npm install
-VITE_API_BASE=https://<container-app-fqdn> npm run build
+export POSTGRES_CLIENT_IP="$(curl -fsS https://api.ipify.org)"
+./scripts/deploy-azure.sh
 ```
 
-Deploy `frontend/dist` to Azure Static Web Apps. The GitHub Actions workflow
-sets `VITE_API_BASE` automatically from the Container App output.
+## Naming
 
-## 4. Persisting state (replace in-memory store)
+Set only `APP_NAME`, `RESOURCE_GROUP`, and `LOCATION` for most deployments.
+Bicep derives globally unique resource names from the resource group id.
 
-The reference `api.py` keeps run state in `_RUNS`. To make it
-multi-replica-safe, swap that dict for a Postgres-backed repository:
+Example:
 
-- On `/compare`, persist `spec_document`, `doc_block`, `comparison_run`,
-  `block_diff`, `page_diff` rows.
-- Keep page images in Blob Storage at `page-images/<doc_id>/page_NNNN.png`.
-- The `/runs/{id}/...` endpoints become DB-backed reads — same shapes.
+```bash
+APP_NAME=altrai-dev RESOURCE_GROUP=rg-altrai-dev LOCATION=eastus2 ./scripts/deploy-azure.sh
+```
 
-## 5. Auth & multi-tenancy
+## Security Defaults
 
-Wrap the API behind Entra ID with `azure-identity` middleware. For multi-tenant
-deployments, add `tenant_id` to `document_family` and partition every query by it.
+- ACR admin user is disabled.
+- Postgres does not create an allow-all firewall rule.
+- CORS defaults to the generated Static Web App hostname.
+- User headers are trusted only in demo mode or when
+  `DOCULENS_TRUST_USER_HEADERS=true`.
+- API tracebacks and internal result paths stay hidden unless
+  `DOCULENS_EXPOSE_DIAGNOSTICS=true`.
 
-## 6. Cost notes
+`DOCULENS_AUTH_MODE=demo` is intended for private sandbox use. For production,
+put the backend behind a trusted auth gateway and set:
 
-For 100 doc-pairs/month, ~50 pages each:
-- Storage: ~10 GB → $0.20
-- Postgres B2s: ~$25
-- Container Apps: ~$15 (idle scaled)
-- OpenAI (gpt-4o, ~30K tokens per pair): ~$15
-- ACR Basic: $5
-- Total: ~$60/mo
+```bash
+export DOCULENS_AUTH_MODE=header
+```
 
-## 7. Observability
+## CI/CD
 
-- App Insights on the Container App → request traces.
-- Postgres `pg_stat_statements` for slow query analysis.
-- Custom metric: `coverage_pct` per ingest — alert if it dips below 95%.
+Use `.github/workflows/azure-full-deploy.yml` for GitHub-hosted deployment.
+Required secrets:
+
+- `AZURE_CREDENTIALS`
+- `POSTGRES_ADMIN_LOGIN`
+- `POSTGRES_ADMIN_PASSWORD`
+
+Optional secrets:
+
+- `AZURE_OPENAI_ENDPOINT`
+- `AZURE_OPENAI_API_KEY`
+- `AZURE_OPENAI_DEPLOYMENT`
+- `AZURE_OPENAI_EMBED_DEPLOYMENT`
+
+Quality gates run from `.github/workflows/build.yml`:
+
+- Python syntax compile
+- security regression scan
+- Bicep build
+- frontend build
+
+Local equivalent:
+
+```bash
+./scripts/checks.sh
+```

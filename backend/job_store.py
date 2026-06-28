@@ -134,7 +134,7 @@ def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
 
 def public_job_record(record: dict[str, Any]) -> dict[str, Any]:
     duration_ms = _duration_ms(record.get("created_at"), record.get("finished_at") or record.get("updated_at"))
-    return {
+    out = {
         "run_id": record.get("run_id"),
         "kind": record.get("kind", "comparison"),
         "status": record.get("status", "unknown"),
@@ -155,13 +155,15 @@ def public_job_record(record: dict[str, Any]) -> dict[str, Any]:
         "n_pages_base": int(record.get("n_pages_base") or 0),
         "n_pages_target": int(record.get("n_pages_target") or 0),
         "ai_usage": record.get("ai_usage") or {},
-        "result_ref": record.get("result_ref") or {},
         "error": record.get("error"),
         "created_at": _iso(record.get("created_at")),
         "updated_at": _iso(record.get("updated_at")),
         "finished_at": _iso(record.get("finished_at")),
         "duration_ms": duration_ms,
     }
+    if os.getenv("DOCULENS_EXPOSE_DIAGNOSTICS", "").strip().lower() in {"1", "true", "yes"}:
+        out["result_ref"] = record.get("result_ref") or {}
+    return out
 
 
 def _job_record(run_id: str, patch: dict[str, Any]) -> dict[str, Any]:

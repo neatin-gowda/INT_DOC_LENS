@@ -15,7 +15,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
+COPY sql/ ./sql/
 
 ENV PORT=8000
 EXPOSE 8000
+RUN useradd --create-home --uid 10001 appuser
+USER appuser
+
 CMD ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]
